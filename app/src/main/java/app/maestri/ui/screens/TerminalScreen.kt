@@ -75,6 +75,7 @@ fun TerminalScreen(
     terminalName: String,
     wsId: String,
     onBack: () -> Unit,
+    onEnterChat: ((String, String) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val snapshot by session.feed.snapshot.collectAsState()
@@ -209,6 +210,13 @@ fun TerminalScreen(
                 )
             }
             ConnChip(feedState, feedError)
+            if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
+                app.maestri.ui.screens.EnterChatModeButton(
+                    session = session,
+                    terminalId = terminalId,
+                    onChatReady = { onEnterChat?.invoke(terminalId, terminalName) },
+                )
+            }
         }
 
         if (pendingPrompt != null) {
