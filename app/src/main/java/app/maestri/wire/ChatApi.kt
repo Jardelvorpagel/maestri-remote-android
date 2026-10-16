@@ -143,6 +143,7 @@ class ChatApi(private val session: app.maestri.wire.session.WireSession) {
         segments: List<Pair<String, *>>,   // ("text", String) | ("attachmentId", String)
         clientMessageId: String = UUID.randomUUID().toString(),
     ): String {
+        ChatVisibility.rememberMintedMessageId(clientMessageId) // P4-A own-send suppression registry
         val segs = JSONArray()
         for ((kind, value) in segments) {
             when (kind) {
@@ -740,5 +741,31 @@ class ChatDraftStore(context: Context, private val serverKey: () -> String) {
 
     fun clear(conversationId: String, fallbackTerminalId: String) {
         prefs.edit().remove(key(conversationId, fallbackTerminalId)).apply()
+    }
+}
+
+/**
+ * P4-A: chat visibility + own-send mint registry. Set from ChatScreens' chat-face lifecycle,
+ * read ONLY by NotificationsRouter (suppression + echo gate). Chat-lane-owned on purpose.
+ */
+object ChatVisibility {
+    private val _visibleTerminalIds = MutableStateFlow<Set<String>>(emptySet())
+    val visibleTerminalIds: StateFlow<Set<String>> = _visibleTerminalIds
+
+    private val _mintedMessageIds = MutableStateFlow<Set<String>>(emptySet())
+    val mintedMessageIds: StateFlow<Set<String>> = _mintedMessageIds
+
+    fun enterChat(terminalId: String) {
+        _visibleTerminalIds.value = _visibleTerminalIds.value + terminalId
+    }
+
+    fun exitChat(terminalId: String) {
+        _visibleTerminalIds.value = _visibleTerminalIds.value - terminalId
+    }
+
+    fun rememberMintedMessageId(clientMessageId: String) {
+        if (clientMessageId.isBlank()) return
+        val next = _mintedMessageIds.value + clientMessageId
+        _mintedMessageIds.value = if (next.size > 64) next.drop(next.size - 64).toSet() else next
     }
 }

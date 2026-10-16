@@ -109,6 +109,13 @@ data class FloorMeta(
     val attentionCount: Int?,
     val hasActivity: Boolean?,
     val isDormant: Boolean?,
+    // ---- P4-A additive (NotificationsRouter): optional fields, appended only.
+    val branch: String?,
+    val isCloneMissing: Boolean?,
+    val pullState: String?,        // FloorPullRequest.state: open | merged | closed
+    val pullAttention: String?,    // conflicts | checksFailing | changesRequested | approved | checksRunning
+    val pullTitle: String?,
+    val pullNumber: Int?,
 ) {
     companion object {
         fun parse(o: JSONObject): FloorMeta = FloorMeta(
@@ -123,6 +130,35 @@ data class FloorMeta(
             attentionCount = if (o.has("attentionCount")) o.optInt("attentionCount") else null,
             hasActivity = if (o.has("hasActivity")) o.optBoolean("hasActivity") else null,
             isDormant = if (o.has("isDormant")) o.optBoolean("isDormant") else null,
+            branch = if (o.has("branch") && !o.isNull("branch")) o.optString("branch") else null,
+            isCloneMissing = if (o.has("isCloneMissing")) o.optBoolean("isCloneMissing") else null,
+            pullState = o.optJSONObject("pullRequest")?.let { pr ->
+                if (pr.has("state") && !pr.isNull("state")) pr.optString("state") else null
+            },
+            pullAttention = o.optJSONObject("pullRequest")?.optString("attention")?.ifBlank { null },
+            pullTitle = o.optJSONObject("pullRequest")?.optString("title")?.ifBlank { null },
+            pullNumber = o.optJSONObject("pullRequest")?.optInt("number")?.takeIf { it > 0 },
+        )
+    }
+}
+
+/** P4-A additive: a pending floor clone (wire truth: pendingFloors: [{id, name, branch, completedItems, totalItems, error?}]). */
+data class PendingFloorMeta(
+    val id: String,
+    val name: String,
+    val branch: String?,
+    val completedItems: Int,
+    val totalItems: Int,
+    val error: String?,
+) {
+    companion object {
+        fun parse(o: JSONObject): PendingFloorMeta = PendingFloorMeta(
+            id = o.optString("id"),
+            name = o.optString("name"),
+            branch = if (o.has("branch") && !o.isNull("branch")) o.optString("branch") else null,
+            completedItems = o.optInt("completedItems", 0),
+            totalItems = o.optInt("totalItems", 0),
+            error = o.optString("error", "").ifBlank { null },
         )
     }
 }
@@ -149,6 +185,9 @@ data class TerminalCard(
     val isActive: Boolean?,
     val accountName: String?,
     val maestroRequestMessage: String?,  // {message, createdAt} → message only
+    // ---- P4-A additive (NotificationsRouter): optional fields, appended only — positional callers unaffected.
+    val maestroCreatedAt: String? = null,  // {message, createdAt} → createdAt, maestro dedup key only (default = caller-safe, matches pendingFloors pattern)
+    val chatPreview: ChatCardPreview? = null,  // present while the chat face is ON (banked wire truth; default = caller-safe, matches pendingFloors pattern)
 ) {
     companion object {
         fun parse(o: JSONObject): TerminalCard = TerminalCard(
@@ -173,6 +212,30 @@ data class TerminalCard(
             isActive = if (o.has("isActive")) o.optBoolean("isActive") else null,
             accountName = if (o.has("accountName")) o.getString("accountName") else null,
             maestroRequestMessage = o.optJSONObject("maestroRequest")?.optString("message"),
+            maestroCreatedAt = o.optJSONObject("maestroRequest")?.optString("createdAt"),
+            chatPreview = o.optJSONObject("chatPreview")?.let { c -> runCatching { ChatCardPreview.parse(c) }.getOrNull() },
+        )
+    }
+}
+
+/**
+ * P4-A additive: the terminal-card chat miniatura — at most four recent entries plus an
+ * unreadCount when the host is showing the chat (wire truth, Chat do terminal section).
+ * Powers the feed-diffed chat notification row WITHOUT opening a second chat stream.
+ */
+data class ChatCardPreview(
+    val entries: List<ChatEntry>,
+    val unreadCount: Int?,
+) {
+    companion object {
+        fun parse(c: JSONObject): ChatCardPreview = ChatCardPreview(
+            entries = c.optJSONArray("entries")?.let { a ->
+                (0 until a.length()).mapNotNull { idx ->
+                    val e = a.optJSONObject(idx) ?: return@mapNotNull null
+                    runCatching { ChatEntry.parse(e) }.getOrNull()
+                }
+            } ?: emptyList(),
+            unreadCount = if (c.has("unreadCount")) c.optInt("unreadCount") else null,
         )
     }
 }
@@ -475,6 +538,8 @@ data class FeedSnapshot(
     val epoch: String,
     val receivedOrder: Long,   // monotonic receive counter for HTTP-vs-socket ordering
     val canvas: CanvasSnapshot?,   // capability canvasMirroring: one floor's canvas per snapshot
+    // ---- P4-A additive (NotificationsRouter): optional, appended only (default keeps positional callers safe).
+    val pendingFloors: List<PendingFloorMeta> = emptyList(),
 ) {
     /** Terminal + pendingPrompt terminal ids -> all terminal cards in this snapshot. */
     val terminalCards: List<TerminalCard>
@@ -522,6 +587,12 @@ data class FeedSnapshot(
                 }
             } ?: emptyList()
 
+            val pending = o.optJSONArray("pendingFloors")?.let { a ->
+                (0 until a.length()).mapNotNull { idx ->
+                    runCatching { PendingFloorMeta.parse(a.getJSONObject(idx)) }.getOrNull()
+                }
+            } ?: emptyList()
+
             return FeedSnapshot(
                 workspaceId = ws?.optString("id", "") ?: "",
                 workspaceName = ws?.optString("name", "") ?: "",
@@ -535,6 +606,7 @@ data class FeedSnapshot(
                 canvas = o.optJSONObject("canvas")?.let {
                     runCatching { CanvasSnapshot.parse(it) }.getOrNull()
                 },
+                pendingFloors = pending,
             )
         }
     }
