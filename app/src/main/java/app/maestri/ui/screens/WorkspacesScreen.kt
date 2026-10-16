@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.material3.Card
@@ -59,6 +60,7 @@ fun WorkspacesScreen(
     session: WireSession,
     onOpenWorkspace: (wsId: String, wsName: String) -> Unit,
     onOpenFloors: (wsId: String, wsName: String) -> Unit = { _, _ -> },
+    onOpenSettings: (() -> Unit)? = null,
 ) {
     var list by remember { mutableStateOf<List<WorkspaceMeta>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -118,6 +120,15 @@ fun WorkspacesScreen(
                             "${p.name} · ${p.role ?: "?"}",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (onOpenSettings != null) {
+                        Text(
+                            "⚙",
+                            fontSize = 18.sp,
+                            modifier = Modifier
+                                .padding(start = 10.dp)
+                                .clickable { onOpenSettings?.invoke() },
                         )
                     }
                 }
