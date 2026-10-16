@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,6 +41,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -64,6 +67,7 @@ import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import kotlin.math.abs
 
@@ -87,7 +91,7 @@ data class OptimisticStroke(
 
 /** What a colour picker is being opened for. */
 sealed interface ColorTarget {
-    data class Node(val nodeId: String) : ColorTarget
+    data class Node(val node: CanvasNode) : ColorTarget
     data class Group(val groupId: String) : ColorTarget
 }
 
@@ -346,10 +350,27 @@ class CanvasWriteController(
 
     fun groupColor(groupId: String, colorName: String) {
         colorFor = null
+        val hex = CanvasWrites.hexFor(colorName)
+        if (hex == null) {
+            error(strings.maestriCouldnTRecolorThatGroup)
+            return
+        }
         write("groupColor", strings.maestriCouldnTRecolorThatGroup) {
             session.canvasWrite(
                 CanvasWrites.groupPath(wsId, groupId, "color"),
-                CanvasWrites.color(colorName),
+                CanvasWrites.groupColor(hex),
+                method = "PUT",
+            )
+        }
+    }
+
+    /** The group route's clear form is a real JSON `null`, which is the only one the host accepts. */
+    fun clearGroupColor(groupId: String) {
+        colorFor = null
+        write("groupColorClear", strings.maestriCouldnTRecolorThatGroup) {
+            session.canvasWrite(
+                CanvasWrites.groupPath(wsId, groupId, "color"),
+                CanvasWrites.groupColor(null),
                 method = "PUT",
             )
         }
@@ -375,11 +396,12 @@ class CanvasWriteController(
 
     fun openTextEditor(node: CanvasNode) {
         textFor = node
-        textDraft = node.subtitle?.takeIf { it.isNotBlank() } ?: node.title
-        textSize = 14
-        textWeight = "regular"
-        textFamily = "sans"
-        textColor = ""
+        val block = node.text
+        textDraft = block?.text ?: ""
+        textSize = block?.fontSize ?: 24
+        textWeight = block?.fontWeight ?: "regular"
+        textFamily = block?.fontFamily ?: "sans"
+        textColor = CanvasWrites.nameForHex(block?.color) ?: ""
     }
 
     fun saveText() {
@@ -390,7 +412,8 @@ class CanvasWriteController(
             fontSize = textSize.coerceIn(8, 200),      // host clamps; stay in range by design
             fontWeight = textWeight,
             fontFamily = textFamily,
-            color = textColor.ifBlank { null },
+            color = CanvasWrites.hexFor(textColor),
+            isMonospaced = node.text?.isMonospaced,
             mutationId = CanvasWrites.newMutationId("txt"),
         )
         write("text", strings.maestriCouldnTChangeThatText) {
@@ -398,12 +421,39 @@ class CanvasWriteController(
         }
     }
 
-    fun setNodeColor(nodeId: String, colorName: String) {
+    /**
+     * Recolour one thing by the contract that kind accepts: a text block takes hex on its own text
+     * route (resending the block's styling so nothing is lost), a note takes the vocabulary name,
+     * and a group takes hex. The three hosts contracts are deliberately not interchangeable.
+     */
+    fun setNodeColor(node: CanvasNode, colorName: String) {
         colorFor = null
-        write("nodeColor", "Maestri couldn't recolor that.") {
+        if (node.kind == "text") {
+            val hex = CanvasWrites.hexFor(colorName)
+            if (hex == null) {
+                error(strings.couldntChangeColor)
+                return
+            }
+            val block = node.text
+            val body = CanvasWrites.text(
+                text = block?.text ?: node.title,
+                fontSize = block?.fontSize,
+                fontWeight = block?.fontWeight,
+                fontFamily = block?.fontFamily,
+                color = hex,
+                isMonospaced = block?.isMonospaced,
+                mutationId = CanvasWrites.newMutationId("txtc"),
+            )
+            write("textColor", strings.maestriCouldnTChangeThatText) {
+                session.canvasWrite(CanvasWrites.nodePath(wsId, node.id, "text"), body)
+            }
+            return
+        }
+        write("nodeColor", strings.couldntChangeColor) {
             session.canvasWrite(
-                CanvasWrites.nodePath(wsId, nodeId, "color"),
-                CanvasWrites.color(colorName),
+                CanvasWrites.nodePath(wsId, node.id, "note/color"),
+                CanvasWrites.noteColor(colorName),
+                method = "PUT",
             )
         }
     }
@@ -558,25 +608,26 @@ private fun distanceToSegment(p: Offset, a: Offset, b: Offset): Float {
 
 // ====================================================================== gesture machine
 
-/** How long a finger must stay put before a drag means "move" rather than "pan". */
-private const val HOLD_MS = 500L
-
 /** Movement beyond this while arming means the user is panning, not holding. */
 private const val HOLD_SLOP_DP = 40f
 
 /**
  * One gesture machine for the whole canvas, because the gestures overlap:
  *
- *  - hold (≥ [HOLD_MS]) then drag on a node  → move that node;
- *  - hold (≥ [HOLD_MS]) then drag on empty   → marquee select;
- *  - hold without moving                     → context menu / selection menu;
- *  - quick drag (no hold)                    → pan (two fingers → pan+pinch);
- *  - tap on node                             → select (terminal: open; text: edit);
- *  - pen mode, one finger                    → draw (a second finger cancels the stroke).
+ *  - hold then drag on a node               → move that node;
+ *  - hold then drag on empty canvas         → marquee select;
+ *  - hold without moving                    → context menu / selection menu;
+ *  - movement past touch slop before that   → pan (two fingers → pan+pinch);
+ *  - quick tap                              → select (terminal: open; text: edit);
+ *  - pen mode, one finger                   → draw (a second finger cancels the stroke).
  *
- * Movement before the hold expires gives up the hold only past [HOLD_SLOP_DP], so a slow start
- * still reads as a hold while a flick never does.
+ * The hold deadline is the platform long-press timeout, but movement is judged against EVENT TIMES
+ * rather than delivery times: a busied main thread (or a batched injection) can hand the movement of
+ * a fast drag over after the deadline, and judging by delivery would turn every such pan into a hold.
+ * A pan always keeps the full delta from the finger-down point, so a flick never pans by zero.
  */
+private enum class Phase { Pending, Pan, Tap, Hold }
+
 internal suspend fun PointerInputScope.detectCanvasInteractions(
     key: Any?,
     penActive: Boolean,
@@ -627,89 +678,159 @@ internal suspend fun PointerInputScope.detectCanvasInteractions(
             return@awaitEachGesture
         }
 
-        // ----------------------------------------------------- phase 1: hold, or give up
-        // The platform's long-press wait is the only timer reachable inside a pointer scope, and it
-        // matches the iOS rule exactly ("Hold, then drag to move"): movement past touch slop before
-        // the hold expires means the user is panning, not holding.
-        val held = awaitLongPressOrCancellation(down.id)
-        val anchorCanvas = held?.let { toCanvas(Offset(it.position.x / density, it.position.y / density)) }
-            ?: startCanvas
-        if (held == null) {
-            val pressed = currentEvent.changes.filter { it.pressed }
-            if (pressed.isEmpty()) {
-                if (!penActive) onTap(startCanvas)     // released inside the hold window: a tap
-                return@awaitEachGesture
-            }
-            // Moved before the hold completed: pan/pinch for the rest of the gesture.
-            var lastCentroid = centroidOf(pressed)
-            var lastSpread = spreadOf(pressed, lastCentroid)
-            var lastCount = pressed.size
-            while (true) {
-                val event = awaitPointerEvent()
-                val live = event.changes.filter { it.pressed }
-                if (live.isEmpty()) break
-                val c = centroidOf(live)
-                if (live.size != lastCount) {
-                    lastCount = live.size
-                    lastCentroid = c
-                    lastSpread = spreadOf(live, c)
-                    continue
+        // ----------------------------------------------------- phase 1: hold, or pan
+        // Movement past touch slop before the deadline is a pan and keeps the FULL delta from the
+        // finger-down point; reaching the deadline without movement is a hold. Event times decide,
+        // not delivery times (a busied main thread can hand the movement over late).
+        val timeout = viewConfiguration.longPressTimeoutMillis
+        val slop = viewConfiguration.touchSlop
+        val deadline = down.uptimeMillis + timeout
+        var phase = Phase.Pending
+        try {
+            withTimeout(timeout) {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    val live = event.changes.filter { it.pressed }
+                    if (live.isEmpty()) {
+                        phase = Phase.Tap
+                        return@withTimeout Unit
+                    }
+                    if (live.size >= 2) {
+                        phase = Phase.Pan
+                        return@withTimeout Unit
+                    }
+                    if ((live.first().position - startScreen).getDistance() > slop) {
+                        phase = Phase.Pan
+                        return@withTimeout Unit
+                    }
                 }
-                val pan = c - lastCentroid
-                val spread = spreadOf(live, c)
-                val zoom = if (live.size >= 2 && lastSpread > 0f) spread / lastSpread else 1f
-                onTransform(c, pan, zoom)
-                lastCentroid = c
-                lastSpread = spread
-                event.changes.forEach { if (it.positionChanged()) it.consume() }
             }
+        } catch (_: PointerEventTimeoutCancellationException) {
+            phase = Phase.Hold
+        }
+        if (phase == Phase.Tap) {
+            if (!penActive) onTap(startCanvas)          // released inside the hold window: a tap
             return@awaitEachGesture
         }
+        val anchorCanvas = startCanvas
 
         onMarquee(null)
 
-        val slop = viewConfiguration.touchSlop
         var dragNode: CanvasNode? = null
         var lockedNode: CanvasNode? = null
         var dragTie: CanvasCableTie? = null
         var marqueeStart: Offset? = null
-        if (anchorCanvas.x.isNaN()) return@awaitEachGesture
 
-        // Hold completed: decide between moving what is under the finger and marquee select.
-        var lastCentroid = held.position
+        var panMode = phase == Phase.Pan
+        val liveNow = currentEvent.changes.filter { it.pressed }
+        var lastCentroid = liveNow.firstOrNull()?.position ?: startScreen
+        var lastSpread = spreadOf(liveNow, lastCentroid)
+        var lastCount = liveNow.size
+        if (panMode) {
+            // Apply the delta the hold window swallowed, then keep panning from here.
+            val c = centroidOf(liveNow)
+            val anchor = if (liveNow.size >= 2) c else startScreen
+            onTransform(c, c - anchor, 1f)
+            lastCentroid = c
+            lastSpread = spreadOf(liveNow, c)
+        }
         var moved = 0f
         var menuFired = false
         var lastCanvasPoint = anchorCanvas
-        val startFrame = hit.nodeAt(anchorCanvas)?.let { n -> Rect(n.frame.x.toFloat(), n.frame.y.toFloat(), 0f, 0f) }
-        val node = hit.nodeAt(anchorCanvas)
-        if (node != null && !node.isNodeLocked) {
-            dragNode = node
-        } else if (node != null) {
-            // Locked: a drag is refused out loud, a plain hold opens the options.
-            lockedNode = node
-        } else {
-            // A tie knot the finger is on is dragged; empty canvas starts a marquee.
-            val tie = hit.tieAt(anchorCanvas, tieRadius)
-            if (tie != null) dragTie = tie else marqueeStart = anchorCanvas
+
+        // Hold completed: decide between moving what is under the finger and marquee select.
+        var startFrame: Rect? = null
+        if (!panMode) {
+            val node = hit.nodeAt(anchorCanvas)
+            if (node != null && !node.isNodeLocked) {
+                dragNode = node
+                startFrame = Rect(node.frame.x.toFloat(), node.frame.y.toFloat(), 0f, 0f)
+            } else if (node != null) {
+                // Locked: a drag is refused out loud, a plain hold opens the options.
+                lockedNode = node
+            } else {
+                // A tie knot the finger is on is dragged; empty canvas starts a marquee.
+                val tie = hit.tieAt(anchorCanvas, tieRadius)
+                if (tie != null) dragTie = tie else marqueeStart = anchorCanvas
+            }
         }
         while (true) {
             val event = awaitPointerEvent()
             val pressed = event.changes.filter { it.pressed }
-            if (pressed.isEmpty()) break
+            if (pressed.isEmpty()) {
+                // The release carries the last position: apply the tail of the gesture before ending,
+                // otherwise a pan (or a node move) loses whatever the finger covered since the final
+                // move event — with coalesced delivery that is a visible slice of the gesture.
+                val up = event.changes.firstOrNull { it.id == down.id }
+                if (up != null) {
+                    if (panMode) {
+                        if ((up.position - lastCentroid).getDistance() > 0.5f) {
+                            onTransform(up.position, up.position - lastCentroid, 1f)
+                        }
+                    } else {
+                        val dragging = dragNode
+                        val from = startFrame
+                        if (dragging != null && from != null) {
+                            val p = canvasAt(up.position)
+                            onNodeDrag(
+                                dragging.id,
+                                from.left + (p.x - anchorCanvas.x),
+                                from.top + (p.y - anchorCanvas.y),
+                            )
+                            lastCanvasPoint = p
+                        }
+                    }
+                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                }
+                break
+            }
+            if (panMode) {
+                val c = centroidOf(pressed)
+                if (pressed.size != lastCount) {
+                    // A finger joined or left: re-anchor instead of jumping.
+                    lastCount = pressed.size
+                    lastCentroid = c
+                    lastSpread = spreadOf(pressed, c)
+                    continue
+                }
+                val spread = spreadOf(pressed, c)
+                val zoom = if (pressed.size >= 2 && lastSpread > 0f) spread / lastSpread else 1f
+                onTransform(c, c - lastCentroid, zoom)
+                lastCentroid = c
+                lastSpread = spread
+                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                continue
+            }
             if (pressed.size >= 2) {
                 // Second finger: abandon the hold-gesture and pan/zoom instead.
-                val c = centroidOf(pressed)
-                onTransform(c, c - lastCentroid, 1f)
-                lastCentroid = c
+                panMode = true
                 dragNode = null
                 lockedNode = null
                 dragTie = null
                 marqueeStart = null
                 onMarquee(null)
+                lastCentroid = centroidOf(pressed)
+                lastSpread = spreadOf(pressed, lastCentroid)
+                lastCount = pressed.size
                 event.changes.forEach { if (it.positionChanged()) it.consume() }
                 continue
             }
             val change = pressed.first()
+            if (change.uptimeMillis < deadline && (change.position - startScreen).getDistance() > slop) {
+                // Moved inside the hold window, handed over after it: a pan, not a hold.
+                panMode = true
+                dragNode = null
+                lockedNode = null
+                dragTie = null
+                marqueeStart = null
+                onMarquee(null)
+                onTransform(change.position, change.position - startScreen, 1f)
+                lastCentroid = change.position
+                lastSpread = 0f
+                lastCount = 1
+                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                continue
+            }
             val p = canvasAt(change.position)
             lastCanvasPoint = p
             moved += (change.position - lastCentroid).getDistance()
@@ -973,13 +1094,15 @@ fun CanvasInputDialog(
                         .background(Surface2, RoundedCornerShape(8.dp))
                         .padding(10.dp)
                 ) {
+                    val focus = remember { FocusRequester() }
+                    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
                     BasicTextField(
                         value = value,
                         onValueChange = onValue,
                         textStyle = MaterialTheme.typography.bodyMedium.copy(
                             color = MaterialTheme.colorScheme.onSurface
                         ),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focus),
                     )
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -1016,6 +1139,8 @@ fun TextBlockEditor(
             Column(Modifier.padding(16.dp)) {
                 Text("Text", fontSize = 15.sp)
                 Spacer(Modifier.height(8.dp))
+                val focus = remember { FocusRequester() }
+                LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -1030,7 +1155,7 @@ fun TextBlockEditor(
                             color = MaterialTheme.colorScheme.onSurface,
                             fontSize = size.sp,
                         ),
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().focusRequester(focus),
                     )
                 }
                 Spacer(Modifier.height(10.dp))
@@ -1204,6 +1329,7 @@ fun ColorPalettePicker(
     title: String,
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
+    onClear: (() -> Unit)? = null,
 ) {
     Box(Modifier.fillMaxSize().clickable { onDismiss() }, contentAlignment = Alignment.Center) {
         Card(
@@ -1230,6 +1356,7 @@ fun ColorPalettePicker(
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    onClear?.let { TextButton(onClick = it) { Text(CanvasStrings.clearColor) } }
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                 }
             }
@@ -1237,20 +1364,9 @@ fun ColorPalettePicker(
     }
 }
 
-/** Vocabulary swatch colours: display-only approximations of the host's palette. */
-private fun namedColor(name: String): Color = when (name) {
-    "yellow" -> Color(0xFFF5D142)
-    "pink" -> Color(0xFFF08BB4)
-    "blue" -> Color(0xFF6FA8F5)
-    "green" -> Color(0xFF7BC47F)
-    "orange" -> Color(0xFFF0A65E)
-    "purple" -> Color(0xFFB48CF2)
-    "white" -> Color(0xFFF2F3F5)
-    "charcoal" -> Color(0xFF4A4E57)
-    "slate" -> Color(0xFF7C8798)
-    "midnight" -> Color(0xFF2B3A55)
-    else -> Color(0xFF8A8F98)
-}
+/** Swatch for a vocabulary name: the same hex this client sends to the host for that name. */
+private fun namedColor(name: String): Color =
+    CanvasWrites.hexFor(name)?.let { parseInkColor(it) } ?: Color(0xFF8A8F98)
 
 /** Rubber band for a marquee selection, drawn in canvas space inside the camera layer. */
 @Composable

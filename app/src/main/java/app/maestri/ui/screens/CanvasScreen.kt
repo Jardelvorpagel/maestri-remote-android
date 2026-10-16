@@ -449,7 +449,7 @@ fun CanvasScreen(
                 onColor = {
                     val node = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }
                     ctl.colorFor = node?.groupId?.let { ColorTarget.Group(it) }
-                        ?: node?.let { ColorTarget.Node(it.id) }
+                        ?: node?.let { ColorTarget.Node(it) }
                 },
                 onDeleteSelected = { ctl.askDelete(ctl.selection.keys.toList()) },
                 selectionCount = ctl.selection.size,
@@ -578,14 +578,15 @@ fun CanvasScreen(
         }
         ctl.colorFor?.let { target ->
             ColorPalettePicker(
-                title = "Change color",
+                title = if (target is ColorTarget.Group) "Change color" else CanvasStrings.changeNoteColor,
                 onPick = { name ->
                     when (target) {
                         is ColorTarget.Group -> ctl.groupColor(target.groupId, name)
-                        is ColorTarget.Node -> ctl.setNodeColor(target.nodeId, name)
+                        is ColorTarget.Node -> ctl.setNodeColor(target.node, name)
                     }
                 },
                 onDismiss = { ctl.colorFor = null },
+                onClear = (target as? ColorTarget.Group)?.let { g -> { ctl.clearGroupColor(g.groupId) } },
             )
         }
         ctl.textFor?.let {

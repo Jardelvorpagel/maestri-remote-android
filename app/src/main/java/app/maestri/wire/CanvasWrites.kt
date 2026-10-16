@@ -21,6 +21,37 @@ object CanvasWrites {
     /** Optimistic display position of a move: the host will land on this grid anyway. */
     fun snap(v: Float): Float = (v / GRID).roundToInt() * GRID.toFloat()
 
+    /**
+     * The ten-name colour vocabulary with the hex this client sends wherever the host wants hex.
+     *
+     * The host's three colour contracts differ (groups = hex, notes = vocabulary name, text blocks =
+     * hex on the text route), so the vocabulary lives here once and the UI reads its swatches from it.
+     * Groups and text blocks carry no name on the wire, so these hexes are this client's canonical
+     * encoding of the vocabulary rather than a value read back from the host.
+     */
+    val COLOR_HEX: Map<String, String> = linkedMapOf(
+        "yellow" to "#F5D142",
+        "pink" to "#F08BB4",
+        "blue" to "#6FA8F5",
+        "green" to "#7BC47F",
+        "orange" to "#F0A65E",
+        "purple" to "#B48CF2",
+        "white" to "#F2F3F5",
+        "charcoal" to "#4A4E57",
+        "slate" to "#7C8798",
+        "midnight" to "#2B3A55",
+    )
+
+    /** Hex for a vocabulary name; unknown names return null so no write is attempted. */
+    fun hexFor(name: String?): String? = COLOR_HEX[name?.trim()?.lowercase()]
+
+    /** Vocabulary name for a hex the host reported (it stores names for notes, hex for groups). */
+    fun nameForHex(hex: String?): String? {
+        val want = hex?.trim()?.uppercase() ?: return null
+        if (!want.startsWith("#")) return null
+        return COLOR_HEX.entries.firstOrNull { it.value.uppercase() == want }?.key
+    }
+
     private fun point(x: Float, y: Float): JSONArray = JSONArray().put(x.toDouble()).put(y.toDouble())
 
     /** Geometry INSIDE a Drawing is a bare `[x, y]` pair, unlike the `{x, y}` of node positions. */
@@ -89,6 +120,7 @@ object CanvasWrites {
         fontWeight: String? = null,
         fontFamily: String? = null,
         color: String? = null,
+        isMonospaced: Boolean? = null,
         mutationId: String? = null,
     ): JSONObject = JSONObject().apply {
         put("text", text)
@@ -96,6 +128,7 @@ object CanvasWrites {
         fontWeight?.let { put("fontWeight", it) }
         fontFamily?.let { put("fontFamily", it) }
         color?.let { put("color", it) }
+        isMonospaced?.let { put("isMonospaced", it) }
         mutationId?.let { put("mutationId", it) }
     }
 
@@ -125,8 +158,22 @@ object CanvasWrites {
 
     fun ungroupPath(wsId: String) = "api/workspaces/$wsId/ungroup"
 
-    fun color(colorHex: String?) = JSONObject().apply {
+    /**
+     * Group colour: `{colorHex}` — HEX ONLY (a vocabulary name is answered 400 "Invalid color"),
+     * and a real JSON `null` is the confirmed clear form. The key must be spelled `colorHex`: a
+     * misnamed key is silently ignored with a 200.
+     */
+    fun groupColor(colorHex: String?): JSONObject = JSONObject().apply {
         if (colorHex == null) put("colorHex", JSONObject.NULL) else put("colorHex", colorHex)
+    }
+
+    /**
+     * Single-note colour: `{color}` — the VOCABULARY NAME only (raw hex is answered 400 "Invalid
+     * color"), `customColor` rides alongside. There is no accepted clear form on this route.
+     */
+    fun noteColor(name: String, customColor: String? = null): JSONObject = JSONObject().apply {
+        put("color", name)
+        customColor?.let { put("customColor", it) }
     }
 
     /** `{tie: {id, position {x,y}, memberConnectionIds}}` — rope ids in crossing order. */

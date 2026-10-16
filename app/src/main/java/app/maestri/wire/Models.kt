@@ -247,6 +247,7 @@ data class CanvasNode(
     val isNodeLocked: Boolean,
     val groupId: String?,
     val terminal: TerminalCard?,    // present when kind == "terminal" and payload parses
+    val text: CanvasTextBlock?,     // present when kind == "text": the styled text payload
 ) {
     companion object {
         fun parse(o: JSONObject): CanvasNode {
@@ -266,8 +267,37 @@ data class CanvasNode(
                 terminal = if (kind == "terminal") o.optJSONObject("terminal")?.let {
                     runCatching { TerminalCard.parse(it) }.getOrNull()
                 } else null,
+                text = if (kind == "text") o.optJSONObject("text")?.let {
+                    runCatching { CanvasTextBlock.parse(it) }.getOrNull()
+                } else null,
             )
         }
+    }
+}
+
+/**
+ * The styled payload a `kind == "text"` node carries: the block's content plus its styling.
+ *
+ * The host hands back only what has been set, so every field but the content is optional: weight and
+ * family default to what a fresh block uses ("regular"/"sans") and an unset colour is absent.
+ */
+data class CanvasTextBlock(
+    val text: String,
+    val fontSize: Int,
+    val fontWeight: String,
+    val fontFamily: String,
+    val color: String?,
+    val isMonospaced: Boolean,
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasTextBlock = CanvasTextBlock(
+            text = o.optString("text", ""),
+            fontSize = o.optDouble("fontSize", 14.0).toInt().coerceIn(8, 200),
+            fontWeight = o.optString("fontWeight", "regular").takeIf { it.isNotBlank() } ?: "regular",
+            fontFamily = o.optString("fontFamily", "sans").takeIf { it.isNotBlank() } ?: "sans",
+            color = if (o.has("color") && !o.isNull("color")) o.getString("color") else null,
+            isMonospaced = o.optBoolean("isMonospaced", false),
+        )
     }
 }
 
