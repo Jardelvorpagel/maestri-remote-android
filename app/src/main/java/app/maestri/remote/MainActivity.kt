@@ -1,9 +1,13 @@
 package app.maestri.remote
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.fragment.app.FragmentActivity
+import app.maestri.ui.settings.AppLockGate
+import app.maestri.ui.settings.AppLockStore
+import app.maestri.ui.settings.applyRecentsBlanking
+import app.maestri.ui.settings.SettingsScreen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -37,7 +41,7 @@ import app.maestri.ui.screens.WorkspacesScreen
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.flow.collect
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -45,15 +49,40 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaestriTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Root(session)
+                    Root(session, appLock())
                 }
             }
         }
     }
+
+    // P6 app-lock lifecycle (spec 4.1/4.2): stamp leave (rotations skipped), re-arm on
+    // entry; the gate sits on the NavHost branch ONLY — pairing never gated (W-1 ruling).
+    override fun onStart() {
+        super.onStart()
+        val store = appLock()
+        store.rearmOnStart(
+            System.currentTimeMillis(),
+            store.enabled.value,
+            store.graceSeconds.value,
+        )
+        applyRecentsBlanking(this, store.locked)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        val store = appLock()
+        store.stampLeave(System.currentTimeMillis(), isChangingConfigurations)
+        // Spec 4.6: grace == 0 means auto-re-arm — blank the recents snapshot too.
+        if (store.enabled.value && store.graceSeconds.value == 0) {
+            applyRecentsBlanking(this, true)
+        }
+    }
+
+    private fun appLock(): AppLockStore = (application as MaestriApp).appLock
 }
 
 @Composable
-fun Root(session: WireSession) {
+fun Root(session: WireSession, appLock: AppLockStore) {
     val paired by session.pairing.collectAsState()
     var authNotice by remember { mutableStateOf<String?>(null) }
     var reauth by remember { mutableStateOf(false) }
@@ -71,12 +100,14 @@ fun Root(session: WireSession) {
     when {
         paired == null || reauth -> PairingScreen(session, authNotice = authNotice, onNoticeShown = { authNotice = null })
         else -> {
+            AppLockGate(appLock) {
             val nav = rememberNavController()
             NavHost(navController = nav, startDestination = "workspaces") {
                 composable("workspaces") {
                     WorkspacesScreen(
                         session = session,
                         onOpenWorkspace = { wsId, wsName -> nav.navigate("feedWithFloors/$wsId/${enc(wsName)}") },
+                        onOpenSettings = { nav.navigate("settings") },
                     )
                 }
                 composable(
@@ -140,6 +171,15 @@ fun Root(session: WireSession) {
                         },
                     )
                 }
+                composable("settings") {
+                    SettingsScreen(
+                        session = session,
+                        appLock = appLock,
+                        onBack = { nav.popBackStack() },
+                        // P4-A owns the route + its real row; navigate only when installed (W-4).
+                        openNotificationsRoute = { r -> if (nav.graph.findNode(r) != null) nav.navigate(r) },
+                    )
+                }
                 chatDestinations(session, nav)
                 // ── P3 floors lane ────────────────────────────────────────────────────
                 // LANES MERGER: this temp "Floors" affordance (FAB inside the feed below)
@@ -179,6 +219,7 @@ fun Root(session: WireSession) {
                         ) { Text("⇆ Floors") }
                     }
                 }
+            }
             }
         }
     }
