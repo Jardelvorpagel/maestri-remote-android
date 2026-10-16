@@ -78,6 +78,7 @@ import app.maestri.wire.ChatApi
 import app.maestri.wire.ChatDraftStore
 import app.maestri.wire.ChatEntry
 import app.maestri.wire.ChatSegment
+import app.maestri.wire.ChatVisibility
 import app.maestri.wire.ChatSnapshot
 import app.maestri.wire.ChatStreamSocket
 import app.maestri.wire.ChatThreadPreview
@@ -147,8 +148,12 @@ fun ChatThreadScreen(
     val appContext = LocalContext.current.applicationContext
     val holder = remember(terminalId) { ChatFaceState(session, wsId, terminalId, appContext) }
     DisposableEffect(terminalId) {
+        ChatVisibility.enterChat(terminalId) // P4-A: on-screen chat suppresses its own notifications
         holder.boot()
-        onDispose { holder.close() }
+        onDispose {
+            holder.close()
+            ChatVisibility.exitChat(terminalId)
+        }
     }
 
     val snapshot by holder.snapshot.collectAsState()

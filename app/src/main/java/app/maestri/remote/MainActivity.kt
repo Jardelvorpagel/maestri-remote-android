@@ -33,9 +33,22 @@ import app.maestri.ui.screens.FeedScreen
 import app.maestri.ui.screens.PairingScreen
 import app.maestri.ui.screens.TerminalScreen
 import app.maestri.ui.chatDestinations
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import app.maestri.ui.ChatNav
+import app.maestri.wire.NotificationsRouter
+import app.maestri.ui.notificationsDestination
 import app.maestri.ui.screens.WorkspacesScreen
+import app.maestri.wire.DeepLinkBus
 import app.maestri.wire.session.WireSession
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import app.maestri.ui.Style.LocalMaestriColors
 
@@ -43,6 +56,8 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // P4-A: a notification tap that COLD-STARTS the app lands its deep link here.
+        intent?.getStringExtra(NotificationsRouter.EXTRA_DEEPLINK)?.let { DeepLinkBus.routes.tryEmit(it) }
         val session = (application as MaestriApp).session
         setContent {
             MaestriTheme {
@@ -53,6 +68,11 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // P4-A: a notification tap that WARMS an existing task lands its deep link here.
+        intent.getStringExtra(NotificationsRouter.EXTRA_DEEPLINK)?.let { DeepLinkBus.routes.tryEmit(it) }
+    }
     // P6 app-lock lifecycle (spec 4.1/4.2): stamp leave (rotations skipped), re-arm on
     // entry; the gate sits on the NavHost branch ONLY — pairing never gated (W-1 ruling).
     override fun onStart() {
@@ -100,6 +120,41 @@ fun Root(session: WireSession, appLock: AppLockStore) {
         else -> {
             AppLockGate(appLock) {
             val nav = rememberNavController()
+            // ---- P4-A: foreground-WSS notification router (option A; the ONLY additive wiring)
+            val activityContext = LocalContext.current
+            val hookScope = rememberCoroutineScope()
+            val appForeground = remember { MutableStateFlow(false) }
+            val router = remember {
+                NotificationsRouter(session, activityContext.applicationContext, appForeground)
+            }
+            val permissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission(),
+            ) { granted -> router.onPermissionResult(granted) }
+            LaunchedEffect(Unit) {
+                launch {
+                    router.permissionNudge.collect { // ask ONCE, at the first natural moment
+                        if (!router.permissionAsked()) {
+                            permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                }
+                launch {
+                    DeepLinkBus.routes.collect { route ->
+                        runCatching { nav.navigate(route) }
+                    }
+                }
+            }
+            DisposableEffect(Unit) {
+                val observer = LifecycleEventObserver { _, event ->
+                    appForeground.value = event == Lifecycle.Event.ON_RESUME
+                }
+                (activityContext as? ComponentActivity)?.lifecycle?.addObserver(observer)
+                router.start()
+                onDispose {
+                    (activityContext as? ComponentActivity)?.lifecycle?.removeObserver(observer)
+                    router.stop()
+                }
+            }
             NavHost(navController = nav, startDestination = "workspaces") {
                 composable("workspaces") {
                     WorkspacesScreen(
@@ -181,6 +236,7 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                     )
                 }
                 chatDestinations(session, nav)
+                notificationsDestination(router)
                 // ── P3 floors lane ────────────────────────────────────────────────────
                 // Entry affordances live on WorkspacesScreen rows and the FeedScreen
                 // chips row (both navigate via FloorsNav.link); the floor-chips lane
