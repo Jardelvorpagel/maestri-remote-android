@@ -79,6 +79,9 @@ import androidx.compose.material.icons.outlined.Backspace
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 // ====================================================================================== modes
 
@@ -918,10 +921,10 @@ fun CanvasToolbar(
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Chip("+ Add", mode !is CanvasMode.Placing, onAdd)
-        Chip(Icons.Outlined.Draw, "Draw", true, onDraw)
-        Chip(Icons.Outlined.Link, "Tie", canTie, onTie)
-        Chip(Icons.Outlined.Backspace, "Erase", true, onErase)
+        IconChip(Icons.Outlined.Add, "Add", mode !is CanvasMode.Placing, onAdd)
+        IconChip(Icons.Outlined.Draw, "Draw", true, onDraw)
+        IconChip(Icons.Outlined.Link, "Tie", canTie, onTie)
+        IconChip(Icons.Outlined.Backspace, "Erase", true, onErase)
         if (mode !is CanvasMode.Idle) {
             Chip(
                 Icons.Filled.Close,
@@ -937,10 +940,10 @@ fun CanvasToolbar(
         }
         if (selectionCount > 0) {
             Spacer(Modifier.width(8.dp))
-            Chip(Icons.Outlined.GridView, CanvasStrings.group, true, onGroup)
+            IconChip(Icons.Outlined.GridView, CanvasStrings.group, true, onGroup)
             Chip(CanvasStrings.ungroup, true, onUngroup)
-            Chip(Icons.Outlined.Palette, CanvasStrings.colors.first(), true, onColor)
-            Chip(Icons.Outlined.DeleteOutline, CanvasStrings.deleteSelectedNodes.trimEnd('?'), true, onDeleteSelected)
+            IconChip(Icons.Outlined.Palette, "Colors", true, onColor)
+            IconChip(Icons.Outlined.DeleteOutline, CanvasStrings.deleteSelectedNodes.trimEnd('?'), true, onDeleteSelected)
         }
     }
 }
@@ -948,6 +951,25 @@ fun CanvasToolbar(
 @Composable
 private fun Chip(label: String, enabled: Boolean, onClick: () -> Unit) {
     Chip(null, label, enabled, onClick)
+}
+
+/**
+ * Icon-only toolbar chip: iOS ships these buttons without text, so the label survives only as the
+ * accessibility description (screen readers and scripted QA match on it).
+ */
+@Composable
+private fun IconChip(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit) {
+    val fg = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        Modifier
+            .padding(end = 6.dp)
+            .background(LocalMaestriColors.current.canvasChromeElevated.copy(alpha = if (enabled) 0.9f else 0.4f), pillShape())
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .semantics { contentDescription = label }
+    ) {
+        IconOnly(icon, size = 16.dp, tint = fg)
+    }
 }
 
 @Composable
