@@ -60,13 +60,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import app.maestri.ui.Amber
+import app.maestri.ui.CanvasStrings
 import app.maestri.ui.Green
 import app.maestri.ui.Surface1
 import app.maestri.ui.Surface2
 import app.maestri.ui.iconGlyph
+import app.maestri.wire.CanvasCableTie
 import app.maestri.wire.CanvasConnection
 import app.maestri.wire.CanvasNode
 import app.maestri.wire.CanvasPoint
+import app.maestri.wire.CanvasWrites
+import androidx.compose.runtime.mutableStateMapOf
 import app.maestri.store.PairingStore
 import app.maestri.wire.FeedSnapshot
 import app.maestri.wire.PresencePeer
@@ -108,6 +112,16 @@ fun CanvasScreen(
     val peers by session.feed.peers.collectAsState()
     val selfPresence by session.feed.selfPresence.collectAsState()
 
+    // Canvas writes (P1a): one controller owns the modes, the selection, the dialogs and every
+    // route; the optimistic overlay it exposes is what makes a write visible before the host echoes.
+    val ctl = remember(session, wsId, scope) { CanvasWriteController(session, scope, wsId) }
+    val optimism = ctl.optimism
+    var marquee by remember { mutableStateOf<Rect?>(null) }
+    var addMenu by remember { mutableStateOf(false) }
+    var penActive by remember { mutableStateOf(false) }
+    var tieMenu by remember { mutableStateOf<CanvasCableTie?>(null) }
+    val tiePositions = remember { mutableStateMapOf<String, Offset>() }
+
     // Persisted per-workspace view state, as iOS keeps it in UserDefaults
     // (`remote.camera.<serverId>.<wsId>` = [x,y,zoom] plus the view's followMac flag).
     var following by remember { mutableStateOf(false) }
@@ -143,11 +157,98 @@ fun CanvasScreen(
         }
     }
 
+    // Optimistic writes: a NEW epoch means resync, so every overlay is dropped; the host echoing
+    // our own mutationId retires the pending entry; a snapshot that agrees drops the override.
+    val lastMutation by session.feed.lastMutation.collectAsState()
+    LaunchedEffect(snapshot) {
+        val s = snapshot ?: return@LaunchedEffect
+        if (s.workspaceId == wsId) optimism.onSnapshot(s)
+    }
+    LaunchedEffect(lastMutation) { lastMutation?.let { optimism.onMutation(it) } }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val stageW = maxWidth.value
         val stageH = maxHeight.value
         val snap = snapshot
         val canvas = snap?.takeIf { it.workspaceId == wsId }?.canvas
+
+        // ---------------------------------------------------------------- interaction helpers
+        // Canvas points ≙ stage dp run through the camera; the pointer machine hands us stage dp.
+        fun hitIndexNow(): CanvasHitIndex = CanvasHitIndex(
+            nodes = canvas?.nodes.orEmpty(),
+            connections = canvas?.connections.orEmpty(),
+            ties = canvas?.cableTies.orEmpty(),
+            frameOf = { id ->
+                optimism.frames[id]?.let { Rect(it.x, it.y, it.x + it.width, it.y + it.height) }
+            },
+        )
+
+        fun stageToCanvas(stage: Offset): Offset =
+            Offset((stage.x - camera.offsetX) / camera.scale, (stage.y - camera.offsetY) / camera.scale)
+
+        // A terminal node still opens its terminal; a text node opens the inline editor.
+        fun openOrSelect(node: CanvasNode) {
+            val t = node.terminal
+            when {
+                node.kind == "terminal" && t != null -> onOpenTerminal(t.id, t.name)
+                node.kind == "text" -> ctl.openTextEditor(node)
+                else -> ctl.selectNode(node, canvas)
+            }
+        }
+
+        // One tap handler for every mode: it either finishes a pending mode or acts on what is hit.
+        fun tapAt(p: Offset) {
+            val hit = hitIndexNow()
+            when (val m = ctl.mode) {
+                is CanvasMode.Placing -> ctl.createNode(m.kind, p.x, p.y)
+                is CanvasMode.Connecting -> {
+                    val node = hit.nodeAt(p)
+                    when {
+                        node == null -> ctl.error(CanvasStrings.canTConnectToThis)
+                        node.id == m.fromNodeId -> ctl.error(CanvasStrings.alreadyConnected)
+                        else -> ctl.connect(m.fromNodeId, node.id)
+                    }
+                }
+                is CanvasMode.TieLinking -> {
+                    val rope = hit.ropeAt(p, ROPE_TOUCH_DP)
+                    when {
+                        rope == null -> ctl.error("Tap a rope")
+                        m.firstConnectionId.isEmpty() -> {
+                            ctl.enterMode(CanvasMode.TieLinking(rope.id))
+                            ctl.info("Tap the second rope")
+                        }
+                        rope.id == m.firstConnectionId -> ctl.error("Tap another rope")
+                        else -> ctl.tieRopes(m.firstConnectionId, rope.id, p.x, p.y)
+                    }
+                }
+                CanvasMode.Idle -> {
+                    val node = hit.nodeAt(p)
+                    val tie = if (node == null) hit.tieAt(p, TIE_TOUCH_DP) else null
+                    when {
+                        node != null -> openOrSelect(node)
+                        tie != null -> tieMenu = tie
+                        hit.ropeAt(p, ROPE_TOUCH_DP) != null -> ctl.clearSelection()
+                        else -> ctl.clearSelection()
+                    }
+                }
+            }
+        }
+
+        // Long-press without dragging: the node options menu.
+        fun longPressAt(p: Offset, node: CanvasNode?) {
+            if (node != null) ctl.menuFor = node
+        }
+
+        fun selectInRect(r: Rect) {
+            val nodes = canvas?.nodes.orEmpty()
+            ctl.clearSelection()
+            nodes.filter { node ->
+                val f = optimism.frames[node.id]?.let { Rect(it.x, it.y, it.x + it.width, it.y + it.height) }
+                    ?: rectOf(node.frame)
+                f.left <= r.right && f.right >= r.left && f.top <= r.bottom && f.bottom >= r.top
+            }.forEach { ctl.selectNode(it, canvas) }
+            android.util.Log.d("QACanvas", "marquee selected ${ctl.selection.size}")
+        }
 
         // Fit-to-bounds ONCE at open (stage ready + first snapshot for this workspace);
         // epoch resyncs must NOT jump the camera. The Fit button re-enables.
@@ -186,22 +287,62 @@ fun CanvasScreen(
             camera.mirror(c.origin, c.zoom)
         }
 
-        // Full-screen gesture surface BEHIND the overlay chrome.
+        // Full-screen gesture surface BEHIND the overlay chrome. Pointer positions arrive as stage
+        // px; the helpers above turn them into canvas points for hit-testing and for optimistic
+        // frames, so a move never has to round-trip through the host to be visible.
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(following) {
+                .pointerInput(following, ctl.mode, penActive, canvas) {
                     // Pan/pinch are hidden while following the Mac; the chip turns it off.
                     if (following) return@pointerInput
-                    detectCanvasGestures { centroidPx, panPx, zoom ->
-                        val d = 1f / this.density  // px → dp
-                        camera.apply(
-                            centroid = Offset(centroidPx.x * d, centroidPx.y * d),
-                            pan = Offset(panPx.x * d, panPx.y * d),
-                            zoom = zoom,
-                        )
-                        persistCamera()
-                    }
+                    val d = 1f / this.density  // px → dp
+                    detectCanvasInteractions(
+                        key = ctl.mode,
+                        penActive = penActive,
+                        hitIndex = { hitIndexNow() },
+                        toCanvas = { stage -> stageToCanvas(stage) },
+                        onTransform = { centroidPx, panPx, zoom ->
+                            camera.apply(
+                                centroid = Offset(centroidPx.x * d, centroidPx.y * d),
+                                pan = Offset(panPx.x * d, panPx.y * d),
+                                zoom = zoom,
+                            )
+                            persistCamera()
+                        },
+                        onTap = { p -> tapAt(p) },
+                        onLockedRefusal = { ctl.info(CanvasStrings.thisNodeIsLockedOnYourComputer) },
+                        onLongPress = { p, node -> longPressAt(p, node) },
+                        onNodeDrag = { id, x, y ->
+                            val n = canvas?.nodes?.firstOrNull { it.id == id }
+                            if (n != null) {
+                                ctl.previewMove(id, x, y, n.frame.width.toInt(), n.frame.height.toInt())
+                            }
+                        },
+                        onNodeDragEnd = { id ->
+                            val ov = optimism.frames[id]
+                            if (ov != null) {
+                                // The host snaps a move to the 20-pt grid: send what it will store.
+                                ctl.moveNode(
+                                    id,
+                                    CanvasWrites.snap(ov.x),
+                                    CanvasWrites.snap(ov.y),
+                                    ov.width,
+                                    ov.height,
+                                )
+                            }
+                        },
+                        onMarquee = { marquee = it },
+                        onMarqueeEnd = { r -> selectInRect(r) },
+                        onStrokeCancel = { },
+                        onStroke = { pts -> ctl.submitStroke(pts, PEN_INK, PEN_WIDTH) },
+                        tieRadius = TIE_TOUCH_DP,
+                        onTieMove = { id, x, y -> tiePositions[id] = Offset(x, y) },
+                        onTieMoveEnd = { id, x, y ->
+                            tiePositions[id] = Offset(x, y)
+                            ctl.moveTie(id, x, y)
+                        },
+                    )
                 }
         ) {
             // The stage: one transform layer; children positioned in canvas points (≙ dp).
@@ -217,10 +358,19 @@ fun CanvasScreen(
                     }
             ) {
                 val nodeIndex = remember(canvas) { nodesById(canvas) }
+                val visibleNodes = canvas?.nodes.orEmpty().filter { optimism.removed[it.id] != true }
                 ConnectionsLayer(canvas = canvas, nodesById = nodeIndex)
-                canvas?.nodes?.forEach { node ->
-                    CanvasNodeCard(node, snap, onOpenTerminal)
+                DrawingLayer(canvas?.drawings.orEmpty(), ctl.strokes)
+                TieLayer(canvas?.cableTies.orEmpty(), tiePositions)
+                visibleNodes.forEach { node ->
+                    // An optimistic frame wins over the snapshot until the host reports the same one.
+                    val ov = optimism.frames[node.id]
+                    val shown = if (ov != null) node.copy(frame = app.maestri.wire.CanvasRect(
+                        ov.x.toDouble(), ov.y.toDouble(), ov.width.toDouble(), ov.height.toDouble(),
+                    )) else node
+                    CanvasNodeCard(shown, snap, ctl.selection[node.id] == true)
                 }
+                MarqueeRect(marquee)
                 CursorsLayer(self = selfPresence, peers = peers, nodeIndex = nodeIndex)
             }
 
@@ -272,6 +422,61 @@ fun CanvasScreen(
             ConnChip(socketState, socketError)
         }
 
+        // Write tools + the mode banner sit in their own row so the header keeps its layout.
+        Column(Modifier.fillMaxWidth().align(Alignment.TopStart).padding(top = 56.dp).statusBarsPadding()) {
+            CanvasToolbar(
+                mode = ctl.mode,
+                canTie = (canvas?.connections?.size ?: 0) >= 1,
+                onAdd = { addMenu = true },
+                onDraw = {
+                    penActive = !penActive
+                    ctl.enterMode(CanvasMode.Idle)
+                },
+                onTie = {
+                    penActive = false
+                    ctl.enterMode(CanvasMode.TieLinking(""))
+                },
+                onErase = { ctl.eraseLastDrawing() },
+                onCancelMode = {
+                    ctl.enterMode(CanvasMode.Idle)
+                    penActive = false
+                },
+                onGroup = {
+                    val gid = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }?.groupId
+                    if (gid == null) ctl.groupSelected(ctl.selection.keys.toList())
+                    else ctl.groupActionsFor = gid          // already grouped: this chip renames it
+                },
+                onUngroup = {
+                    val gid = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }?.groupId
+                    val members = canvas?.nodes?.filter { it.groupId == gid }?.map { it.id }
+                    if (gid == null || members.isNullOrEmpty()) ctl.error(CanvasStrings.thisGroupIsNoLongerOnTheCanvas)
+                    else ctl.ungroup(members)              // one workspace-level ungroup for the whole group
+                },
+                onColor = {
+                    val node = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }
+                    ctl.colorFor = node?.groupId?.let { ColorTarget.Group(it) }
+                        ?: node?.let { ColorTarget.Node(it) }
+                },
+                onDeleteSelected = { ctl.askDelete(ctl.selection.keys.toList()) },
+                selectionCount = ctl.selection.size,
+            )
+            if (penActive) {
+                Row(
+                    Modifier
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .background(Amber.copy(alpha = 0.18f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(CanvasStrings.drawWithOneFingerTwoFingersPanAndZoom, fontSize = 11.sp, color = Amber)
+                }
+            }
+            CanvasModeBanner(mode = ctl.mode, onCancel = { ctl.enterMode(CanvasMode.Idle) })
+            CanvasBanner(message = ctl.banner, isError = ctl.bannerIsError, onDismiss = { ctl.dismissBanner() })
+            if (ctl.busy) {
+                Text("·  working…", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
         // Zoom badge.
         Box(
             Modifier
@@ -286,6 +491,126 @@ fun CanvasScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        // ------------------------------------------------------------------ overlays
+        ctl.menuFor?.let { node ->
+            NodeContextMenu(
+                node = node,
+                connections = canvas?.connections.orEmpty(),
+                onDismiss = { ctl.menuFor = null },
+                onRename = {
+                    ctl.menuFor = null
+                    ctl.renameFor = node
+                    ctl.renameText = node.title
+                },
+                onLock = { ctl.toggleLock(node) },
+                onDuplicate = { ctl.duplicate(node) },
+                onConnect = {
+                    ctl.menuFor = null
+                    ctl.enterMode(CanvasMode.Connecting(node.id))
+                },
+                onDisconnectAll = { ctl.disconnectAll(node.id, canvas?.connections.orEmpty()) },
+                onDelete = { ctl.askDelete(listOf(node.id)) },
+                onEditText = if (node.kind == "text") {
+                    {
+                        ctl.menuFor = null
+                        ctl.openTextEditor(node)
+                    }
+                } else null,
+            )
+        }
+        tieMenu?.let { tie ->
+            TieContextMenu(
+                onDismiss = { tieMenu = null },
+                onCut = {
+                    ctl.cutTie(tie.id)
+                    tieMenu = null
+                },
+            )
+        }
+        if (addMenu) {
+            CreateMenu(
+                onPick = { kind ->
+                    addMenu = false
+                    penActive = false
+                    ctl.enterMode(CanvasMode.Placing(kind))
+                },
+                onDismiss = { addMenu = false },
+            )
+        }
+        ctl.renameFor?.let { node ->
+            CanvasInputDialog(
+                title = CanvasStrings.rename,
+                value = ctl.renameText,
+                onValue = { ctl.renameText = it },
+                onConfirm = {
+                    ctl.rename(node, ctl.renameText)
+                    ctl.renameFor = null
+                },
+                onDismiss = { ctl.renameFor = null },
+            )
+        }
+        ctl.confirmIds?.let { ids ->
+            val plural = if (ids.size == 1) null else
+                "${ids.size} nodes will be removed from the canvas on your computer."
+            CanvasConfirmDialog(
+                title = if (ids.size == 1) CanvasStrings.deleteThisNode else CanvasStrings.deleteSelectedNodes,
+                body = plural ?: CanvasStrings.itSRemovedFromTheCanvasOnYourComputer,
+                onConfirm = { ctl.confirmDelete(ids, ids.size > 1) },
+                onDismiss = { ctl.confirmIds = null },
+            )
+        }
+        if (ctl.groupDialog) {
+            CanvasInputDialog(
+                title = CanvasStrings.nameGroup,
+                value = ctl.groupName,
+                body = CanvasStrings.groupName,
+                onValue = { ctl.groupName = it },
+                onConfirm = { ctl.confirmGroup(ctl.selection.keys.toList(), ctl.groupName) },
+                onDismiss = { ctl.groupDialog = false },
+            )
+        }
+        ctl.groupActionsFor?.let { gid ->
+            CanvasInputDialog(
+                title = CanvasStrings.groupName,
+                value = ctl.groupName,
+                onValue = { ctl.groupName = it },
+                onConfirm = {
+                    ctl.groupRename(gid, ctl.groupName)
+                    ctl.groupActionsFor = null
+                },
+                onDismiss = { ctl.groupActionsFor = null },
+            )
+        }
+        ctl.colorFor?.let { target ->
+            ColorPalettePicker(
+                title = if (target is ColorTarget.Group) "Change color" else CanvasStrings.changeNoteColor,
+                onPick = { name ->
+                    when (target) {
+                        is ColorTarget.Group -> ctl.groupColor(target.groupId, name)
+                        is ColorTarget.Node -> ctl.setNodeColor(target.node, name)
+                    }
+                },
+                onDismiss = { ctl.colorFor = null },
+                onClear = (target as? ColorTarget.Group)?.let { g -> { ctl.clearGroupColor(g.groupId) } },
+            )
+        }
+        ctl.textFor?.let {
+            TextBlockEditor(
+                draft = ctl.textDraft,
+                size = ctl.textSize,
+                weight = ctl.textWeight,
+                family = ctl.textFamily,
+                color = ctl.textColor,
+                onDraft = { d -> ctl.textDraft = d },
+                onSize = { s -> ctl.textSize = s },
+                onWeight = { w -> ctl.textWeight = w },
+                onFamily = { f -> ctl.textFamily = f },
+                onColor = { c -> ctl.textColor = c },
+                onSave = { ctl.saveText() },
+                onDismiss = { ctl.textFor = null },
+            )
+        }
     }
 }
 
@@ -297,6 +622,14 @@ private const val CURSOR_FADE_MS = 5_000L
 
 /** Presence is reported once the camera settles, not per gesture frame. */
 private const val PRESENCE_REPORT_MS = 1_500L
+
+/** Pen ink + width for a local stroke; the host stores exactly what we send. */
+private const val PEN_INK = "#F2F3F5"
+private const val PEN_WIDTH = 3f
+
+/** Touch tolerance in canvas points for hitting a rope or a tie knot. */
+private const val ROPE_TOUCH_DP = 24f
+private const val TIE_TOUCH_DP = 30f
 
 // -------------------------------------------------------------------------------- camera
 
@@ -361,54 +694,7 @@ class CameraState {
 
 // ----------------------------------------------------------------------------- gestures
 
-/**
- * Minimal pan/pinch transform detector on stable pointer APIs
- * (`Modifier.transformable` has no centroid; `detectTransformGestures` was removed in
- * Compose foundation 1.10). Emits (centroid px, pan px delta, zoom ratio). Single pointer
- * → pan; two pointers → pinch around the mid-point. Touch slop gate keeps taps clean;
- * once active, position changes are consumed so child clickables cancel.
- */
-private suspend fun PointerInputScope.detectCanvasGestures(
-    onTransform: (centroid: Offset, pan: Offset, zoom: Float) -> Unit,
-) {
-    awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false)
-        val slop = viewConfiguration.touchSlop
-        var lastCount = 0
-        var lastCentroid = Offset.Zero
-        var lastSpread = 0f
-        var moved = 0f
-        var active = false
-        while (true) {
-            val event = awaitPointerEvent()
-            val pressed = event.changes.filter { it.pressed }
-            if (pressed.isEmpty()) break
-            val centroid = centroidOf(pressed)
-            val count = pressed.size
-            if (count != lastCount) {
-                // Pointer membership changed (finger landed/lifted): re-anchor.
-                lastCount = count
-                lastCentroid = centroid
-                lastSpread = spreadOf(pressed, centroid)
-                if (count >= 2) active = true
-                continue
-            }
-            val pan = centroid - lastCentroid
-            val spread = spreadOf(pressed, centroid)
-            val zoom = if (count >= 2 && lastSpread > 0f) (spread / lastSpread) else 1f
-            moved += pan.getDistance()
-            if (!active && (moved > slop || count >= 2)) active = true
-            if (active) {
-                onTransform(centroid, pan, zoom)
-                event.changes.forEach { if (it.positionChanged()) it.consume() }
-            }
-            lastCentroid = centroid
-            lastSpread = spread
-        }
-    }
-}
-
-private fun centroidOf(changes: List<PointerInputChange>): Offset {
+internal fun centroidOf(changes: List<PointerInputChange>): Offset {
     var sx = 0f
     var sy = 0f
     changes.forEach {
@@ -419,7 +705,7 @@ private fun centroidOf(changes: List<PointerInputChange>): Offset {
 }
 
 /** Sum of finger distances to the centroid (spread metric for pinch zoom). */
-private fun spreadOf(changes: List<PointerInputChange>, centroid: Offset): Float =
+internal fun spreadOf(changes: List<PointerInputChange>, centroid: Offset): Float =
     if (changes.size < 2) 0f
     else changes.sumOf { (it.position - centroid).getDistance().toDouble() }.toFloat()
 
@@ -600,18 +886,15 @@ private fun endpointColor(c: CanvasConnection, nodesById: Map<String, CanvasNode
 private fun CanvasNodeCard(
     node: CanvasNode,
     snap: FeedSnapshot?,
-    onOpenTerminal: (terminalId: String, terminalName: String) -> Unit,
+    selected: Boolean,
 ) {
     val t = node.terminal
     if (node.kind == "terminal" && t != null) {
         val pending = snap?.pendingPromptIds?.contains(t.id) == true
-        CanvasTerminalNode(
-            node, t, pending,
-            onOpen = { onOpenTerminal(t.id, t.name) },
-        )
+        CanvasTerminalNode(node, t, pending, selected)
     } else {
         // Per docs: an unknown/non-terminal kind still has frame + title — simple box.
-        UnknownNodeBox(node)
+        UnknownNodeBox(node, selected)
     }
 }
 
@@ -620,7 +903,7 @@ private fun CanvasTerminalNode(
     node: CanvasNode,
     t: TerminalCard,
     pending: Boolean,
-    onOpen: () -> Unit,
+    selected: Boolean,
 ) {
     val accent = parseColor(node.color, parseColor(t.color, Green))
     val dotColor = when {
@@ -635,14 +918,19 @@ private fun CanvasTerminalNode(
             .offset(x = node.frame.x.dp, y = node.frame.y.dp)
             .size(node.frame.width.dp, node.frame.height.dp)
     ) {
+        // Taps are handled by the canvas gesture machine (one hit-test source), so the card itself
+        // is inert; the selection ring shows what the marquee or a tap selected.
+        SelectionRing(selected, Modifier.fillMaxSize())
         Card(
-            onClick = onOpen,
             modifier = Modifier.fillMaxSize(),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
                 containerColor = if (pending || t.needsAttention) Surface2 else Surface1
             ),
-            border = BorderStroke(1.5.dp, accent.copy(alpha = 0.55f)),
+            border = BorderStroke(
+                if (selected) 2.dp else 1.5.dp,
+                if (selected) Green else accent.copy(alpha = 0.55f),
+            ),
         ) {
             Column(Modifier.fillMaxSize().padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -718,18 +1006,19 @@ private fun CanvasTerminalNode(
 }
 
 @Composable
-private fun UnknownNodeBox(node: CanvasNode) {
+private fun UnknownNodeBox(node: CanvasNode, selected: Boolean) {
     Box(
         Modifier
             .zIndex(node.zIndex.toFloat())
             .offset(x = node.frame.x.dp, y = node.frame.y.dp)
             .size(node.frame.width.dp, node.frame.height.dp)
     ) {
+        SelectionRing(selected, Modifier.fillMaxSize())
         Card(
             modifier = Modifier.fillMaxSize(),
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = Surface1.copy(alpha = 0.92f)),
-            border = BorderStroke(1.dp, Surface2),
+            border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) Green else Surface2),
         ) {
             Column(Modifier.fillMaxSize().padding(12.dp)) {
                 Text(
@@ -750,7 +1039,8 @@ private fun UnknownNodeBox(node: CanvasNode) {
                 }
                 if (node.kind.isNotBlank()) {
                     Text(
-                        "(read-only · kind ${node.kind})",
+                        if (node.isNodeLocked) "(locked on your computer · kind ${node.kind})"
+                        else "(kind ${node.kind})",
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
