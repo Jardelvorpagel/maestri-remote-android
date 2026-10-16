@@ -311,6 +311,7 @@ fun CanvasScreen(
                             persistCamera()
                         },
                         onTap = { p -> tapAt(p) },
+                        onLockedRefusal = { ctl.info(CanvasStrings.thisNodeIsLockedOnYourComputer) },
                         onLongPress = { p, node -> longPressAt(p, node) },
                         onNodeDrag = { id, x, y ->
                             val n = canvas?.nodes?.firstOrNull { it.id == id }
@@ -440,11 +441,16 @@ fun CanvasScreen(
                     ctl.enterMode(CanvasMode.Idle)
                     penActive = false
                 },
-                onGroup = { ctl.groupSelected(ctl.selection.keys.toList()) },
+                onGroup = {
+                    val gid = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }?.groupId
+                    if (gid == null) ctl.groupSelected(ctl.selection.keys.toList())
+                    else ctl.groupActionsFor = gid          // already grouped: this chip renames it
+                },
                 onUngroup = {
-                    val id = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }?.groupId
-                    if (id == null) ctl.error(CanvasStrings.thisGroupIsNoLongerOnTheCanvas)
-                    else ctl.groupActionsFor = id
+                    val gid = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }?.groupId
+                    val members = canvas?.nodes?.filter { it.groupId == gid }?.map { it.id }
+                    if (gid == null || members.isNullOrEmpty()) ctl.error(CanvasStrings.thisGroupIsNoLongerOnTheCanvas)
+                    else ctl.ungroup(members)              // one workspace-level ungroup for the whole group
                 },
                 onColor = {
                     val node = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }

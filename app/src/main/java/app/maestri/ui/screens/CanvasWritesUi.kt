@@ -231,7 +231,7 @@ class CanvasWriteController(
 
     fun toggleLock(node: CanvasNode) {
         menuFor = null
-        write("lock", strings.thisNodeIsLockedOnYourComputer) {
+        write("lock", strings.couldntChangeLock) {
             session.canvasWrite(CanvasWrites.nodePath(wsId, node.id, "lock"), CanvasWrites.lock(!node.isNodeLocked))
         }
     }
@@ -279,9 +279,9 @@ class CanvasWriteController(
                 )
                 info(strings.connectingFromHere)
             } catch (e: Exception) {
-                // The host refuses some pairs outright ("These nodes can't be connected", 400).
-                if (e.message?.contains("connect", ignoreCase = true) == true) error(strings.thisNodeCanTTakeThatConnection)
-                else throw e
+                // The host refuses some pairs outright (400 "These nodes can't be connected"); iOS names
+                // the pair rather than the request, then leaves connect mode, which is already done above.
+                error(strings.thisNodeCanTTakeThatConnection)
             }
         }
     }

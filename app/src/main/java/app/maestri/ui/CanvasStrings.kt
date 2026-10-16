@@ -71,6 +71,8 @@ object CanvasStrings {
     const val maestriCouldnTUngroupThoseNodes = "Maestri couldn't ungroup those nodes."
     const val maestriCouldnTRecolorThatGroup = "Maestri couldn't recolor that group."
     const val couldntChangeColor = "Couldn't Change Color"
+    /** No lock-specific failure literal exists in the iOS corpus; this follows its "Couldn't X" form. */
+    const val couldntChangeLock = "Couldn't Change Lock"
     const val changeNoteColor = "Change note color"
     const val clearColor = "Clear Color"
     const val maestriCouldnTRenameThatGroup = "Maestri couldn't rename that group."
