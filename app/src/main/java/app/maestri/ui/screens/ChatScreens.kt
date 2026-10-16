@@ -2317,7 +2317,7 @@ fun EnterChatModeButton(
             session.scope.launch {
                 try {
                     ChatApi(session).chatSetFace(terminalId, true, null)
-                    onChatReady()
+                    withContext(Dispatchers.Main) { onChatReady() }
                 } catch (e: Exception) {
                     android.util.Log.d("QAChat", "enter chat mode failed: $e")
                 } finally {
