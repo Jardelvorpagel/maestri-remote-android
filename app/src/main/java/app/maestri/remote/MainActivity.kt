@@ -4,12 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -77,7 +73,8 @@ fun Root(session: WireSession) {
                 composable("workspaces") {
                     WorkspacesScreen(
                         session = session,
-                        onOpenWorkspace = { wsId, wsName -> nav.navigate("feedWithFloors/$wsId/${enc(wsName)}") },
+                        onOpenWorkspace = { wsId, wsName -> nav.navigate("feed/$wsId/${enc(wsName)}") },
+                        onOpenFloors = { wsId, wsName -> nav.navigate(FloorsNav.link(wsId, wsName)) },
                     )
                 }
                 composable(
@@ -98,6 +95,7 @@ fun Root(session: WireSession) {
                         onOpenTerminal = { terminalId, terminalName ->
                             nav.navigate("terminal/${enc(wsId)}/${enc(terminalId)}/${enc(terminalName)}")
                         },
+                        onOpenFloors = { nav.navigate(FloorsNav.link(wsId, wsName)) },
                     )
                 }
                 composable(
@@ -143,43 +141,15 @@ fun Root(session: WireSession) {
                 }
                 chatDestinations(session, nav)
                 // ── P3 floors lane ────────────────────────────────────────────────────
-                // LANES MERGER: this temp "Floors" affordance (FAB inside the feed below)
-                // exists only because FeedScreen is lane-frozen this wave; the proper
-                // entry is the merger's floor-chips wiring (WorkspacesScreen/FeedScreen),
-                // which should navigate via FloorsNav.link(wsId, wsName).
+                // Entry affordances live on WorkspacesScreen rows and the FeedScreen
+                // chips row (both navigate via FloorsNav.link); the floor-chips lane
+                // retired the old temp feedWithFloors FAB wrapper.
                 FloorsNav.installFloorsRoutes(
                     nav = this,
                     session = session,
                     navigate = { r -> nav.navigate(r) },
                     pop = { nav.popBackStack() },
                 )
-                composable(
-                    route = "feedWithFloors/{wsId}/{wsName}",
-                    arguments = listOf(
-                        navArgument("wsId") { type = NavType.StringType },
-                        navArgument("wsName") { type = NavType.StringType },
-                    ),
-                ) { entry ->
-                    val wsId = entry.arguments?.getString("wsId") ?: return@composable
-                    val wsName = entry.arguments?.getString("wsName") ?: "workspace"
-                    Box(Modifier.fillMaxSize()) {
-                        FeedScreen(
-                            session = session,
-                            wsId = wsId,
-                            wsName = wsName,
-                            onBack = { nav.popBackStack() },
-                            onOpenCanvas = { nav.navigate("canvas/${enc(wsId)}/${enc(wsName)}") },
-                            onOpenTerminal = { terminalId, terminalName ->
-                                nav.navigate("terminal/${enc(wsId)}/${enc(terminalId)}/${enc(terminalName)}")
-                            },
-                        )
-                        ExtendedFloatingActionButton(
-                            onClick = { nav.navigate(FloorsNav.link(wsId, wsName)) },
-                            modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd).padding(16.dp),
-                            containerColor = LocalMaestriColors.current.canvasSurface,
-                        ) { Text("⇆ Floors") }
-                    }
-                }
             }
         }
     }

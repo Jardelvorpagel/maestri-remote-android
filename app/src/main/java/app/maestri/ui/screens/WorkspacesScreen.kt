@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -41,6 +42,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import app.maestri.wire.WorkspaceMeta
@@ -56,6 +58,7 @@ import app.maestri.ui.Style.LocalMaestriColors
 fun WorkspacesScreen(
     session: WireSession,
     onOpenWorkspace: (wsId: String, wsName: String) -> Unit,
+    onOpenFloors: (wsId: String, wsName: String) -> Unit = { _, _ -> },
 ) {
     var list by remember { mutableStateOf<List<WorkspaceMeta>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -194,15 +197,27 @@ fun WorkspacesScreen(
                                     }
                                 }
                                 Spacer(Modifier.height(6.dp))
-                                Text(
-                                    buildString {
-                                        append("${ws.runningTerminalCount}/${ws.terminalCount} running")
-                                        if (ws.isLoaded) append(" · loaded") else append(" · not loaded")
-                                        ws.groupName?.let { append(" · $it") }
-                                    },
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        buildString {
+                                            append("${ws.runningTerminalCount}/${ws.terminalCount} running")
+                                            if (ws.isLoaded) append(" · loaded") else append(" · not loaded")
+                                            ws.groupName?.let { append(" · $it") }
+                                        },
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    // Floor-chips lane: every row opens the workspace's floors
+                                    // + git screens (route via FloorsNav.link — MainActivity).
+                                    TextButton(
+                                        enabled = !ws.isLocked,
+                                        onClick = { onOpenFloors(ws.id, ws.name) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp),
+                                    ) {
+                                        Text("${app.maestri.ui.FloorsStrings.floors} ›", fontSize = 12.sp)
+                                    }
+                                }
                             }
                         }
                     }

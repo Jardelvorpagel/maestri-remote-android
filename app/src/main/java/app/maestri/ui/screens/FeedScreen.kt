@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -47,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.iconGlyph
 import app.maestri.wire.FeedItem
+import app.maestri.wire.FloorMeta
 import app.maestri.wire.FeedSnapshot
 import app.maestri.wire.NoteCard
 import app.maestri.wire.SocketState
@@ -71,6 +73,7 @@ fun FeedScreen(
     onBack: () -> Unit,
     onOpenCanvas: () -> Unit,
     onOpenTerminal: (terminalId: String, terminalName: String) -> Unit,
+    onOpenFloors: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val snapshot by session.feed.snapshot.collectAsState()
@@ -144,20 +147,33 @@ fun FeedScreen(
                     .padding(vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Floor-chips lane: head of the row opens the floors + git screens;
+                // the mirror chips keep their floor-switching semantics, now with the
+                // FloorMeta state glyph (⚠ attention/blocked — clone-missing and copy
+                // errors travel only on the floors screens' FloorRow, not in models).
+                TextButton(onClick = onOpenFloors, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text("${app.maestri.ui.FloorsStrings.floors} ›", fontSize = 13.sp)
+                }
                 FilterChip(
                     selected = floor == null,
                     onClick = { floor = null },
                     label = { Text("Host view") },
                 )
                 floors.forEach { f ->
+                    val glyph = floorStateGlyph(f)
                     FilterChip(
                         selected = floor == (f.id ?: "ground"),
                         onClick = { floor = f.id ?: "ground" },
                         label = {
-                            Text(
-                                (if (f.statusText != null) "${f.name} · ${truncate(f.statusText, 26)}" else f.name),
-                                maxLines = 1,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (glyph != null) {
+                                    Text(glyph, fontSize = 12.sp, modifier = Modifier.padding(end = 3.dp))
+                                }
+                                Text(
+                                    (if (f.statusText != null) "${f.name} · ${truncate(f.statusText, 26)}" else f.name),
+                                    maxLines = 1,
+                                )
+                            }
                         },
                     )
                 }
@@ -207,6 +223,16 @@ private fun snapshotItemKey(item: FeedItem): String = when (item) {
 }
 
 private fun truncate(s: String, max: Int) = if (s.length > max) s.take(max - 1) + "…" else s
+
+/** State glyph from FloorMeta (chips lane): needs-attention ⚠ when the row carries
+ *  attention or a blocked status; normal floors get no glyph (hasActivity/activity dot
+ *  already surfaces elsewhere). clone-missing/copy ERROR are not on FloorMeta — the
+ *  floors list screen (FloorRow.isCloneMissing) owns those; honest limitation. */
+private fun floorStateGlyph(f: FloorMeta): String? = when {
+    (f.attentionCount ?: 0) > 0 -> "⚠"
+    f.statusState == "blocked" -> "⚠"
+    else -> null
+}
 
 @Composable
 fun ConnChip(state: SocketState, err: String?) {
