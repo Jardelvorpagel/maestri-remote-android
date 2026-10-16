@@ -39,10 +39,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.Amber
-import app.maestri.ui.Green
-import app.maestri.ui.Red
 import kotlinx.coroutines.launch
+import app.maestri.ui.Style.LocalMaestriColors
 
 /**
  * Pairing screen.
@@ -100,7 +98,7 @@ fun PairingScreen(
             Spacer(Modifier.height(22.dp))
 
             if (storedNotice != null) {
-                NoticeCard(text = storedNotice!!, tint = Red)
+                NoticeCard(text = storedNotice!!, tint = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(12.dp))
                 Row {
                     TextButton(onClick = {
@@ -113,7 +111,7 @@ fun PairingScreen(
                             onNoticeShown()
                             storedNotice = null
                         }
-                    }) { Text("Forget this server", color = Red) }
+                    }) { Text("Forget this server", color = MaterialTheme.colorScheme.error) }
                 }
                 Spacer(Modifier.height(6.dp))
             }
@@ -225,7 +223,7 @@ fun PairingScreen(
                     }
                     err?.let {
                         Spacer(Modifier.height(10.dp))
-                        NoticeCard(text = it, tint = Red)
+                        NoticeCard(text = it, tint = MaterialTheme.colorScheme.error)
                     }
                 }
 
@@ -266,11 +264,11 @@ fun PairingScreen(
                         KeyCard("Key you entered (normalized):", enteredNorm)
                     }
                     if (keyGarbled) {
-                        NoticeCard("Key format not recognized — optional check skipped", Amber)
+                        NoticeCard("Key format not recognized — optional check skipped", LocalMaestriColors.current.warning)
                     } else if (enteredNorm != null && matchOk) {
-                        NoticeCard("Keys match ✓", Green)
+                        NoticeCard("Keys match ✓", MaterialTheme.colorScheme.primary)
                     } else if (enteredNorm != null) {
-                        NoticeCard("KEY MISMATCH — do not trust this host", Red)
+                        NoticeCard("KEY MISMATCH — do not trust this host", MaterialTheme.colorScheme.error)
                     }
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
@@ -346,7 +344,7 @@ fun PairingScreen(
                     ) { Text("Back") }
                     err?.let {
                         Spacer(Modifier.height(10.dp))
-                        NoticeCard(text = it, tint = Red)
+                        NoticeCard(text = it, tint = MaterialTheme.colorScheme.error)
                     }
                 }
             }

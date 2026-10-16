@@ -51,13 +51,15 @@ import app.maestri.wire.FileTreeListing
 import app.maestri.wire.PendingFloorRow
 import app.maestri.wire.PrContext
 import app.maestri.wire.session.WireSession
-import app.maestri.ui.Amber
 import app.maestri.ui.FloorsStrings as S
-import app.maestri.ui.Green
-import app.maestri.ui.Red
-import app.maestri.ui.Surface1
-import app.maestri.ui.Surface2
 import kotlinx.coroutines.launch
+import androidx.compose.material3.MaterialTheme
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.controlShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import app.maestri.ui.Style.BackLabel
+import app.maestri.ui.Style.IconLabel
 
 // ------------------------------------------------------------------ shared affordances
 
@@ -71,7 +73,7 @@ fun errText(e: Exception): String = when (e) {
 /** Small mono console box for git output — git's own words, verbatim. */
 @Composable
 private fun OutputCard(output: String) {
-    Surface(color = Color(0xFF0B0C0E), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Surface(color = Color(0xFF0B0C0E), shape = controlShape(), modifier = Modifier.fillMaxWidth()) {
         Text(
             output.ifBlank { "(no output)" },
             fontFamily = FontFamily.Monospace,
@@ -86,7 +88,7 @@ private fun OutputCard(output: String) {
 private fun ErrorLine(text: String?) {
     if (text != null) {
         Spacer(Modifier.height(6.dp))
-        Text(text, color = Amber, fontSize = 12.5.sp)
+        Text(text, color = LocalMaestriColors.current.warning, fontSize = 12.5.sp)
     }
 }
 
@@ -95,10 +97,11 @@ private fun StatusDot(color: Color) {
     Box(Modifier.size(10.dp).background(color, CircleShape))
 }
 
+@Composable
 fun statusColor(state: String?): Color = when (state) {
-    "working" -> Green
-    "blocked" -> Red
-    "review" -> Amber
+    "working" -> MaterialTheme.colorScheme.primary
+    "blocked" -> MaterialTheme.colorScheme.error
+    "review" -> LocalMaestriColors.current.warning
     "done" -> Color(0xFF63B3ED)
     "dormant" -> Color.Gray
     else -> Color.Gray
@@ -150,12 +153,12 @@ fun FloorsScreen(
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { BackLabel("Back") }
             Column(Modifier.weight(1f)) {
                 Text(S.floors, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 Text(wsName, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Button(onClick = { showCreate = true }) { Text("＋ ${S.newFloor}") }
+            Button(onClick = { showCreate = true }) { IconLabel(Icons.Filled.Add, S.newFloor) }
         }
         ErrorLine(err)
 
@@ -211,7 +214,7 @@ fun FloorsScreen(
 
 @Composable
 private fun PendingFloorCard(p: PendingFloorRow, busyId: String?, onDismiss: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = Surface2), modifier = Modifier.fillMaxWidth()) {
+    Card(colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasChromeElevated), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
@@ -233,7 +236,7 @@ private fun PendingFloorCard(p: PendingFloorRow, busyId: String?, onDismiss: () 
             }
             if (p.error != null) {
                 Spacer(Modifier.height(6.dp))
-                Text("⚠ ${p.error}", color = Red, fontSize = 12.sp)
+                Text("⚠ ${p.error}", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
             }
         }
     }
@@ -241,7 +244,7 @@ private fun PendingFloorCard(p: PendingFloorRow, busyId: String?, onDismiss: () 
 
 @Composable
 private fun FloorListRow(f: FloorRow, onOpen: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = Surface1), modifier = Modifier.fillMaxWidth(), onClick = onOpen) {
+    Card(colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface), modifier = Modifier.fillMaxWidth(), onClick = onOpen) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusDot(statusColor(f.statusState))
@@ -265,10 +268,10 @@ private fun FloorListRow(f: FloorRow, onOpen: () -> Unit) {
                     )
                 }
                 if (f.attentionCount > 0) {
-                    Text("⚠${f.attentionCount}", color = Red, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("⚠${f.attentionCount}", color = MaterialTheme.colorScheme.error, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.width(8.dp))
                 }
-                if (f.hasActivity) StatusDot(Green)
+                if (f.hasActivity) StatusDot(MaterialTheme.colorScheme.primary)
             }
             if (f.statusText != null || f.isRemoving) {
                 Spacer(Modifier.height(6.dp))
@@ -279,13 +282,13 @@ private fun FloorListRow(f: FloorRow, onOpen: () -> Unit) {
                         t
                     },
                     fontSize = 11.5.sp,
-                    color = if (f.statusState == "blocked") Red else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (f.statusState == "blocked") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
             if (f.isCloneMissing) {
                 Spacer(Modifier.height(4.dp))
-                Text(S.cloneDirectoryMissing, color = Red, fontSize = 11.sp)
+                Text(S.cloneDirectoryMissing, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
             }
         }
     }
@@ -435,9 +438,9 @@ private fun CreateFloorSheet(
                         }
                         // client-side pre-warning; the host's own 409 text arrives at create
                         val clash = (pickExisting && pickedBranch == b.current) || (!pickExisting && newBranchText == b.current)
-                        if (clash) Text(S.groundBranchCheckedOutWorktree, fontSize = 11.sp, color = Amber)
+                        if (clash) Text(S.groundBranchCheckedOutWorktree, fontSize = 11.sp, color = LocalMaestriColors.current.warning)
                     }
-                    branchesErr?.let { Text(it, color = Red, fontSize = 11.sp) }
+                    branchesErr?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 11.sp) }
 
                     Spacer(Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.Top) {
@@ -459,7 +462,7 @@ private fun CreateFloorSheet(
                 )
                 Spacer(Modifier.height(8.dp))
                 when {
-                    prListErr != null -> Text(prListErr!!, color = Amber, fontSize = 12.5.sp)
+                    prListErr != null -> Text(prListErr!!, color = LocalMaestriColors.current.warning, fontSize = 12.5.sp)
                     prListData != null && prListData!!.pullRequests.isEmpty() ->
                         Text(S.noOpenPullRequests, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     prListData != null -> Column {
@@ -474,7 +477,7 @@ private fun CreateFloorSheet(
                                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                                if (pr.isDraft) Text(S.draft, fontSize = 10.sp, color = Amber)
+                                if (pr.isDraft) Text(S.draft, fontSize = 10.sp, color = LocalMaestriColors.current.warning)
                             }
                         }
                     }
@@ -589,7 +592,7 @@ fun FloorOverviewScreen(
 
     if (gone) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)) {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { BackLabel("Back") }
             Spacer(Modifier.height(20.dp))
             Text(S.thisFloorIsntThereAnymore, fontWeight = FontWeight.SemiBold)
         }
@@ -598,7 +601,7 @@ fun FloorOverviewScreen(
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { BackLabel("Back") }
             Column(Modifier.weight(1f)) {
                 Text(row?.name ?: floorIdOrGround, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(wsName, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -609,7 +612,7 @@ fun FloorOverviewScreen(
 
         row?.let { f ->
             Spacer(Modifier.height(8.dp))
-            Card(colors = CardDefaults.cardColors(containerColor = Surface1)) {
+            Card(colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         StatusDot(statusColor(f.statusState))
@@ -637,8 +640,8 @@ fun FloorOverviewScreen(
                         InfoRow("Branch", it, trailing = "⧉")   // copy branch name
                     }
                     f.folder?.let { InfoRow("Folder", it) }
-                    if (f.attentionCount > 0) Text("⚠ ${f.attentionCount} · ${S.lldNeedAttention.format(f.attentionCount)}", color = Red, fontSize = 12.sp)
-                    if (f.isCloneMissing) Text("⚠ ${S.cloneDirectoryMissing}", color = Red, fontSize = 12.sp)
+                    if (f.attentionCount > 0) Text("⚠ ${f.attentionCount} · ${S.lldNeedAttention.format(f.attentionCount)}", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                    if (f.isCloneMissing) Text("⚠ ${S.cloneDirectoryMissing}", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                 }
             }
         }
@@ -684,7 +687,7 @@ fun FloorOverviewScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("⏻ ${S.unload}") }
             if (!isGround) {
-                OutlinedButton(onClick = { showDelete = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Red)) {
+                OutlinedButton(onClick = { showDelete = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
                     Text("🗑 ${S.deleteFloor}…")
                 }
             }
@@ -887,7 +890,7 @@ private fun DeleteFloorSheet(api: FloorsApi, wsId: String, row: FloorRow, onDone
                 }
                 if (cleanupFailText != null) {
                     Spacer(Modifier.height(6.dp))
-                    Text(S.theFloorsCloneCouldNotBeRemoved, color = Red, fontSize = 12.sp)
+                    Text(S.theFloorsCloneCouldNotBeRemoved, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                 }
                 ErrorLine(erro)
             }
@@ -916,7 +919,7 @@ private fun DeleteFloorSheet(api: FloorsApi, wsId: String, row: FloorRow, onDone
                     }
                 },
             ) {
-                Text(if (forcing) "Delete anyway" else if (deleteBranch) S.deleteFloorAndBranch else S.deleteFloor, color = Red)
+                Text(if (forcing) "Delete anyway" else if (deleteBranch) S.deleteFloorAndBranch else S.deleteFloor, color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = { TextButton(onClick = { onDone(null) }, enabled = !busy) { Text("Cancel") } },
@@ -984,10 +987,10 @@ private fun LandFloorSheet(api: FloorsApi, wsId: String, floor: FloorRow, onDone
                 Spacer(Modifier.height(8.dp))
                 Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1518)), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp)) {
-                        Text("⚠ ${S.codeConflictsWereFound}", color = Red, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text("⚠ ${S.codeConflictsWereFound}", color = MaterialTheme.colorScheme.error, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(4.dp))
-                        Text(S.conflictsWith.format("${l.conflicts.size} path(s)"), fontSize = 11.sp, color = Amber)
-                        l.conflicts.take(8).forEach { Text(it, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = Red) }
+                        Text(S.conflictsWith.format("${l.conflicts.size} path(s)"), fontSize = 11.sp, color = LocalMaestriColors.current.warning)
+                        l.conflicts.take(8).forEach { Text(it, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
                     }
                 }
             }
@@ -1003,8 +1006,8 @@ private fun LandFloorSheet(api: FloorsApi, wsId: String, floor: FloorRow, onDone
                 l.files.take(12).forEach { f ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(f.path, fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        Text("+${f.additions}", color = Green, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                        Text(" -${f.deletions}", color = Red, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        Text("+${f.additions}", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        Text(" -${f.deletions}", color = MaterialTheme.colorScheme.error, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                     }
                 }
                 if (l.files.size > 12) Text("…${l.files.size - 12} more", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1025,7 +1028,7 @@ private fun LandFloorSheet(api: FloorsApi, wsId: String, floor: FloorRow, onDone
         ErrorLine(erro)
         doneMsg?.let {
             Spacer(Modifier.height(8.dp))
-            Text(it, color = Green, fontSize = 12.5.sp)
+            Text(it, color = MaterialTheme.colorScheme.primary, fontSize = 12.5.sp)
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -1121,7 +1124,7 @@ private fun FloorPullRequestSheet(api: FloorsApi, wsId: String, floor: FloorRow,
             Text(S.openPullRequest, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             ctx?.problem?.let {
                 Spacer(Modifier.height(6.dp))
-                Text(it, color = Amber, fontSize = 12.5.sp)   // host's reason, verbatim (client-visible)
+                Text(it, color = LocalMaestriColors.current.warning, fontSize = 12.5.sp)   // host's reason, verbatim (client-visible)
             }
             ErrorLine(loadErr)
             ctx?.let { c ->
@@ -1138,13 +1141,13 @@ private fun FloorPullRequestSheet(api: FloorsApi, wsId: String, floor: FloorRow,
                         Checkbox(checked = draft, onCheckedChange = { draft = it })
                         Text(S.draft, fontSize = 13.sp)
                     }
-                    if (draft) Text(S.draftsCantBeMerged, fontSize = 11.sp, color = Amber)
+                    if (draft) Text(S.draftsCantBeMerged, fontSize = 11.sp, color = LocalMaestriColors.current.warning)
                 }
                 if ((c.unpushedCommits ?: 0) > 0) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         if (c.unpushedCommits == 1) S.oneCommitNotInPr else S.lldCommitsNotInPr.format(c.unpushedCommits),
-                        fontSize = 11.5.sp, color = Amber,
+                        fontSize = 11.5.sp, color = LocalMaestriColors.current.warning,
                     )
                 }
                 if (c.agents.isNotEmpty()) {
@@ -1152,7 +1155,7 @@ private fun FloorPullRequestSheet(api: FloorsApi, wsId: String, floor: FloorRow,
                     Text(S.askAgentToReview, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     c.agents.take(4).forEach { ag ->
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-                            StatusDot(if (ag.isRunning) Green else Color.Gray)
+                            StatusDot(if (ag.isRunning) MaterialTheme.colorScheme.primary else Color.Gray)
                             Text("  ${ag.name}", fontSize = 12.5.sp, modifier = Modifier.weight(1f))
                             TextButton(enabled = !busy && ag.isRunning, onClick = { ask("review", ag) }) { Text(S.askAgentToReview) }
                         }
@@ -1163,7 +1166,7 @@ private fun FloorPullRequestSheet(api: FloorsApi, wsId: String, floor: FloorRow,
             }
             Spacer(Modifier.height(10.dp))
             if (erro != null) {
-                Text(erro!!, color = Red, fontSize = 12.5.sp)
+                Text(erro!!, color = MaterialTheme.colorScheme.error, fontSize = 12.5.sp)
                 if (erro.orEmpty().startsWith("503")) Text(S.opensOnTheHostsWebsiteAfterThePush, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (openedUrl != null || openedOnWebsite) {
@@ -1264,7 +1267,7 @@ fun FileTreeScreen(
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { BackLabel("Back") }
             Column(Modifier.weight(1f)) {
                 Text(S.fileTree, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(rootPath, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1278,7 +1281,7 @@ fun FileTreeScreen(
                 l.gitBranch?.let {
                     Text("⑂ $it", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                     Spacer(Modifier.width(8.dp))
-                    Text("Δ${l.changedCount}", fontSize = 11.sp, color = if (l.changedCount > 0) Amber else MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Δ${l.changedCount}", fontSize = 11.sp, color = if (l.changedCount > 0) LocalMaestriColors.current.warning else MaterialTheme.colorScheme.onSurfaceVariant)
                 } ?: run {
                     Text(S.projectNotGit, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -1362,9 +1365,9 @@ private fun EntryRow(
         Spacer(Modifier.weight(1f))
         if (e.gitStatus != null) {
             Text(e.gitStatus, color = when (e.gitStatus) {
-                "M", "?" -> Amber
-                "A", "R" -> Green
-                "D", "!" -> Red
+                "M", "?" -> LocalMaestriColors.current.warning
+                "A", "R" -> MaterialTheme.colorScheme.primary
+                "D", "!" -> MaterialTheme.colorScheme.error
                 else -> Color.Gray
             }, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
             Spacer(Modifier.width(6.dp))
@@ -1396,7 +1399,7 @@ fun FileScreen(
     }
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { BackLabel("Back") }
             Text(relPath, fontSize = 13.sp, fontFamily = FontFamily.Monospace, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         }
         ErrorLine(err)
@@ -1404,7 +1407,7 @@ fun FileScreen(
         when {
             err != null -> Text(S.couldntLoadFile, fontWeight = FontWeight.SemiBold)
             c is FloorsApi.FileContent.Text -> OutputCard(c.content)
-            c is FloorsApi.FileContent.Binary -> Card(colors = CardDefaults.cardColors(containerColor = Surface1)) {
+            c is FloorsApi.FileContent.Binary -> Card(colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface)) {
                 Column(Modifier.padding(12.dp)) {
                     Text(S.binary, fontWeight = FontWeight.SemiBold)
                     Text("${c.size} bytes · ${c.mime}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1460,7 +1463,7 @@ fun ChangesScreen(
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { BackLabel("Back") }
             Column(Modifier.weight(1f)) {
                 Text(S.changes, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Text(changes?.branch ?: "…", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1593,9 +1596,9 @@ private fun ChangeSection(
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     color = when (c.status) {
-                        "M", "?" -> Amber
-                        "A", "R" -> Green
-                        "D", "!" -> Red
+                        "M", "?" -> LocalMaestriColors.current.warning
+                        "A", "R" -> MaterialTheme.colorScheme.primary
+                        "D", "!" -> MaterialTheme.colorScheme.error
                         else -> Color.Gray
                     },
                 )
@@ -1638,7 +1641,7 @@ fun DiffScreen(api: FloorsApi, wsId: String, nodeId: String, path: String, scope
     }
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { BackLabel("Back") }
             Column(Modifier.weight(1f)) {
                 Text(path, fontSize = 13.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(scope, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1658,7 +1661,7 @@ fun DiffScreen(api: FloorsApi, wsId: String, nodeId: String, path: String, scope
 
 @Composable
 private fun DiffPatch(patch: String) {
-    Surface(color = Color(0xFF0B0C0E), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Surface(color = Color(0xFF0B0C0E), shape = controlShape(), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(8.dp).verticalScroll(rememberScrollState())) {
             patch.lineSequence().forEach { line ->
                 val (fg, bg) = when {

@@ -38,17 +38,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.Amber
 import app.maestri.ui.NotesStrings as S
-import app.maestri.ui.Surface0
-import app.maestri.ui.Surface1
-import app.maestri.ui.Surface2
 import app.maestri.wire.CanvasPoint
 import app.maestri.wire.FicharioState
 import app.maestri.wire.NotesApi
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.pillShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import app.maestri.ui.Style.IconOnly
 
 /**
  * Fichário components — the notes lane's share of canvas cards (P1b).
@@ -94,7 +95,7 @@ fun FicharioTabRailInline(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Surface0.copy(alpha = 0.55f), RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
+            .background(LocalMaestriColors.current.canvasChrome.copy(alpha = 0.55f), RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
             .padding(4.dp),
     ) {
         Row(verticalAlignment = Alignment.Bottom) {
@@ -167,10 +168,10 @@ private fun RailTab(
         Box(
             Modifier
                 .background(
-                    if (isFront) accent.copy(alpha = 0.28f) else Surface1,
+                    if (isFront) accent.copy(alpha = 0.28f) else LocalMaestriColors.current.canvasSurface,
                     shape,
                 )
-                .border(1.dp, if (isFront) accent.copy(alpha = 0.7f) else Surface2, shape)
+                .border(1.dp, if (isFront) accent.copy(alpha = 0.7f) else LocalMaestriColors.current.canvasChromeElevated, shape)
                 .clickable { onTabTap() }
                 .pointerInput(overflow) {
                     if (overflow) return@pointerInput
@@ -190,13 +191,17 @@ private fun RailTab(
                 .padding(vertical = 5.dp, horizontal = 6.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                tab.title.ifBlank { if (overflow) OVERFLOW_GLYPH else "Page" },
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = if (isFront) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (overflow && tab.title == OVERFLOW_GLYPH) {
+                IconOnly(Icons.Filled.MoreVert, size = 12.dp)
+            } else {
+                Text(
+                    tab.title.ifBlank { "Page" },
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (isFront) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -221,7 +226,7 @@ fun FicharioPagesSheet(
     var query by remember { mutableStateOf("") }
     var renameTarget by remember { mutableStateOf<FicharioState.FicharioTab?>(null) }
     val visible = stack.tabs.filter { it.title.contains(query, ignoreCase = true) }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Surface1) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = LocalMaestriColors.current.canvasSurface) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -265,10 +270,10 @@ fun FicharioPagesSheet(
                             if (tab.nodeId == stack.frontNoteId) {
                                 Box(
                                     Modifier
-                                        .background(Amber.copy(alpha = 0.2f), RoundedCornerShape(50))
+                                        .background(LocalMaestriColors.current.warning.copy(alpha = 0.2f), pillShape())
                                         .padding(horizontal = 8.dp, vertical = 2.dp),
                                 ) {
-                                    Text(S.FRONT_PAGE, fontSize = 10.sp, color = Amber)
+                                    Text(S.FRONT_PAGE, fontSize = 10.sp, color = LocalMaestriColors.current.warning)
                                 }
                             }
                             TextButton(onClick = { renameTarget = tab }) { Text(S.RENAME_PAGE, fontSize = 12.sp) }
@@ -293,7 +298,7 @@ fun FicharioPagesSheet(
                 }) { Text("OK") }
             },
             dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("Cancel") } },
-            containerColor = Surface1,
+            containerColor = LocalMaestriColors.current.canvasSurface,
         )
     }
 }
