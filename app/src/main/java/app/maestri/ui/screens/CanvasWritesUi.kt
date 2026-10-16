@@ -73,6 +73,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.graphics.vector.ImageVector
 import app.maestri.ui.Style.IconOnly
+import androidx.compose.material.icons.outlined.Draw
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Backspace
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.DeleteOutline
 
 // ====================================================================================== modes
 
@@ -913,9 +919,9 @@ fun CanvasToolbar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Chip("+ Add", mode !is CanvasMode.Placing, onAdd)
-        Chip("✎ Draw", true, onDraw)
-        Chip("⌘ Tie", canTie, onTie)
-        Chip("⌫ Erase", true, onErase)
+        Chip(Icons.Outlined.Draw, "Draw", true, onDraw)
+        Chip(Icons.Outlined.Link, "Tie", canTie, onTie)
+        Chip(Icons.Outlined.Backspace, "Erase", true, onErase)
         if (mode !is CanvasMode.Idle) {
             Chip(
                 Icons.Filled.Close,
@@ -931,10 +937,10 @@ fun CanvasToolbar(
         }
         if (selectionCount > 0) {
             Spacer(Modifier.width(8.dp))
-            Chip("⊞ " + CanvasStrings.group, true, onGroup)
+            Chip(Icons.Outlined.GridView, CanvasStrings.group, true, onGroup)
             Chip(CanvasStrings.ungroup, true, onUngroup)
-            Chip("◐ " + CanvasStrings.colors.first(), true, onColor)
-            Chip("✕ " + CanvasStrings.deleteSelectedNodes.trimEnd('?'), true, onDeleteSelected)
+            Chip(Icons.Outlined.Palette, CanvasStrings.colors.first(), true, onColor)
+            Chip(Icons.Outlined.DeleteOutline, CanvasStrings.deleteSelectedNodes.trimEnd('?'), true, onDeleteSelected)
         }
     }
 }
