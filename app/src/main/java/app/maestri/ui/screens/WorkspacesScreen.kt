@@ -34,9 +34,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.Amber
-import app.maestri.ui.Green
-import app.maestri.ui.Red
 import app.maestri.ui.iconGlyph
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -48,6 +45,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import app.maestri.wire.WorkspaceMeta
 import app.maestri.wire.session.WireSession
+import app.maestri.ui.Style.LocalMaestriColors
 
 /**
  * Workspace list: `GET /api/workspaces` polled every 15 s (the docs' attention-watch
@@ -134,7 +132,7 @@ fun WorkspacesScreen(
                     }
                 }
                 err?.let {
-                    Text(it, color = Red, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
                 }
 
                 LazyColumn(
@@ -174,12 +172,12 @@ fun WorkspacesScreen(
                                     if (ws.attentionCount > 0) {
                                         Box(
                                             modifier = Modifier
-                                                .background(Red.copy(alpha = 0.18f), CircleShape)
+                                                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.18f), CircleShape)
                                                 .padding(6.dp),
                                         ) {
                                             Text(
                                                 "${ws.attentionCount}",
-                                                color = Red,
+                                                color = MaterialTheme.colorScheme.error,
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 modifier = Modifier.padding(horizontal = 6.dp),
@@ -191,7 +189,7 @@ fun WorkspacesScreen(
                                         Box(
                                             Modifier
                                                 .size(10.dp)
-                                                .background(Green, CircleShape),
+                                                .background(MaterialTheme.colorScheme.primary, CircleShape),
                                         )
                                     }
                                 }

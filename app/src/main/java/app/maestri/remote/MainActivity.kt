@@ -36,6 +36,7 @@ import app.maestri.ui.ChatNav
 import app.maestri.ui.screens.WorkspacesScreen
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.flow.collect
+import app.maestri.ui.Style.LocalMaestriColors
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -175,7 +176,7 @@ fun Root(session: WireSession) {
                         ExtendedFloatingActionButton(
                             onClick = { nav.navigate(FloorsNav.link(wsId, wsName)) },
                             modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd).padding(16.dp),
-                            containerColor = app.maestri.ui.Surface1,
+                            containerColor = LocalMaestriColors.current.canvasSurface,
                         ) { Text("⇆ Floors") }
                     }
                 }

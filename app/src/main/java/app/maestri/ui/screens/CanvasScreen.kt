@@ -59,11 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import app.maestri.ui.Amber
 import app.maestri.ui.CanvasStrings
-import app.maestri.ui.Green
-import app.maestri.ui.Surface1
-import app.maestri.ui.Surface2
 import app.maestri.ui.iconGlyph
 import app.maestri.wire.CanvasCableTie
 import app.maestri.wire.CanvasConnection
@@ -81,6 +77,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.pillShape
+import app.maestri.ui.Style.cardShape
+import app.maestri.ui.Style.controlShape
+import app.maestri.ui.Style.BackLabel
 
 /**
  * Canvas v1 — read-only spatial mirror of the floor's canvas that rides inside every
@@ -389,7 +390,7 @@ fun CanvasScreen(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onBack) { Text("‹ Feed") }
+            TextButton(onClick = onBack) { BackLabel("Feed") }
             Column(Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(
                     "Canvas · $wsName",
@@ -464,10 +465,10 @@ fun CanvasScreen(
                 Row(
                     Modifier
                         .padding(horizontal = 12.dp, vertical = 4.dp)
-                        .background(Amber.copy(alpha = 0.18f), RoundedCornerShape(10.dp))
+                        .background(LocalMaestriColors.current.warning.copy(alpha = 0.18f), controlShape())
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
-                    Text(CanvasStrings.drawWithOneFingerTwoFingersPanAndZoom, fontSize = 11.sp, color = Amber)
+                    Text(CanvasStrings.drawWithOneFingerTwoFingersPanAndZoom, fontSize = 11.sp, color = LocalMaestriColors.current.warning)
                 }
             }
             CanvasModeBanner(mode = ctl.mode, onCancel = { ctl.enterMode(CanvasMode.Idle) })
@@ -482,7 +483,7 @@ fun CanvasScreen(
             Modifier
                 .align(Alignment.BottomStart)
                 .padding(16.dp)
-                .background(Surface1.copy(alpha = 0.85f), RoundedCornerShape(50))
+                .background(LocalMaestriColors.current.canvasSurface.copy(alpha = 0.85f), pillShape())
                 .padding(horizontal = 10.dp, vertical = 4.dp)
         ) {
             Text(
@@ -741,6 +742,7 @@ private fun CursorsLayer(
         else ((PresencePeer.STALE_MS - age).toFloat() / CURSOR_FADE_MS)
         Triple(peer, pos, alpha.coerceIn(0f, 1f))
     }
+    val cursorAccent = LocalMaestriColors.current.warning
     cursors.forEach { (peer, pos, alpha) ->
         Row(
             Modifier
@@ -756,11 +758,11 @@ private fun CursorsLayer(
                     lineTo(size.width * 0.28f, size.height)
                     close()
                 }
-                drawPath(arrow, color = presenceColor(peer))
+                drawPath(arrow, color = presenceColor(peer, cursorAccent))
             }
             Box(
                 Modifier
-                    .background(Surface2.copy(alpha = 0.9f), RoundedCornerShape(50))
+                    .background(LocalMaestriColors.current.canvasChromeElevated.copy(alpha = 0.9f), pillShape())
                     .padding(horizontal = 6.dp, vertical = 1.dp)
             ) {
                 Text(peer.name, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
@@ -776,23 +778,23 @@ private fun presencePosition(peer: PresencePeer, nodeIndex: Map<String, CanvasNo
     return Offset((n.frame.x + n.frame.width / 2).toFloat(), (n.frame.y + n.frame.height / 2).toFloat())
 }
 
-private fun presenceColor(peer: PresencePeer): Color {
-    val hex = peer.color ?: return Amber
-    return runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Amber)
+private fun presenceColor(peer: PresencePeer, fallback: Color): Color {
+    val hex = peer.color ?: return fallback
+    return runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(fallback)
 }
 
 @Composable
 private fun FollowChip(following: Boolean, enabled: Boolean, onToggle: (Boolean) -> Unit) {
-    val bg = if (following) Green.copy(alpha = 0.22f) else Surface2
+    val bg = if (following) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else LocalMaestriColors.current.canvasChromeElevated
     val fg = when {
         !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-        following -> Green
+        following -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Box(
         Modifier
             .padding(end = 6.dp)
-            .background(bg, RoundedCornerShape(50))
+            .background(bg, pillShape())
             .clickable(enabled = enabled) { onToggle(!following) }
             .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
@@ -828,13 +830,14 @@ private fun ConnectionsLayer(
     canvas: app.maestri.wire.CanvasSnapshot?,
     nodesById: Map<String, CanvasNode>,
 ) {
+    val ropeAccent = MaterialTheme.colorScheme.primary
     Canvas(Modifier.fillMaxSize()) {
         if (canvas == null) return@Canvas
         val s = density // canvas point → px in this layer's local space
         canvas.connections.forEach { c ->
             val pts = c.points.ifEmpty { fallbackEndpoints(c, nodesById) }
             if (pts.size < 2) return@forEach
-            val accent = endpointColor(c, nodesById)
+            val accent = endpointColor(c, nodesById, ropeAccent)
             val path = Path()
             pts.forEachIndexed { i, p ->
                 val x = (p.x * s).toFloat()
@@ -876,9 +879,9 @@ private fun fallbackEndpoints(
     )
 }
 
-private fun endpointColor(c: CanvasConnection, nodesById: Map<String, CanvasNode>): Color {
+private fun endpointColor(c: CanvasConnection, nodesById: Map<String, CanvasNode>, fallback: Color): Color {
     val raw = nodesById[c.fromNodeId]?.color ?: nodesById[c.toNodeId]?.color
-    return parseColor(raw, Green)
+    return parseColor(raw, fallback)
 }
 
 /** One canvas node: terminal payload → rich card; anything else → simple titled box. */
@@ -905,11 +908,11 @@ private fun CanvasTerminalNode(
     pending: Boolean,
     selected: Boolean,
 ) {
-    val accent = parseColor(node.color, parseColor(t.color, Green))
+    val accent = parseColor(node.color, parseColor(t.color, MaterialTheme.colorScheme.primary))
     val dotColor = when {
-        pending || t.needsAttention -> app.maestri.ui.Red
-        t.isActive == true -> Green
-        t.isLive -> Amber
+        pending || t.needsAttention -> MaterialTheme.colorScheme.error
+        t.isActive == true -> MaterialTheme.colorScheme.primary
+        t.isLive -> LocalMaestriColors.current.warning
         else -> Color.Gray
     }
     Box(
@@ -923,13 +926,13 @@ private fun CanvasTerminalNode(
         SelectionRing(selected, Modifier.fillMaxSize())
         Card(
             modifier = Modifier.fillMaxSize(),
-            shape = RoundedCornerShape(16.dp),
+            shape = cardShape(),
             colors = CardDefaults.cardColors(
-                containerColor = if (pending || t.needsAttention) Surface2 else Surface1
+                containerColor = if (pending || t.needsAttention) LocalMaestriColors.current.canvasChromeElevated else LocalMaestriColors.current.canvasSurface
             ),
             border = BorderStroke(
                 if (selected) 2.dp else 1.5.dp,
-                if (selected) Green else accent.copy(alpha = 0.55f),
+                if (selected) MaterialTheme.colorScheme.primary else accent.copy(alpha = 0.55f),
             ),
         ) {
             Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -944,7 +947,7 @@ private fun CanvasTerminalNode(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            if (t.isManager) Text("  (maestro)", fontSize = 11.sp, color = Amber)
+                            if (t.isManager) Text("  (maestro)", fontSize = 11.sp, color = LocalMaestriColors.current.warning)
                         }
                         Text(
                             buildString {
@@ -973,7 +976,7 @@ private fun CanvasTerminalNode(
                     Spacer(Modifier.height(8.dp))
                     Box(
                         Modifier
-                            .background(Surface2, RoundedCornerShape(50))
+                            .background(LocalMaestriColors.current.canvasChromeElevated, pillShape())
                             .padding(horizontal = 10.dp, vertical = 3.dp)
                     ) {
                         Text(fn, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -985,7 +988,7 @@ private fun CanvasTerminalNode(
                     Column(
                         Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF0B0C0E), RoundedCornerShape(8.dp))
+                            .background(Color(0xFF0B0C0E), controlShape())
                             .padding(8.dp)
                     ) {
                         lines.forEach { line ->
@@ -1016,9 +1019,9 @@ private fun UnknownNodeBox(node: CanvasNode, selected: Boolean) {
         SelectionRing(selected, Modifier.fillMaxSize())
         Card(
             modifier = Modifier.fillMaxSize(),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = Surface1.copy(alpha = 0.92f)),
-            border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) Green else Surface2),
+            shape = cardShape(),
+            colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface.copy(alpha = 0.92f)),
+            border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else LocalMaestriColors.current.canvasChromeElevated),
         ) {
             Column(Modifier.fillMaxSize().padding(12.dp)) {
                 Text(

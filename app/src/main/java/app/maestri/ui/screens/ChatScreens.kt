@@ -72,13 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.Amber
 import app.maestri.ui.ChatStrings as S
-import app.maestri.ui.Green
-import app.maestri.ui.Red
-import app.maestri.ui.Surface0
-import app.maestri.ui.Surface1
-import app.maestri.ui.Surface2
 import app.maestri.wire.ApiException
 import app.maestri.wire.ChatApi
 import app.maestri.wire.ChatDraftStore
@@ -106,6 +100,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.pillShape
+import app.maestri.ui.Style.cardShape
+import app.maestri.ui.Style.controlShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.MoreVert
+import app.maestri.ui.Style.BackLabel
+import app.maestri.ui.Style.IconOnly
 
 /**
  * ChatThreadScreen — the chat face of a terminal, iOS parity per behavior spec §3.
@@ -200,7 +205,7 @@ fun ChatThreadScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding()
-            .background(Surface0)
+            .background(LocalMaestriColors.current.canvasChrome)
     ) {
         ChatTopBar(
             terminalName = terminalName,
@@ -218,7 +223,7 @@ fun ChatThreadScreen(
         notice?.let { n ->
             Text(
                 n,
-                color = Amber,
+                color = LocalMaestriColors.current.warning,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
                 maxLines = 2,
@@ -244,7 +249,7 @@ fun ChatThreadScreen(
                         fontSize = 13.sp,
                     )
                     if (socketState == SocketState.CLOSED) {
-                        Text("chat stream offline — retrying…", color = Amber, fontSize = 12.sp)
+                        Text("chat stream offline — retrying…", color = LocalMaestriColors.current.warning, fontSize = 12.sp)
                     }
                 }
             } else {
@@ -261,7 +266,7 @@ fun ChatThreadScreen(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 8.dp)
-                            .background(Surface2, RoundedCornerShape(50)),
+                            .background(LocalMaestriColors.current.canvasChromeElevated, pillShape()),
                     ) { Text(S.scrollToBottom, fontSize = 12.sp) }
                 }
                 if (shellStrip) {
@@ -314,7 +319,7 @@ fun ChatThreadScreen(
                 TextButton(onClick = {
                     showClearHistoryDialog = false
                     scope.launch { holder.clearHistory() }
-                }) { Text(S.clearChatHistory, color = Red) }
+                }) { Text(S.clearChatHistory, color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { showClearHistoryDialog = false }) { Text("Cancel") }
@@ -1244,7 +1249,7 @@ private fun ChatTopBar(
     var menuOpen by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { BackLabel("Back") }
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -1252,8 +1257,8 @@ private fun ChatTopBar(
                             .size(8.dp)
                             .background(
                                 when (snapshot?.status) {
-                                    "working" -> Amber
-                                    "needsAttention" -> Red
+                                    "working" -> LocalMaestriColors.current.warning
+                                    "needsAttention" -> MaterialTheme.colorScheme.error
                                     else -> Color(0xFF3A3D45)
                                 },
                                 CircleShape,
@@ -1302,7 +1307,7 @@ private fun ChatTopBar(
                 )
             }
             if (snapshot?.canClear == true) {
-                TextButton(onClick = { menuOpen = !menuOpen }) { Text("⋯") }
+                TextButton(onClick = { menuOpen = !menuOpen }) { IconOnly(Icons.Filled.MoreVert) }
             }
         }
         if (menuOpen) {
@@ -1321,7 +1326,7 @@ private fun SlotChip(threads: ChatThreads, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .background(Surface1, RoundedCornerShape(50))
+            .background(LocalMaestriColors.current.canvasSurface, pillShape())
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 2.dp),
     ) {
@@ -1426,8 +1431,8 @@ private fun EntryList(
 @Composable
 private fun BoundaryCard() {
     Surface(
-        color = Surface1,
-        shape = RoundedCornerShape(10.dp),
+        color = LocalMaestriColors.current.canvasSurface,
+        shape = controlShape(),
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
     ) {
         Text(
@@ -1494,8 +1499,8 @@ private fun EntryBubble(
             else -> {
                 // message + final: canonical entry; user rides their composer segments
                 Surface(
-                    color = if (isUser) Color(0xFF2A4633) else Surface2,
-                    shape = RoundedCornerShape(14.dp),
+                    color = if (isUser) Color(0xFF2A4633) else LocalMaestriColors.current.canvasChromeElevated,
+                    shape = cardShape(),
                     modifier = Modifier
                         .widthIn(max = 340.dp)
                         .combinedClickable(onClick = {}, onLongClick = onLongPress),
@@ -1573,11 +1578,11 @@ private fun AttachmentPill(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .background(Surface1, RoundedCornerShape(8.dp))
+                .background(LocalMaestriColors.current.canvasSurface, controlShape())
                 .clickable { onTap() }
                 .padding(horizontal = 8.dp, vertical = 6.dp),
         ) {
-            Text("⎘", fontSize = 13.sp)
+            IconOnly(Icons.Filled.ContentCopy, size = 13.dp)
             Spacer(Modifier.width(6.dp))
             Text(
                 S.attachmentNamed(seg.filename),
@@ -1594,7 +1599,7 @@ private fun LoadingPill(label: String, onTap: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .background(Surface1, RoundedCornerShape(8.dp))
+            .background(LocalMaestriColors.current.canvasSurface, controlShape())
             .clickable { onTap() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
@@ -1661,7 +1666,7 @@ private fun MarkdownText(text: String) {
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
-                        .background(Surface1, RoundedCornerShape(6.dp))
+                        .background(LocalMaestriColors.current.canvasSurface, controlShape())
                         .padding(6.dp)
                         .fillMaxWidth(),
                 )
@@ -1711,8 +1716,8 @@ private fun CodeBlockCard(
     clipboard: androidx.compose.ui.platform.ClipboardManager,
 ) {
     Surface(
-        color = Surface1,
-        shape = RoundedCornerShape(10.dp),
+        color = LocalMaestriColors.current.canvasSurface,
+        shape = controlShape(),
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
     ) {
         Column(Modifier.padding(8.dp)) {
@@ -1795,7 +1800,7 @@ private fun ComposerPill(
         mentionPanel?.let { panel -> MentionDropdown(holder = holder, panel = panel) }
         flight?.let { f -> FlightBanner(flight = f, onKeepDraft = { holder.dismissFlight() }) }
 
-        Surface(color = Surface2, shape = RoundedCornerShape(18.dp), modifier = Modifier.padding(8.dp)) {
+        Surface(color = LocalMaestriColors.current.canvasChromeElevated, shape = cardShape(), modifier = Modifier.padding(8.dp)) {
             Column(Modifier.padding(8.dp)) {
                 if (staged.isNotEmpty()) {
                     StagedSlots(staged = staged, onRemove = onRemoveStaged)
@@ -1809,7 +1814,7 @@ private fun ComposerPill(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
                                 .weight(1f)
-                                .background(Surface1, RoundedCornerShape(6.dp))
+                                .background(LocalMaestriColors.current.canvasSurface, controlShape())
                                 .padding(6.dp),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
@@ -1817,7 +1822,7 @@ private fun ComposerPill(
                         TextButton(
                             onClick = onRemoveQuote,
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp),
-                        ) { Text("×") }
+                        ) { IconOnly(Icons.Filled.Close, size = 16.dp) }
                     }
                     Spacer(Modifier.height(6.dp))
                 }
@@ -1825,7 +1830,7 @@ private fun ComposerPill(
                     TextButton(
                         onClick = onOpenAttachMenu,
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp),
-                    ) { Text("＋", fontSize = 16.sp) }
+                    ) { IconOnly(Icons.Filled.Add, size = 16.dp) }
                     OutlinedTextField(
                         value = text,
                         onValueChange = onTextChange,
@@ -1862,8 +1867,8 @@ private fun ComposerPill(
 
         if (showAttachMenu) {
             Surface(
-                color = Surface2,
-                shape = RoundedCornerShape(12.dp),
+                color = LocalMaestriColors.current.canvasChromeElevated,
+                shape = cardShape(),
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
             ) {
                 Column(Modifier.padding(4.dp)) {
@@ -1906,7 +1911,7 @@ private fun StagedSlots(staged: List<StagedItem>, onRemove: (StagedItem) -> Unit
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .widthIn(min = 88.dp)
-                    .background(Surface1, RoundedCornerShape(10.dp))
+                    .background(LocalMaestriColors.current.canvasSurface, controlShape())
                     .padding(6.dp),
             ) {
                 Text(
@@ -1923,7 +1928,7 @@ private fun StagedSlots(staged: List<StagedItem>, onRemove: (StagedItem) -> Unit
                 TextButton(
                     onClick = { onRemove(item) },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(2.dp),
-                ) { Text("×", color = Red, fontSize = 12.sp) }
+                ) { IconOnly(Icons.Filled.Close, size = 12.dp, tint = MaterialTheme.colorScheme.error) }
             }
         }
     }
@@ -1936,9 +1941,9 @@ private fun FlightBanner(flight: SendFlight, onKeepDraft: () -> Unit) {
         color = when (flight.stage) {
             SendFlight.Stage.UNKNOWN -> Color(0xFF4A3A20)
             SendFlight.Stage.FAILED -> Color(0xFF4A2020)
-            else -> Surface2
+            else -> LocalMaestriColors.current.canvasChromeElevated
         },
-        shape = RoundedCornerShape(10.dp),
+        shape = controlShape(),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp),
@@ -1950,7 +1955,7 @@ private fun FlightBanner(flight: SendFlight, onKeepDraft: () -> Unit) {
                     flight.stage == SendFlight.Stage.CORRELATING
                 Text(
                     if (busy) "↑ " else "! ",
-                    color = if (busy) Green else Red,
+                    color = if (busy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                     fontSize = 12.sp,
                 )
                 Text(flight.title(), fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -1977,7 +1982,7 @@ private fun MentionDropdown(holder: ChatFaceState, panel: ChatFaceState.MentionP
             .padding(horizontal = 8.dp)
             .fillMaxWidth()
             .heightIn(max = 240.dp)
-            .background(Surface2, RoundedCornerShape(12.dp))
+            .background(LocalMaestriColors.current.canvasChromeElevated, cardShape())
             .padding(6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1999,7 +2004,7 @@ private fun MentionDropdown(holder: ChatFaceState, panel: ChatFaceState.MentionP
                 )
             }
         }
-        panel.errorWording?.let { Text(it, fontSize = 11.sp, color = Amber) }
+        panel.errorWording?.let { Text(it, fontSize = 11.sp, color = LocalMaestriColors.current.warning) }
         LazyColumn(Modifier.weight(1f, fill = false)) {
             if (panel.mode == ChatFaceState.MentionPanelState.Mode.MENTIONS) {
                 items(panel.mentions) { m ->
@@ -2119,7 +2124,7 @@ private fun ThreadSwitcherSheet(
                     .verticalScroll(rememberScrollState()),
             ) {
                 if (!threads.canSelect) {
-                    Text("Thread switching is locked right now.", fontSize = 11.sp, color = Amber)
+                    Text("Thread switching is locked right now.", fontSize = 11.sp, color = LocalMaestriColors.current.warning)
                     Spacer(Modifier.height(6.dp))
                 }
                 (0..6).forEach { slot ->
@@ -2127,8 +2132,8 @@ private fun ThreadSwitcherSheet(
                     val preview = previews.firstOrNull { it.id == slot }
                     val isActive = slot == threads.activeSlot
                     Surface(
-                        color = if (isActive) Color(0xFF24324A) else Surface1,
-                        shape = RoundedCornerShape(10.dp),
+                        color = if (isActive) Color(0xFF24324A) else LocalMaestriColors.current.canvasSurface,
+                        shape = controlShape(),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 2.dp),
@@ -2165,7 +2170,7 @@ private fun ThreadSwitcherSheet(
                                     onClick = { holder.clearSlot(slot) },
                                     enabled = threads.canSelect,
                                     contentPadding = androidx.compose.foundation.layout.PaddingValues(2.dp),
-                                ) { Text("Clear", fontSize = 11.sp, color = Red) }
+                                ) { Text("Clear", fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
                             }
                             TextButton(
                                 onClick = { holder.selectThread(slot); onDismiss() },
@@ -2205,7 +2210,7 @@ private fun FaceGate(onEnterChat: () -> Unit) {
 private fun ShellStrip(preview: List<String>) {
     Surface(
         color = Color(0xFF0C0D10),
-        shape = RoundedCornerShape(8.dp),
+        shape = controlShape(),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
@@ -2238,7 +2243,7 @@ private fun EntryMenuDialog(
         title = { Text("Entry", fontSize = 15.sp) },
         text = { Text(target.copyText().take(160), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
         confirmButton = { TextButton(onClick = onQuote) { Text(S.quote, fontSize = 12.sp) } },
-        dismissButton = { TextButton(onClick = onDelete) { Text("Delete", fontSize = 12.sp, color = Red) } },
+        dismissButton = { TextButton(onClick = onDelete) { Text("Delete", fontSize = 12.sp, color = MaterialTheme.colorScheme.error) } },
     )
 }
 
@@ -2291,7 +2296,7 @@ private fun AttachmentPreviewDialog(
                         holder.deleteAttachmentEverywhere(target.attachmentId)
                     },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(2.dp),
-                ) { Text("Delete", fontSize = 12.sp, color = Red) }
+                ) { Text("Delete", fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },

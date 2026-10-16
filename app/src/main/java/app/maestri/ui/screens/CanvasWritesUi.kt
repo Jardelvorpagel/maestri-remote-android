@@ -51,12 +51,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.Amber
 import app.maestri.ui.CanvasStrings
-import app.maestri.ui.Green
-import app.maestri.ui.Red
-import app.maestri.ui.Surface1
-import app.maestri.ui.Surface2
 import app.maestri.wire.CanvasCableTie
 import app.maestri.wire.CanvasConnection
 import app.maestri.wire.CanvasNode
@@ -70,6 +65,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import kotlin.math.abs
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.pillShape
+import app.maestri.ui.Style.cardShape
+import app.maestri.ui.Style.controlShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.graphics.vector.ImageVector
+import app.maestri.ui.Style.IconOnly
 
 // ====================================================================================== modes
 
@@ -915,11 +918,12 @@ fun CanvasToolbar(
         Chip("⌫ Erase", true, onErase)
         if (mode !is CanvasMode.Idle) {
             Chip(
+                Icons.Filled.Close,
                 when (mode) {
-                    is CanvasMode.Placing -> "× Cancel"
-                    is CanvasMode.Connecting -> "× " + CanvasStrings.cancelsConnecting
-                    is CanvasMode.TieLinking -> "× Cancel tie"
-                    else -> "× Cancel"
+                    is CanvasMode.Placing -> "Cancel"
+                    is CanvasMode.Connecting -> CanvasStrings.cancelsConnecting
+                    is CanvasMode.TieLinking -> "Cancel tie"
+                    else -> "Cancel"
                 },
                 true,
                 onCancelMode,
@@ -937,15 +941,26 @@ fun CanvasToolbar(
 
 @Composable
 private fun Chip(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Chip(null, label, enabled, onClick)
+}
+
+@Composable
+private fun Chip(icon: ImageVector?, label: String, enabled: Boolean, onClick: () -> Unit) {
     val fg = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
         Modifier
             .padding(end = 6.dp)
-            .background(Surface2.copy(alpha = if (enabled) 0.9f else 0.4f), RoundedCornerShape(50))
+            .background(LocalMaestriColors.current.canvasChromeElevated.copy(alpha = if (enabled) 0.9f else 0.4f), pillShape())
             .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
-        Text(label, fontSize = 11.sp, color = fg, maxLines = 1)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) {
+                IconOnly(icon, size = 13.dp, tint = fg)
+                Spacer(Modifier.width(4.dp))
+            }
+            Text(label, fontSize = 11.sp, color = fg, maxLines = 1)
+        }
     }
 }
 
@@ -965,11 +980,11 @@ fun CanvasModeBanner(mode: CanvasMode, onCancel: () -> Unit) {
     Row(
         Modifier
             .padding(horizontal = 12.dp, vertical = 6.dp)
-            .background(Amber.copy(alpha = 0.18f), RoundedCornerShape(10.dp))
+            .background(LocalMaestriColors.current.warning.copy(alpha = 0.18f), controlShape())
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, fontSize = 12.sp, color = Amber, maxLines = 2, modifier = Modifier.weight(1f))
+        Text(text, fontSize = 12.sp, color = LocalMaestriColors.current.warning, maxLines = 2, modifier = Modifier.weight(1f))
         TextButton(onClick = onCancel) { Text("Cancel", fontSize = 12.sp) }
     }
 }
@@ -986,11 +1001,11 @@ fun CanvasBanner(message: String?, isError: Boolean, onDismiss: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
-            .background((if (isError) Red else Green).copy(alpha = 0.18f), RoundedCornerShape(10.dp))
+            .background((if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary).copy(alpha = 0.18f), controlShape())
             .clickable { onDismiss() }
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        Text(msg, fontSize = 12.sp, color = if (isError) Red else Green, maxLines = 3)
+        Text(msg, fontSize = 12.sp, color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, maxLines = 3)
     }
 }
 
@@ -1044,8 +1059,8 @@ private fun MenuCard(onDismiss: () -> Unit, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize().clickable { onDismiss() }, contentAlignment = Alignment.Center) {
         Card(
             modifier = Modifier.width(260.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = Surface1),
+            shape = cardShape(),
+            colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface),
         ) {
             Column(Modifier.padding(vertical = 8.dp)) { content() }
         }
@@ -1078,8 +1093,8 @@ fun CanvasInputDialog(
     Box(Modifier.fillMaxSize().clickable { onDismiss() }, contentAlignment = Alignment.Center) {
         Card(
             modifier = Modifier.width(320.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = Surface1),
+            shape = cardShape(),
+            colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface),
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text(title, fontSize = 15.sp, maxLines = 2)
@@ -1091,7 +1106,7 @@ fun CanvasInputDialog(
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .background(Surface2, RoundedCornerShape(8.dp))
+                        .background(LocalMaestriColors.current.canvasChromeElevated, controlShape())
                         .padding(10.dp)
                 ) {
                     val focus = remember { FocusRequester() }
@@ -1133,8 +1148,8 @@ fun TextBlockEditor(
     Box(Modifier.fillMaxSize().clickable { onDismiss() }, contentAlignment = Alignment.Center) {
         Card(
             modifier = Modifier.width(460.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = Surface1),
+            shape = cardShape(),
+            colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface),
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text("Text", fontSize = 15.sp)
@@ -1145,7 +1160,7 @@ fun TextBlockEditor(
                     Modifier
                         .fillMaxWidth()
                         .height(96.dp)
-                        .background(Surface2, RoundedCornerShape(8.dp))
+                        .background(LocalMaestriColors.current.canvasChromeElevated, controlShape())
                         .padding(10.dp)
                 ) {
                     BasicTextField(
@@ -1183,11 +1198,11 @@ fun TextBlockEditor(
                         Box(
                             Modifier
                                 .padding(end = 6.dp)
-                                .background(namedColor(name), RoundedCornerShape(50))
+                                .background(namedColor(name), pillShape())
                                 .border(
                                     if (color == name) 2.dp else 1.dp,
-                                    if (color == name) Green else Surface2,
-                                    RoundedCornerShape(50),
+                                    if (color == name) MaterialTheme.colorScheme.primary else LocalMaestriColors.current.canvasChromeElevated,
+                                    pillShape(),
                                 )
                                 .clickable { onColor(name) }
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1233,8 +1248,8 @@ fun CanvasConfirmDialog(
     Box(Modifier.fillMaxSize().clickable { onDismiss() }, contentAlignment = Alignment.Center) {
         Card(
             modifier = Modifier.width(340.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = Surface1),
+            shape = cardShape(),
+            colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface),
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text(title, fontSize = 15.sp, maxLines = 2)
@@ -1243,7 +1258,7 @@ fun CanvasConfirmDialog(
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
-                    TextButton(onClick = onConfirm) { Text(confirmLabel, color = Red) }
+                    TextButton(onClick = onConfirm) { Text(confirmLabel, color = MaterialTheme.colorScheme.error) }
                 }
             }
         }
@@ -1257,11 +1272,12 @@ fun TieLayer(
     tiePositions: SnapshotStateMap<String, Offset>,
 ) {
     if (ties.isEmpty()) return
+    val tieAccent = LocalMaestriColors.current.warning
     Canvas(Modifier.fillMaxSize()) {
         val s = density
         ties.forEach { t ->
             val p = tiePositions[t.id] ?: Offset(t.position.x.toFloat(), t.position.y.toFloat())
-            drawCircle(Amber.copy(alpha = 0.9f), radius = 7f * s, center = Offset(p.x * s, p.y * s))
+            drawCircle(tieAccent.copy(alpha = 0.9f), radius = 7f * s, center = Offset(p.x * s, p.y * s))
             drawCircle(Color(0xFF0B0C0E), radius = 3.5f * s, center = Offset(p.x * s, p.y * s))
         }
     }
@@ -1334,8 +1350,8 @@ fun ColorPalettePicker(
     Box(Modifier.fillMaxSize().clickable { onDismiss() }, contentAlignment = Alignment.Center) {
         Card(
             modifier = Modifier.width(340.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = Surface1),
+            shape = cardShape(),
+            colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface),
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text(title, fontSize = 15.sp)
@@ -1346,7 +1362,7 @@ fun ColorPalettePicker(
                             Box(
                                 Modifier
                                     .padding(end = 8.dp)
-                                    .background(namedColor(name), RoundedCornerShape(8.dp))
+                                    .background(namedColor(name), controlShape())
                                     .clickable { onPick(name) }
                                     .padding(horizontal = 10.dp, vertical = 8.dp)
                             ) {
@@ -1372,15 +1388,16 @@ private fun namedColor(name: String): Color =
 @Composable
 fun MarqueeRect(rect: Rect?) {
     val r = rect ?: return
+    val marqueeAccent = MaterialTheme.colorScheme.primary
     Canvas(Modifier.fillMaxSize()) {
         val s = density
         drawRect(
-            color = Green.copy(alpha = 0.12f),
+            color = marqueeAccent.copy(alpha = 0.12f),
             topLeft = Offset(r.left * s, r.top * s),
             size = androidx.compose.ui.geometry.Size(r.width * s, r.height * s),
         )
         drawRect(
-            color = Green.copy(alpha = 0.9f),
+            color = marqueeAccent.copy(alpha = 0.9f),
             topLeft = Offset(r.left * s, r.top * s),
             size = androidx.compose.ui.geometry.Size(r.width * s, r.height * s),
             style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f * s),
@@ -1394,8 +1411,8 @@ fun SelectionRing(selected: Boolean, modifier: Modifier = Modifier) {
     if (!selected) return
     Box(
         modifier
-            .border(2.dp, Green.copy(alpha = 0.9f), RoundedCornerShape(16.dp))
-            .background(Green.copy(alpha = 0.06f), RoundedCornerShape(16.dp))
+            .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.9f), cardShape())
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.06f), cardShape())
     )
 }
 

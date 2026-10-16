@@ -51,6 +51,13 @@ object TerminalThemes {
 
     val embedded: List<TerminalPalette> = listOf(tokyoNight, tokyoDaylight)
 
+    /**
+     * Preview foreground: the scheme's green when a built-in table exists, else Tokyo Night's.
+     * Keeps the terminal preview on a theme-family colour instead of a screen-local literal.
+     */
+    fun previewForeground(theme: String? = null): Color =
+        embeddedPalette(theme)?.ansi?.getOrNull(5) ?: tokyoNight.ansi[5]
+
     /** Recovered palette for a scheme name, or null for the host-delivered family. */
     fun embeddedPalette(name: String?): TerminalPalette? =
         embedded.firstOrNull { it.name.equals(name?.trim(), ignoreCase = true) }

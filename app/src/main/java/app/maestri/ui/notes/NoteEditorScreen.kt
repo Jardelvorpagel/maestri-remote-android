@@ -48,12 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.Amber
 import app.maestri.ui.NotesStrings as S
-import app.maestri.ui.Red
-import app.maestri.ui.Surface0
-import app.maestri.ui.Surface1
-import app.maestri.ui.Surface2
 import app.maestri.wire.NotesApi
 import app.maestri.wire.NoteContent
 import app.maestri.wire.NoteSaveResult
@@ -63,6 +58,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.controlShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
+import app.maestri.ui.Style.IconOnly
 
 @Composable
 fun NoteEditorScreen(
@@ -112,7 +113,7 @@ fun NoteEditorScreen(
         onDispose { model.saveOnExit() }
     }
 
-    Column(Modifier.fillMaxSize().background(Surface0)) {
+    Column(Modifier.fillMaxSize().background(LocalMaestriColors.current.canvasChrome)) {
         when (val s = state) {
             is EditorState.Loading -> {
                 EditorTopBar(model, s, onBack, toast)
@@ -489,7 +490,7 @@ private fun EditorTopBar(
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextButton(onClick = onBack) { Text("‹", fontSize = 22.sp, maxLines = 1) }
+        TextButton(onClick = onBack) { IconOnly(Icons.Filled.ArrowBack, size = 22.dp) }
         Column(Modifier.weight(1f)) {
             Text(
                 ready?.content?.displayName ?: "",
@@ -504,7 +505,7 @@ private fun EditorTopBar(
         }
         if (ready != null && !ready.readOnly) {
             Box {
-                TextButton(onClick = { menuOpen = true }) { Text("⋯", fontSize = 22.sp, maxLines = 1) }
+                TextButton(onClick = { menuOpen = true }) { IconOnly(Icons.Filled.MoreVert, size = 22.dp) }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(text = { Text(S.RENAME_NOTE) }, onClick = { menuOpen = false; showRename = true })
                     DropdownMenuItem(
@@ -636,7 +637,7 @@ private fun StatusFooter(
                 Text(
                     st.message,
                     fontSize = 12.sp,
-                    color = Red,
+                    color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.weight(1f),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -655,12 +656,12 @@ private fun EditorBanner(title: String, body: String) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)
-            .background(Amber.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
-            .border(1.dp, Amber.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+            .background(LocalMaestriColors.current.warning.copy(alpha = 0.12f), controlShape())
+            .border(1.dp, LocalMaestriColors.current.warning.copy(alpha = 0.5f), controlShape())
             .padding(12.dp),
     ) {
         Column {
-            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Amber)
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = LocalMaestriColors.current.warning)
             Spacer(Modifier.height(2.dp))
             Text(body, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
         }
@@ -679,7 +680,7 @@ private fun ConflictDialog(
         text = { Text(body) },
         confirmButton = { TextButton(onClick = onRetrySaving) { Text(S.RETRY_SAVING_NOTE) } },
         dismissButton = { TextButton(onClick = onUseComputerVersion) { Text(S.USE_THE_COMPUTERS_VERSION) } },
-        containerColor = Surface1,
+        containerColor = LocalMaestriColors.current.canvasSurface,
     )
 }
 
@@ -704,7 +705,7 @@ private fun RenameDialog(
         },
         confirmButton = { TextButton(onClick = { onConfirm(name) }) { Text("OK") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        containerColor = Surface1,
+        containerColor = LocalMaestriColors.current.canvasSurface,
     )
 }
 
@@ -719,7 +720,7 @@ private fun ColorSheet(
 ) {
     var showCustom by remember { mutableStateOf(false) }
     var customHex by remember { mutableStateOf("#") }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Surface1) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = LocalMaestriColors.current.canvasSurface) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -742,7 +743,7 @@ private fun ColorSheet(
                                     .background(swatchColor(name), CircleShape)
                                     .border(
                                         width = if (selected) 2.dp else 1.dp,
-                                        color = if (selected) MaterialTheme.colorScheme.onSurface else Surface2,
+                                        color = if (selected) MaterialTheme.colorScheme.onSurface else LocalMaestriColors.current.canvasChromeElevated,
                                         shape = CircleShape,
                                     )
                                     .clickable { onColor(name) },
@@ -781,7 +782,7 @@ private fun ColorSheet(
                 }) { Text("OK") }
             },
             dismissButton = { TextButton(onClick = { showCustom = false }) { Text("Cancel") } },
-            containerColor = Surface1,
+            containerColor = LocalMaestriColors.current.canvasSurface,
         )
     }
 }

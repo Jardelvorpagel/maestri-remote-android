@@ -31,12 +31,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.Amber
-import app.maestri.ui.Green
-import app.maestri.ui.Red
-import app.maestri.ui.Surface0
 import app.maestri.wire.Geometry
 import app.maestri.wire.SocketState
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.controlShape
 
 /**
  * Live terminal renderer on top of the tiny ANSI emulator ([app.maestri.wire.MiniTerm]).
@@ -117,7 +115,7 @@ fun LiveTerminalView(
             Modifier
                 .fillMaxWidth()
                 .height(300.dp)
-                .background(Color(0xFF07080A), RoundedCornerShape(8.dp))
+                .background(Color(0xFF07080A), controlShape())
                 .verticalScroll(screenScroll)
         ) {
             Text(
@@ -136,7 +134,7 @@ fun LiveTerminalView(
             state == SocketState.IDLE -> "stream off"
             else -> null
         }
-        warn?.let { Text(it, color = if (state == SocketState.CLOSED) Red else Amber, fontSize = 11.sp) }
+        warn?.let { Text(it, color = if (state == SocketState.CLOSED) MaterialTheme.colorScheme.error else LocalMaestriColors.current.warning, fontSize = 11.sp) }
     }
 }
 
