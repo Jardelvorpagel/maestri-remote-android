@@ -1,0 +1,10 @@
+# PROGRESS — Maestri Remote Android client
+
+- 2026-10-16 02:20 — Contract studied: wire-protocol-brief.md + vendor docs + wire-probe.py verified; JSON shapes locked in (FeedItem kinds, TerminalCard, mutations, terminal stream frames).
+- 2026-10-16 02:21 — Toolchain verified: JDK 21, build-tools 36.0.0, platforms android-36/37, Gradle 9.5.1, Pixel_8 AVD exists.
+- 2026-10-16 02:22 — Scaffolded Kotlin/Compose project: AGP 9.1.1 (built-in Kotlin) + compose BOM, wrapper bootstrapped, minSdk 29 / targetSdk 36.
+- 2026-10-16 02:31 — `./gradlew assembleDebug` GREEN (app-debug.apk). Wire layer: SPKI pin TrustManager, OrgJSON defensive models, WireClient (HTTP/1.1, Bearer, 401 surfacing), FeedSocket (epoch/sequence dedupe + epoch resync + JSON ping + backoff), TerminalStreamSocket, MiniTerm ANSI-lite emulator, Keystore-encrypted token in DataStore.
+- 2026-10-16 02:44 — Pixel_8 AVD e2e vs live host (10.0.2.2:7434): token reuse → SPKI SHA-256 shown & matched pin → trust → Workspaces with real attention badges (Knowledge/Protector fleet + activity dot) → Feed "Android MVP test" live (epoch FB39B082, floor chips incl. Térreo status line, real preview lines) → Terminal mvp-cat: prompt round-trip echoed in live feed snapshot; Live view: geometry 75×23 rendered, typed "live-echo" + ⏎ chip → echo on screen r7c10. No crashes.
+- 2026-10-16 02:51 — Post-test polish: SF-Symbol icon names → neutral glyph helper; authLost now closes sockets + forces re-pair UX ("Forget this server" path); rebuilt + reinstalled clean.
+- 2026-10-16 02:56 — Sandbox cleanup: test workspace deleted via DELETE /api/workspaces/{ws} (owner), list updated live in app; production workspaces/terminals untouched. Stretch (live terminal) done; README.md written.
+- STATUS: Definition of done MET (assembleDebug green; installs on Pixel_8; pairs/reuses token; live workspaces + feed; prompt to own test terminal; 401→re-pair path). SGR styling parsed but not rendered (renderer is plain text) — documented in README.
