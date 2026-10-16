@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.maestri.ui.Amber
 import app.maestri.ui.Green
 import app.maestri.ui.Red
 import kotlinx.coroutines.launch
@@ -228,8 +230,26 @@ fun PairingScreen(
 
                 "confirm" -> {
                     val expected = expectedKey.trim()
-                    val enteredNorm = expected.ifBlank { null }?.let { app.maestri.wire.Pinning.normalizeKey(it) }
-                    val matchOk = enteredNorm == null || enteredNorm == computedKeyB64
+                    // Both sides are normalized (hex-colon / hex-plain / padded / unpadded base64)
+                    // before the compare, so every equivalent spelling of the same digest matches.
+                    val enteredNorm = expected
+                        .takeIf { it.isNotBlank() }
+                        ?.let { app.maestri.wire.Pinning.normalizeKey(it) }
+                    val computedNorm = app.maestri.wire.Pinning.normalizeKey(computedKeyB64)
+                    val keyUnchecked = expected.isBlank()
+                    val keyGarbled = !keyUnchecked && enteredNorm == null
+                    val matchOk = keyUnchecked || keyGarbled || enteredNorm == computedNorm
+                    LaunchedEffect(expected, computedKeyB64) {
+                        android.util.Log.d(
+                            "QAAuth",
+                            "key gate: enteredLen=${expected.length} computedLen=${computedKeyB64.length}" +
+                                " format=" + when {
+                                    keyUnchecked -> "empty"
+                                    keyGarbled -> "unrecognized"
+                                    else -> "ok"
+                                } + " match=$matchOk (check skipped=${keyUnchecked || keyGarbled})",
+                        )
+                    }
 
                     Text("Security key", fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
                     Text(
@@ -240,10 +260,13 @@ fun PairingScreen(
                     )
                     Spacer(Modifier.height(10.dp))
                     KeyCard("Key on THIS host:", computedKeyHex)
+                    KeyCard("Key on THIS host (base64):", computedKeyB64)
                     if (enteredNorm != null) {
-                        KeyCard("Key you entered:", expected)
+                        KeyCard("Key you entered (normalized):", enteredNorm)
                     }
-                    if (enteredNorm != null && matchOk) {
+                    if (keyGarbled) {
+                        NoticeCard("Key format not recognized — optional check skipped", Amber)
+                    } else if (enteredNorm != null && matchOk) {
                         NoticeCard("Keys match ✓", Green)
                     } else if (enteredNorm != null) {
                         NoticeCard("KEY MISMATCH — do not trust this host", Red)

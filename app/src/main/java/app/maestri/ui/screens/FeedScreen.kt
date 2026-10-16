@@ -351,6 +351,7 @@ fun PendingPromptCard(   // public: also used by TerminalScreen
     scope: kotlinx.coroutines.CoroutineScope,
 ) {
     var busy by remember { mutableStateOf(false) }
+    var fail by remember { mutableStateOf<String?>(null) }
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1518)),
         onClick = { onOpen(t.id, t.name) },
@@ -373,11 +374,17 @@ fun PendingPromptCard(   // public: also used by TerminalScreen
                 OutlinedButton(
                     enabled = !busy,
                     onClick = {
+                        android.util.Log.d("QAFeed", "pending card tap: Reject term=${t.id}")
                         busy = true
                         scope.launch {
                             try {
                                 session.reject(t.id)
+                                fail = null
+                                android.util.Log.d("QAFeed", "pending card Reject returned ok term=${t.id}")
                             } catch (e: Exception) {
+                                fail = (e as? app.maestri.wire.ApiException)?.let { "HTTP ${it.status}: ${it.message}" }
+                                    ?: "failed: ${e.message}"
+                                android.util.Log.e("QAFeed", "pending card Reject threw term=${t.id}: $e")
                             } finally {
                                 busy = false
                             }
@@ -387,17 +394,27 @@ fun PendingPromptCard(   // public: also used by TerminalScreen
                 Button(
                     enabled = !busy,
                     onClick = {
+                        android.util.Log.d("QAFeed", "pending card tap: Approve term=${t.id}")
                         busy = true
                         scope.launch {
                             try {
                                 session.approve(t.id)
+                                fail = null
+                                android.util.Log.d("QAFeed", "pending card Approve returned ok term=${t.id}")
                             } catch (e: Exception) {
+                                fail = (e as? app.maestri.wire.ApiException)?.let { "HTTP ${it.status}: ${it.message}" }
+                                    ?: "failed: ${e.message}"
+                                android.util.Log.e("QAFeed", "pending card Approve threw term=${t.id}: $e")
                             } finally {
                                 busy = false
                             }
                         }
                     },
                 ) { Text("Approve") }
+            }
+            fail?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, color = Amber, fontSize = 12.sp)
             }
         }
     }

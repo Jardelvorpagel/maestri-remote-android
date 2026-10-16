@@ -154,12 +154,15 @@ fun TerminalScreen(
     }
 
     fun approveReject(yes: Boolean) {
+        android.util.Log.d("QAFeed", "terminal screen tap: ${if (yes) "Approve" else "Reject"} term=$terminalId")
         scope.launch {
             try {
                 if (yes) session.approve(terminalId) else session.reject(terminalId)
+                android.util.Log.d("QAFeed", "terminal screen ${if (yes) "Approve" else "Reject"} returned ok")
             } catch (e: app.maestri.wire.ApiException) {
                 notice = "HTTP ${e.status}: ${e.message}"
             } catch (e: Exception) {
+                android.util.Log.e("QAFeed", "terminal screen approve/reject threw: $e")
                 notice = "failed: ${e.message}"
             }
         }

@@ -212,8 +212,21 @@ class WireSession(context: Context) {
     suspend fun prompt(terminalId: String, text: String) =
         terminalPost(terminalId, "prompt", JSONObject().put("text", text))
 
-    suspend fun approve(terminalId: String) = terminalPost(terminalId, "approve")
-    suspend fun reject(terminalId: String) = terminalPost(terminalId, "reject")
+    suspend fun approve(terminalId: String) = loggedTerminalOp(terminalId, "approve")
+    suspend fun reject(terminalId: String) = loggedTerminalOp(terminalId, "reject")
+
+    /** QA instrumentation: proves whether the approve/reject request actually leaves the app. */
+    private suspend fun loggedTerminalOp(terminalId: String, op: String): JSONObject {
+        android.util.Log.d("QAFeed", "POST api/terminals/$terminalId/$op -> sending")
+        return try {
+            terminalPost(terminalId, op).also {
+                android.util.Log.d("QAFeed", "POST api/terminals/$terminalId/$op -> answer $it")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("QAFeed", "POST api/terminals/$terminalId/$op -> failed: $e")
+            throw e
+        }
+    }
 
     /** `POST …/seen` on terminal open (clears attention on the host badge). */
     suspend fun seen(terminalId: String) = runCatching { terminalPost(terminalId, "seen") }.isSuccess
