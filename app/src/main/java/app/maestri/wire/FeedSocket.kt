@@ -48,6 +48,10 @@ class FeedSocket(
 
     val lastMutationKind = MutableStateFlow<String?>(null)
 
+    /** Last mutation event as parsed (canvas writes reconcile their optimistic overlay against it). */
+    private val _lastMutation = MutableStateFlow<MutationEvent?>(null)
+    val lastMutation: StateFlow<MutationEvent?> = _lastMutation
+
     /** Our own last presence report — rendered locally as the self cursor. */
     private val _selfPresence = MutableStateFlow<PresencePeer?>(null)
     val selfPresence: StateFlow<PresencePeer?> = _selfPresence
@@ -231,6 +235,7 @@ class FeedSocket(
                     "mutation" -> {
                         val m = MutationEvent.parse(msg) ?: return
                         lastMutationKind.value = m.kind
+                        _lastMutation.value = m
                         onMutation(m)
                     }
 

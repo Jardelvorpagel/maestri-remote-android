@@ -303,6 +303,10 @@ data class CanvasConnection(
  * unknown members are ignored per contract, and v1 renders none of them, so absent
  * handling = survive. Mutation events carry no canvas state (attribution only), so the
  * snapshot is the sole source of truth for this object.
+ *
+ * P1a renders and writes drawings and cable ties, so those two members are parsed now;
+ * `groups` is still not modeled — a group's identity reaches the client through its
+ * members' `groupId`, which is all the group actions here need.
  */
 data class CanvasSnapshot(
     val origin: CanvasPoint,
@@ -310,6 +314,8 @@ data class CanvasSnapshot(
     val bounds: CanvasRect?,
     val nodes: List<CanvasNode>,
     val connections: List<CanvasConnection>,
+    val drawings: List<CanvasDrawing> = emptyList(),
+    val cableTies: List<CanvasCableTie> = emptyList(),
 ) {
     companion object {
         fun parse(o: JSONObject): CanvasSnapshot {
@@ -330,8 +336,84 @@ data class CanvasSnapshot(
                 bounds = o.optJSONObject("bounds")?.let { runCatching { CanvasRect.parse(it) }.getOrNull() },
                 nodes = nodes,
                 connections = connections,
+                drawings = o.optJSONArray("drawings")?.let { a ->
+                    (0 until a.length()).mapNotNull { idx ->
+                        runCatching { CanvasDrawing.parse(a.getJSONObject(idx)) }.getOrNull()
+                    }
+                } ?: emptyList(),
+                cableTies = o.optJSONArray("cableTies")?.let { a ->
+                    (0 until a.length()).mapNotNull { idx ->
+                        runCatching { CanvasCableTie.parse(a.getJSONObject(idx)) }.getOrNull()
+                    }
+                } ?: emptyList(),
             )
         }
+    }
+}
+
+/**
+ * A drawing the host serializes with the same 14 fields its create route requires. Points are local
+ * to `origin`; `size`/`originalSize` are bare `[w, h]` pairs on the wire (tolerated as `{x, y}`
+ * here because earlier captures showed both shapes).
+ */
+data class CanvasDrawing(
+    val id: String,
+    val tool: String,
+    val points: List<CanvasPoint>,
+    val origin: CanvasPoint,
+    val size: CanvasPoint,
+    val color: String,
+    val lineWidth: Double,
+    val opacity: Double,
+    val zIndex: Int,
+    val rotation: Double,
+    val isLocked: Boolean,
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasDrawing = CanvasDrawing(
+            id = o.getString("id"),
+            tool = o.optString("tool", "pen"),
+            // Points are bare [x, y] pairs (the write schema is explicit about this).
+            points = o.optJSONArray("points")?.let { a ->
+                (0 until a.length()).mapNotNull { idx ->
+                    val p = a.optJSONArray(idx) ?: return@mapNotNull null
+                    runCatching { CanvasPoint(p.getDouble(0), p.getDouble(1)) }.getOrNull()
+                }
+            } ?: emptyList(),
+            origin = parseVec(o.opt("origin")) ?: CanvasPoint(0.0, 0.0),
+            size = parseVec(o.opt("size")) ?: CanvasPoint(0.0, 0.0),
+            color = o.optString("color", ""),
+            lineWidth = o.optDouble("lineWidth", 3.0),
+            opacity = o.optDouble("opacity", 1.0),
+            zIndex = o.optInt("zIndex", 0),
+            rotation = o.optDouble("rotation", 0.0),
+            isLocked = o.optBoolean("isLocked", false),
+        )
+
+        /** `[x, y]` or `{x, y}` — both have been seen for drawing vectors. */
+        private fun parseVec(v: Any?): CanvasPoint? = when (v) {
+            is JSONArray -> runCatching { CanvasPoint(v.getDouble(0), v.getDouble(1)) }.getOrNull()
+            is JSONObject -> runCatching { CanvasPoint.parse(v) }.getOrNull()
+            else -> null
+        }
+    }
+}
+
+/** A tie knot binding the ropes that cross under it (`memberConnectionIds` in crossing order). */
+data class CanvasCableTie(
+    val id: String,
+    val position: CanvasPoint,
+    val memberConnectionIds: List<String>,
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasCableTie = CanvasCableTie(
+            id = o.getString("id"),
+            position = o.optJSONObject("position")?.let { runCatching { CanvasPoint.parse(it) }.getOrNull() }
+                ?: CanvasPoint(0.0, 0.0),
+            memberConnectionIds = o.optJSONArray("memberConnectionIds")?.let { a ->
+                (0 until a.length()).map { a.optString(it) }
+            } ?: emptyList(),
+        )
     }
 }
 
@@ -436,17 +518,21 @@ data class MutationEvent(
     val sequence: Long,
     val epoch: String,
     val kind: String,
+    /** Node the mutation is about, when the kind carries one (nodeMoved/nodeRemoved/…). */
+    val nodeId: String? = null,
 ) {
     fun dedupeKey(): String = "$epoch/$sequence"
 
     companion object {
         fun parse(o: JSONObject): MutationEvent? {
             val m = o.optJSONObject("mutation") ?: return null
+            val kind = m.optJSONObject("kind")
             return MutationEvent(
                 mutationId = if (m.has("mutationId")) m.getString("mutationId") else null,
                 sequence = m.optLong("sequence", -1L),
                 epoch = m.optString("epoch", ""),
-                kind = m.optJSONObject("kind")?.optString("kind") ?: "",
+                kind = kind?.optString("kind") ?: "",
+                nodeId = kind?.optString("nodeId")?.takeIf { it.isNotBlank() },
             )
         }
     }
