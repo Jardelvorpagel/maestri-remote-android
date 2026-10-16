@@ -4,8 +4,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,6 +26,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.maestri.ui.MaestriTheme
+import app.maestri.ui.FloorsNav
 import app.maestri.ui.screens.CanvasScreen
 import app.maestri.ui.screens.FeedScreen
 import app.maestri.ui.screens.PairingScreen
@@ -71,7 +76,7 @@ fun Root(session: WireSession) {
                 composable("workspaces") {
                     WorkspacesScreen(
                         session = session,
-                        onOpenWorkspace = { wsId, wsName -> nav.navigate("feed/$wsId/${enc(wsName)}") },
+                        onOpenWorkspace = { wsId, wsName -> nav.navigate("feedWithFloors/$wsId/${enc(wsName)}") },
                     )
                 }
                 composable(
@@ -136,6 +141,44 @@ fun Root(session: WireSession) {
                     )
                 }
                 chatDestinations(session, nav)
+                // ── P3 floors lane ────────────────────────────────────────────────────
+                // LANES MERGER: this temp "Floors" affordance (FAB inside the feed below)
+                // exists only because FeedScreen is lane-frozen this wave; the proper
+                // entry is the merger's floor-chips wiring (WorkspacesScreen/FeedScreen),
+                // which should navigate via FloorsNav.link(wsId, wsName).
+                FloorsNav.installFloorsRoutes(
+                    nav = this,
+                    session = session,
+                    navigate = { r -> nav.navigate(r) },
+                    pop = { nav.popBackStack() },
+                )
+                composable(
+                    route = "feedWithFloors/{wsId}/{wsName}",
+                    arguments = listOf(
+                        navArgument("wsId") { type = NavType.StringType },
+                        navArgument("wsName") { type = NavType.StringType },
+                    ),
+                ) { entry ->
+                    val wsId = entry.arguments?.getString("wsId") ?: return@composable
+                    val wsName = entry.arguments?.getString("wsName") ?: "workspace"
+                    Box(Modifier.fillMaxSize()) {
+                        FeedScreen(
+                            session = session,
+                            wsId = wsId,
+                            wsName = wsName,
+                            onBack = { nav.popBackStack() },
+                            onOpenCanvas = { nav.navigate("canvas/${enc(wsId)}/${enc(wsName)}") },
+                            onOpenTerminal = { terminalId, terminalName ->
+                                nav.navigate("terminal/${enc(wsId)}/${enc(terminalId)}/${enc(terminalName)}")
+                            },
+                        )
+                        ExtendedFloatingActionButton(
+                            onClick = { nav.navigate(FloorsNav.link(wsId, wsName)) },
+                            modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd).padding(16.dp),
+                            containerColor = app.maestri.ui.Surface1,
+                        ) { Text("⇆ Floors") }
+                    }
+                }
             }
         }
     }
