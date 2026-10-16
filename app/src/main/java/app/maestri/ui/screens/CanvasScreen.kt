@@ -2,6 +2,7 @@ package app.maestri.ui.screens
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,13 +26,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -61,10 +67,16 @@ import app.maestri.ui.iconGlyph
 import app.maestri.wire.CanvasConnection
 import app.maestri.wire.CanvasNode
 import app.maestri.wire.CanvasPoint
+import app.maestri.store.PairingStore
 import app.maestri.wire.FeedSnapshot
+import app.maestri.wire.PresencePeer
 import app.maestri.wire.TerminalCard
 import app.maestri.wire.session.WireSession
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.launch
 
 /**
  * Canvas v1 — read-only spatial mirror of the floor's canvas that rides inside every
@@ -91,6 +103,36 @@ fun CanvasScreen(
     val socketError by session.feed.lastError.collectAsState()
     val camera = remember { CameraState() }
     var fitted by remember { mutableStateOf(false) }
+    val serverKey = session.serverKey
+    val scope = rememberCoroutineScope()
+    val peers by session.feed.peers.collectAsState()
+    val selfPresence by session.feed.selfPresence.collectAsState()
+
+    // Persisted per-workspace view state, as iOS keeps it in UserDefaults
+    // (`remote.camera.<serverId>.<wsId>` = [x,y,zoom] plus the view's followMac flag).
+    var following by remember { mutableStateOf(false) }
+    var cameraReady by remember { mutableStateOf(false) }
+    var saveJob by remember { mutableStateOf<Job?>(null) }
+
+    fun persistCamera() {
+        saveJob?.cancel()
+        saveJob = scope.launch {
+            delay(CAMERA_SAVE_DEBOUNCE_MS)
+            session.store.saveCamera(serverKey, wsId, camera.toView())
+        }
+    }
+
+    LaunchedEffect(serverKey, wsId) {
+        val storedFollow = session.store.snapshotFollowMac(serverKey)
+        val stored = session.store.snapshotCamera(serverKey, wsId)
+        if (stored != null) {
+            camera.set(stored)
+            fitted = true            // a restored camera wins over the one-shot fit
+        }
+        following = storedFollow
+        if (storedFollow) fitted = true
+        cameraReady = true
+    }
 
     // Defensive seed only; never reset/retarget — the feed socket stays open
     // (owned by the feed screen) and keeps streaming fresh snapshots with the canvas.
@@ -109,18 +151,48 @@ fun CanvasScreen(
 
         // Fit-to-bounds ONCE at open (stage ready + first snapshot for this workspace);
         // epoch resyncs must NOT jump the camera. The Fit button re-enables.
-        LaunchedEffect(fitted, stageW, stageH, snap != null) {
-            if (!fitted && snap != null && snap.workspaceId == wsId) {
-                contentRect(snap)?.let { camera.fitTo(it, stageW, stageH) }
+        LaunchedEffect(cameraReady, fitted, stageW, stageH, snap != null) {
+            if (cameraReady && !fitted && !following && snap != null && snap.workspaceId == wsId) {
+                contentRect(snap)?.let {
+                    camera.fitTo(it, stageW, stageH)
+                    persistCamera()      // "Fit" recenters AND persists
+                }
                 fitted = true
             }
+        }
+
+        // Presence: while this canvas is up, report where we are looking — the viewport center in
+        // canvas points — so the host can draw our cursor; the same report draws it locally.
+        LaunchedEffect(cameraReady, stageW, stageH) {
+            if (!cameraReady) return@LaunchedEffect
+            snapshotFlow { Triple(camera.scale, camera.offsetX, camera.offsetY) }
+                .debounce(PRESENCE_REPORT_MS)
+                .collect { (scale, ox, oy) ->
+                    session.feed.sendPresencePoint(
+                        x = (stageW / 2f - ox) / scale,
+                        y = (stageH / 2f - oy) / scale,
+                    )
+                }
+        }
+        DisposableEffect(wsId) {
+            onDispose { session.feed.sendPresence(null) }   // "nowhere" on the way out
+        }
+
+        // Follow-Mac: mirror the host's own camera. The host autosaves origin/zoom, so those
+        // ride in the snapshot (not per frame) — following is therefore stepwise, as on iOS.
+        LaunchedEffect(following, canvas?.origin, canvas?.zoom) {
+            val c = canvas ?: return@LaunchedEffect
+            if (!following) return@LaunchedEffect
+            camera.mirror(c.origin, c.zoom)
         }
 
         // Full-screen gesture surface BEHIND the overlay chrome.
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
+                .pointerInput(following) {
+                    // Pan/pinch are hidden while following the Mac; the chip turns it off.
+                    if (following) return@pointerInput
                     detectCanvasGestures { centroidPx, panPx, zoom ->
                         val d = 1f / this.density  // px → dp
                         camera.apply(
@@ -128,6 +200,7 @@ fun CanvasScreen(
                             pan = Offset(panPx.x * d, panPx.y * d),
                             zoom = zoom,
                         )
+                        persistCamera()
                     }
                 }
         ) {
@@ -143,13 +216,12 @@ fun CanvasScreen(
                         transformOrigin = TransformOrigin(0f, 0f)
                     }
             ) {
-                ConnectionsLayer(
-                    canvas = canvas,
-                    nodesById = remember(canvas) { nodesById(canvas) },
-                )
+                val nodeIndex = remember(canvas) { nodesById(canvas) }
+                ConnectionsLayer(canvas = canvas, nodesById = nodeIndex)
                 canvas?.nodes?.forEach { node ->
                     CanvasNodeCard(node, snap, onOpenTerminal)
                 }
+                CursorsLayer(self = selfPresence, peers = peers, nodeIndex = nodeIndex)
             }
 
             if (snap == null) {
@@ -163,6 +235,7 @@ fun CanvasScreen(
         Row(
             Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()   // top chrome clears the system status bar
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -186,7 +259,16 @@ fun CanvasScreen(
                     )
                 }
             }
-            TextButton(onClick = { fitted = false }, enabled = canvas != null) { Text("⤢ Fit") }
+            FollowChip(following = following, enabled = canvas != null) { on ->
+                following = on
+                if (on) fitted = true    // mirror takes over from here
+                scope.launch { session.store.saveFollowMac(serverKey, on) }
+                if (!on) persistCamera() // keep where we stopped
+            }
+            TextButton(
+                onClick = { fitted = false },
+                enabled = canvas != null && !following,
+            ) { Text("⤢ Fit") }
             ConnChip(socketState, socketError)
         }
 
@@ -199,13 +281,22 @@ fun CanvasScreen(
                 .padding(horizontal = 10.dp, vertical = 4.dp)
         ) {
             Text(
-                "zoom ${(camera.scale * 100).roundToInt()}%",
+                "zoom ${(camera.scale * 100).roundToInt()}%" + if (following) " · following Mac" else "",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
+
+/** Debounce: camera writes hit DataStore at most twice a second (never the host). */
+private const val CAMERA_SAVE_DEBOUNCE_MS = 500L
+
+/** Cursors fade out over the last stretch of the staleness window. */
+private const val CURSOR_FADE_MS = 5_000L
+
+/** Presence is reported once the camera settles, not per gesture frame. */
+private const val PRESENCE_REPORT_MS = 1_500L
 
 // -------------------------------------------------------------------------------- camera
 
@@ -240,6 +331,25 @@ class CameraState {
         scale = (minOf(availW / w, availH / h)).coerceIn(MIN_ZOOM, MAX_ZOOM)
         offsetX = ((stageWidthDp - w * scale) / 2f - content.left * scale)
         offsetY = ((stageHeightDp - h * scale) / 2f - content.top * scale)
+    }
+
+    /** Restore a persisted camera ([x, y, zoom] ≙ offsetX/offsetY/scale). */
+    fun set(v: PairingStore.CameraView) {
+        scale = v.zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
+        offsetX = v.x
+        offsetY = v.y
+    }
+
+    fun toView(): PairingStore.CameraView = PairingStore.CameraView(offsetX, offsetY, scale)
+
+    /**
+     * Follow-Mac: adopt the host camera from the snapshot (canvas-space viewport origin + zoom).
+     * The host viewport size is not published, so the origin lands at our top-left corner.
+     */
+    fun mirror(origin: CanvasPoint, zoom: Double) {
+        scale = zoom.toFloat().coerceIn(MIN_ZOOM, MAX_ZOOM)
+        offsetX = -origin.x.toFloat() * scale
+        offsetY = -origin.y.toFloat() * scale
     }
 
     companion object {
@@ -312,6 +422,97 @@ private fun centroidOf(changes: List<PointerInputChange>): Offset {
 private fun spreadOf(changes: List<PointerInputChange>, centroid: Offset): Float =
     if (changes.size < 2) 0f
     else changes.sumOf { (it.position - centroid).getDistance().toDouble() }.toFloat()
+
+// ------------------------------------------------------------------------------ cursors
+
+/**
+ * Presence cursors, drawn inside the camera layer at canvas points: our own report plus any peer
+ * report the host sends. The contract documents presence as client -> server only (the host draws
+ * remote cursors on its own canvas) and defines no peer roster, so peers render when a host does
+ * send them and simply do not exist otherwise. Reports older than 20 s fade out and disappear.
+ */
+@Composable
+private fun CursorsLayer(
+    self: PresencePeer?,
+    peers: List<PresencePeer>,
+    nodeIndex: Map<String, CanvasNode>,
+) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(2_000)
+            now = System.currentTimeMillis()
+        }
+    }
+    val cursors = buildList {
+        self?.let { add(it) }
+        addAll(peers)
+    }.mapNotNull { peer ->
+        val age = now - peer.atMillis
+        if (age > PresencePeer.STALE_MS) return@mapNotNull null
+        val pos = presencePosition(peer, nodeIndex) ?: return@mapNotNull null
+        val alpha = if (age <= PresencePeer.STALE_MS - CURSOR_FADE_MS) 1f
+        else ((PresencePeer.STALE_MS - age).toFloat() / CURSOR_FADE_MS)
+        Triple(peer, pos, alpha.coerceIn(0f, 1f))
+    }
+    cursors.forEach { (peer, pos, alpha) ->
+        Row(
+            Modifier
+                .offset(x = pos.x.dp, y = pos.y.dp)
+                .zIndex(900f)
+                .graphicsLayer { this.alpha = alpha },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Canvas(Modifier.size(10.dp)) {
+                val arrow = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(size.width, size.height * 0.28f)
+                    lineTo(size.width * 0.28f, size.height)
+                    close()
+                }
+                drawPath(arrow, color = presenceColor(peer))
+            }
+            Box(
+                Modifier
+                    .background(Surface2.copy(alpha = 0.9f), RoundedCornerShape(50))
+                    .padding(horizontal = 6.dp, vertical = 1.dp)
+            ) {
+                Text(peer.name, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** Canvas-space position of a report: an explicit point, else the center of the reported node. */
+private fun presencePosition(peer: PresencePeer, nodeIndex: Map<String, CanvasNode>): Offset? {
+    if (peer.hasPoint) return Offset((peer.x ?: 0.0).toFloat(), (peer.y ?: 0.0).toFloat())
+    val n = peer.nodeId?.let { nodeIndex[it] } ?: return null
+    return Offset((n.frame.x + n.frame.width / 2).toFloat(), (n.frame.y + n.frame.height / 2).toFloat())
+}
+
+private fun presenceColor(peer: PresencePeer): Color {
+    val hex = peer.color ?: return Amber
+    return runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Amber)
+}
+
+@Composable
+private fun FollowChip(following: Boolean, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    val bg = if (following) Green.copy(alpha = 0.22f) else Surface2
+    val fg = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+        following -> Green
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        Modifier
+            .padding(end = 6.dp)
+            .background(bg, RoundedCornerShape(50))
+            .clickable(enabled = enabled) { onToggle(!following) }
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    ) {
+        Text(if (following) "⚲ Following" else "⚲ Follow Mac", fontSize = 11.sp, color = fg)
+    }
+}
 
 // --------------------------------------------------------------------------- rendering
 

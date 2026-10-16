@@ -156,6 +156,49 @@ class PairingStore(private val context: Context) {
         }
     }
 
+    // ------------------------------------------------- per-workspace canvas view state
+    //
+    // iOS keeps `remote.camera.<serverId>.<wsId>` = [x, y, zoom] and the view's followMac flag
+    // in UserDefaults. We keep the same shape in DataStore, keyed by the pinned server identity
+    // (the SPKI hash — our closest analogue to iOS's serverId, and stable across IP changes).
+
+    /** Camera as persisted: [x, y, zoom] ≙ (offsetX, offsetY, scale). */
+    data class CameraView(val x: Float, val y: Float, val zoom: Float)
+
+    private fun cameraKey(serverKey: String, wsId: String) = stringPreferencesKey("camera.$serverKey.$wsId")
+
+    // iOS keeps followMac per SERVER (remote.view.<serverId>), not per workspace: one key, no ws.
+    private fun followMacKey(serverKey: String) = stringPreferencesKey("followmac.$serverKey")
+
+    fun camera(serverKey: String, wsId: String): Flow<CameraView?> =
+        context.dataStore.data.map { p -> p[cameraKey(serverKey, wsId)]?.let(::parseCamera) }
+
+    suspend fun snapshotCamera(serverKey: String, wsId: String): CameraView? = camera(serverKey, wsId).first()
+
+    suspend fun saveCamera(serverKey: String, wsId: String, c: CameraView) {
+        val value = "${c.x},${c.y},${c.zoom}"
+        context.dataStore.edit { it[cameraKey(serverKey, wsId)] = value }
+    }
+
+    fun followMac(serverKey: String): Flow<Boolean> =
+        context.dataStore.data.map { p -> p[followMacKey(serverKey)] == "true" }
+
+    suspend fun snapshotFollowMac(serverKey: String): Boolean = followMac(serverKey).first()
+
+    suspend fun saveFollowMac(serverKey: String, on: Boolean) {
+        context.dataStore.edit { it[followMacKey(serverKey)] = if (on) "true" else "false" }
+    }
+
+    private fun parseCamera(raw: String): CameraView? {
+        val parts = raw.split(',')
+        if (parts.size != 3) return null
+        val x = parts[0].toFloatOrNull() ?: return null
+        val y = parts[1].toFloatOrNull() ?: return null
+        val z = parts[2].toFloatOrNull() ?: return null
+        if (z <= 0f) return null
+        return CameraView(x, y, z)
+    }
+
     suspend fun saveHosts(extra: List<String>) {
         context.dataStore.edit { p ->
             val current = (p[Keys.HOSTS] ?: emptySet()).toMutableSet()

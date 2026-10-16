@@ -36,6 +36,15 @@ class WireSession(context: Context) {
     val pairing: StateFlow<Pairing?> = _pairing
 
     /** Persistent 401 → token revoked/forgotten → return to pairing UX. */
+    /**
+     * Stable identity for local per-server state (persisted camera, follow-Mac): the pinned SPKI
+     * hash — our closest analogue to the iOS `serverId`, and stable across host address changes.
+     */
+    val serverKey: String
+        get() = _pairing.value?.serverKeyHashB64?.takeIf { it.isNotBlank() }
+            ?: _pairing.value?.let { "${it.host}:${it.port}" }
+            ?: "unknown"
+
     private val _authLost = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val authLost: SharedFlow<String> = _authLost
 
@@ -61,6 +70,8 @@ class WireSession(context: Context) {
             store.pairing.collect { p ->
                 _pairing.value = p
                 if (p != null) client.pinned(p.serverKeyHashB64)
+                feed.selfDeviceId = p?.deviceId ?: ""
+                feed.selfLabel = p?.deviceName?.takeIf { it.isNotBlank() } ?: "You"
             }
         }
         scope.launch {

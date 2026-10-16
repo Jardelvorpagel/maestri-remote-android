@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -107,7 +108,7 @@ fun FeedScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(12.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("‹ Back") }
             Column(Modifier.weight(1f)) {
@@ -179,6 +180,12 @@ fun FeedScreen(
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // MaestroRequest: an actionable-looking surface. The contract documents no
+                // acknowledge route, so the button stays visibly disabled (honest, not dead).
+                snap.terminalCards
+                    .filter { it.maestroRequestMessage != null }
+                    .forEach { t -> MaestroRequestBanner(t, onOpenTerminal) }
+
                 for (item in snap.items) {
                     FeedItemRow(
                         item = item,
@@ -322,6 +329,37 @@ private fun TerminalCardView(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+        }
+    }
+}
+
+/** The Maestro asking the person for something — banner above the feed items. */
+@Composable
+private fun MaestroRequestBanner(t: TerminalCard, onOpen: (terminalId: String, terminalName: String) -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Amber.copy(alpha = 0.12f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("⚑ Maestro request", color = Amber, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Text(" · ${t.name}", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(t.maestroRequestMessage ?: "", fontSize = 13.sp)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(onClick = {}, enabled = false) { Text("Acknowledge") }
+                Text(
+                    "(awaiting schema)",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { onOpen(t.id, t.name) }) { Text("Open terminal") }
             }
         }
     }

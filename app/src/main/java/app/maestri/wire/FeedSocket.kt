@@ -48,6 +48,21 @@ class FeedSocket(
 
     val lastMutationKind = MutableStateFlow<String?>(null)
 
+    /** Our own last presence report — rendered locally as the self cursor. */
+    private val _selfPresence = MutableStateFlow<PresencePeer?>(null)
+    val selfPresence: StateFlow<PresencePeer?> = _selfPresence
+
+    /** Peer presence frames, when the host sends any (the contract defines no peer roster). */
+    private val _peers = MutableStateFlow<List<PresencePeer>>(emptyList())
+    val peers: StateFlow<List<PresencePeer>> = _peers
+
+    /** Identity used to tell our own presence frames apart from a peer's. */
+    @Volatile
+    var selfDeviceId: String = ""
+
+    @Volatile
+    var selfLabel: String = "You"
+
     private var ws: WebSocket? = null
     private var connectJob: Job? = null
     private var pingJob: Job? = null
@@ -115,6 +130,8 @@ class FeedSocket(
         }
         ws = null
         _state.value = SocketState.IDLE
+        _selfPresence.value = null
+        _peers.value = emptyList()
     }
 
     private fun connect() {
@@ -162,6 +179,34 @@ class FeedSocket(
         } ?: JSONObject().put("type", "presence")
         pendingPresence = body
         ws?.send(body.toString())
+        // "Os dois ausentes significa lugar nenhum": leaving a node clears our own report.
+        _selfPresence.value = nodeId?.let {
+            PresencePeer(
+                id = selfDeviceId.ifBlank { "self" },
+                name = selfLabel,
+                nodeId = it,
+                atMillis = System.currentTimeMillis(),
+            )
+        }
+    }
+
+    /**
+     * Report where this device is looking, in canvas points — the documented "real pointer" form
+     * of presence. The host draws our cursor with it; the canvas renders the same report locally.
+     */
+    fun sendPresencePoint(x: Float, y: Float) {
+        val body = JSONObject()
+            .put("type", "presence")
+            .put("point", JSONObject().put("x", x.toDouble()).put("y", y.toDouble()))
+        pendingPresence = body
+        ws?.send(body.toString())
+        _selfPresence.value = PresencePeer(
+            id = selfDeviceId.ifBlank { "self" },
+            name = selfLabel,
+            x = x.toDouble(),
+            y = y.toDouble(),
+            atMillis = System.currentTimeMillis(),
+        )
     }
 
     inner class Listener : WebSocketListener() {
@@ -187,6 +232,16 @@ class FeedSocket(
                         val m = MutationEvent.parse(msg) ?: return
                         lastMutationKind.value = m.kind
                         onMutation(m)
+                    }
+
+                    "presence" -> {
+                        // Undocumented as server -> client; tolerated when a host sends it.
+                        val self = selfDeviceId.ifBlank { null }
+                        val peer = PresencePeer.parse(msg, self, selfLabel, System.currentTimeMillis())
+                        if (peer != null) {
+                            if (peer.id == self) _selfPresence.value = peer
+                            else _peers.value = _peers.value.filterNot { it.id == peer.id } + peer
+                        }
                     }
 
                     "pong" -> Unit
