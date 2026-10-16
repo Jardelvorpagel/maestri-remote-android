@@ -199,6 +199,142 @@ data class NoteCard(
     }
 }
 
+// ---------------------------------------------------------------------------- canvas mirror
+
+// Host canvas geometry is in plain points (a 20 pt grid); parsed as doubles and
+// never rounded — the host enforces the grid, we are read-only.
+data class CanvasPoint(val x: Double, val y: Double) {
+    companion object {
+        fun parse(o: JSONObject): CanvasPoint = CanvasPoint(
+            x = o.optDouble("x", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+            y = o.optDouble("y", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+        )
+    }
+}
+
+data class CanvasRect(val x: Double, val y: Double, val width: Double, val height: Double) {
+    val centerX: Double get() = x + width / 2.0
+    val centerY: Double get() = y + height / 2.0
+
+    companion object {
+        fun parse(o: JSONObject): CanvasRect = CanvasRect(
+            x = o.optDouble("x", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+            y = o.optDouble("y", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+            width = o.optDouble("width", 0.0).takeIf { !it.isNaN() && it >= 0 } ?: 0.0,
+            height = o.optDouble("height", 0.0).takeIf { !it.isNaN() && it >= 0 } ?: 0.0,
+        )
+    }
+}
+
+/**
+ * A node on a single floor's canvas (CanvasNode). Per the docs a node has exactly one
+ * payload per kind; kinds are open strings — unknown kinds still carry frame + title and
+ * render as a simple box. Only the `terminal` payload is consumed in v1; note/text/file/
+ * link/fileTree/portal/connector/noteStack payloads are ignored (graceful box).
+ *
+ * `id` is the NODE id (UUID verbatim); a terminal node's payload re-addresses the
+ * TERMINAL id under `.terminal.id` — they are different ids, never rebuild them.
+ */
+data class CanvasNode(
+    val id: String,
+    val kind: String,               // open string: terminal | note | text | … | unknown
+    val title: String,
+    val subtitle: String?,
+    val icon: String?,
+    val color: String?,             // #RRGGBB verbatim; conversion is a UI concern
+    val zIndex: Int,
+    val frame: CanvasRect,
+    val isNodeLocked: Boolean,
+    val groupId: String?,
+    val terminal: TerminalCard?,    // present when kind == "terminal" and payload parses
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasNode {
+            val kind = o.optString("kind", "")
+            return CanvasNode(
+                id = o.getString("id"),
+                kind = kind,
+                title = o.optString("title", ""),
+                subtitle = if (o.has("subtitle")) o.getString("subtitle") else null,
+                icon = if (o.has("icon")) o.getString("icon") else null,
+                color = if (o.has("color")) o.getString("color") else null,
+                zIndex = o.optInt("zIndex", 0),
+                frame = o.optJSONObject("frame")?.let { runCatching { CanvasRect.parse(it) }.getOrNull() }
+                    ?: CanvasRect(0.0, 0.0, 600.0, 400.0),
+                isNodeLocked = o.optBoolean("isNodeLocked", false),
+                groupId = if (o.has("groupId") && !o.isNull("groupId")) o.getString("groupId") else null,
+                terminal = if (kind == "terminal") o.optJSONObject("terminal")?.let {
+                    runCatching { TerminalCard.parse(it) }.getOrNull()
+                } else null,
+            )
+        }
+    }
+}
+
+/** A rope between two nodes: polyline in canvas coordinates, edge-to-edge (not centers). */
+data class CanvasConnection(
+    val id: String,                 // UUID verbatim
+    val fromNodeId: String,
+    val toNodeId: String,
+    val kind: String,               // open string: terminal | note | crossFloor | … | unknown
+    val isActive: Boolean,
+    val points: List<CanvasPoint>,
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasConnection = CanvasConnection(
+            id = o.getString("id"),
+            fromNodeId = o.optString("fromNodeId", ""),
+            toNodeId = o.optString("toNodeId", ""),
+            kind = o.optString("kind", ""),
+            isActive = o.optBoolean("isActive", false),
+            points = o.optJSONArray("points")?.let { a ->
+                (0 until a.length()).mapNotNull { idx ->
+                    runCatching { CanvasPoint.parse(a.getJSONObject(idx)) }.getOrNull()
+                }
+            } ?: emptyList(),
+        )
+    }
+}
+
+/**
+ * CanvasSnapshot (capability canvasMirroring): exactly one floor's canvas, riding inside
+ * every full feed snapshot. `origin`/`zoom` are the HOST viewport — informative only.
+ * `bounds` may be absent. cableTies / groups / drawings are deliberately not modeled:
+ * unknown members are ignored per contract, and v1 renders none of them, so absent
+ * handling = survive. Mutation events carry no canvas state (attribution only), so the
+ * snapshot is the sole source of truth for this object.
+ */
+data class CanvasSnapshot(
+    val origin: CanvasPoint,
+    val zoom: Double,
+    val bounds: CanvasRect?,
+    val nodes: List<CanvasNode>,
+    val connections: List<CanvasConnection>,
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasSnapshot {
+            val nodes = o.optJSONArray("nodes")?.let { a ->
+                (0 until a.length()).mapNotNull { idx ->
+                    runCatching { CanvasNode.parse(a.getJSONObject(idx)) }.getOrNull()
+                }
+            } ?: emptyList()
+            val connections = o.optJSONArray("connections")?.let { a ->
+                (0 until a.length()).mapNotNull { idx ->
+                    runCatching { CanvasConnection.parse(a.getJSONObject(idx)) }.getOrNull()
+                }
+            } ?: emptyList()
+            return CanvasSnapshot(
+                origin = o.optJSONObject("origin")?.let { runCatching { CanvasPoint.parse(it) }.getOrNull() }
+                    ?: CanvasPoint(0.0, 0.0),
+                zoom = o.optDouble("zoom", 1.0).takeIf { !it.isNaN() && it != 0.0 } ?: 1.0,
+                bounds = o.optJSONObject("bounds")?.let { runCatching { CanvasRect.parse(it) }.getOrNull() },
+                nodes = nodes,
+                connections = connections,
+            )
+        }
+    }
+}
+
 /** FeedItem discriminated by kind: terminal | pendingPrompt | note | (open) */
 sealed interface FeedItem {
     val kind: String
@@ -226,6 +362,7 @@ data class FeedSnapshot(
     val items: List<FeedItem>,
     val epoch: String,
     val receivedOrder: Long,   // monotonic receive counter for HTTP-vs-socket ordering
+    val canvas: CanvasSnapshot?,   // capability canvasMirroring: one floor's canvas per snapshot
 ) {
     /** Terminal + pendingPrompt terminal ids -> all terminal cards in this snapshot. */
     val terminalCards: List<TerminalCard>
@@ -283,6 +420,9 @@ data class FeedSnapshot(
                 items = items,
                 epoch = o.optString("epoch", ""),
                 receivedOrder = order,
+                canvas = o.optJSONObject("canvas")?.let {
+                    runCatching { CanvasSnapshot.parse(it) }.getOrNull()
+                },
             )
         }
     }

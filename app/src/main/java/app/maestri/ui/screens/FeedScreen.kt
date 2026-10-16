@@ -70,6 +70,7 @@ fun FeedScreen(
     wsId: String,
     wsName: String,
     onBack: () -> Unit,
+    onOpenCanvas: () -> Unit,
     onOpenTerminal: (terminalId: String, terminalName: String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -128,6 +129,9 @@ fun FeedScreen(
                     )
                 }
             }
+            OutlinedButton(
+                onClick = onOpenCanvas,
+            ) { Text("Canvas") }
             ConnChip(socketState, socketError)
         }
 

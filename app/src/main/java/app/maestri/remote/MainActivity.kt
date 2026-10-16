@@ -22,6 +22,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.maestri.ui.MaestriTheme
+import app.maestri.ui.screens.CanvasScreen
 import app.maestri.ui.screens.FeedScreen
 import app.maestri.ui.screens.PairingScreen
 import app.maestri.ui.screens.TerminalScreen
@@ -81,6 +82,26 @@ fun Root(session: WireSession) {
                     val wsId = entry.arguments?.getString("wsId") ?: return@composable
                     val wsName = entry.arguments?.getString("wsName") ?: "workspace"
                     FeedScreen(
+                        session = session,
+                        wsId = wsId,
+                        wsName = wsName,
+                        onBack = { nav.popBackStack() },
+                        onOpenCanvas = { nav.navigate("canvas/${enc(wsId)}/${enc(wsName)}") },
+                        onOpenTerminal = { terminalId, terminalName ->
+                            nav.navigate("terminal/${enc(wsId)}/${enc(terminalId)}/${enc(terminalName)}")
+                        },
+                    )
+                }
+                composable(
+                    route = "canvas/{wsId}/{wsName}",
+                    arguments = listOf(
+                        navArgument("wsId") { type = NavType.StringType },
+                        navArgument("wsName") { type = NavType.StringType },
+                    ),
+                ) { entry ->
+                    val wsId = entry.arguments?.getString("wsId") ?: return@composable
+                    val wsName = entry.arguments?.getString("wsName") ?: "workspace"
+                    CanvasScreen(
                         session = session,
                         wsId = wsId,
                         wsName = wsName,

@@ -104,3 +104,33 @@ and was deleted from the host afterwards (production terminals untouched).
 - ANSI **styling** (SGR colors) is parsed but not rendered; renderer is plain text.
 - No `terminalChat` surfaces, no note/file-tree writes, no presence — MVP scope.
 - No landscape/tablet layouts, no dark/light switch (dark-only theme).
+
+## Canvas v1 (read-only)
+
+A spatial mirror of one floor's canvas, reachable from the Feed screen header
+("Canvas" button → route `canvas/{wsId}/{wsName}`; the existing live FeedSocket keeps
+streaming while you are there, so the canvas re-renders on every fresh snapshot and
+survives epoch resyncs unchanged — mutation events are attribution-only and carry no
+canvas state, so the full snapshot is the sole source of truth).
+
+- **Parsing**: `canvas` rides defensively on `FeedSnapshot` in `wire/Models.kt`
+  (`org.json`, `opt*` only): nodes `{id (UUID verbatim), frame, zIndex, isNodeLocked,
+  kind, title, subtitle?, icon?, color? (#RRGGBB verbatim), groupId?}` with the
+  `terminal` payload parsed into the same `TerminalCard` used by items; connections
+  `{id, from/toNodeId, kind, isActive, points (verbatim edge-to-edge polyline)}`;
+  host viewport `origin`/`zoom` kept but informative; `cableTies`/`groups`/`drawings`
+  ignored gracefully (absent = survive). Unknown node kinds render as a simple titled
+  box per the vendor docs.
+- **Rendering**: fullscreen pan (one finger) + pinch zoom; fit-to-bounds at open
+  (host `canvas.bounds`, else union of node frames; host-style zoom range 0.25–4×).
+  All transform state lives in ONE deferred-reading `graphicsLayer` — gestures never
+  recompose node content. Nodes: rounded cards in zIndex order reusing the feed card
+  styling language (icon glyph via `iconGlyph`, color accent border, floor chip,
+  isLive/needsAttention/pendingPrompt dots, manager tag, preview lines). Connections:
+  polylines behind the nodes (active ropes emphasized with a halo; endpoints fall back
+  to node center lines only when `points` is missing).
+- **Note**: `detectTransformGestures` no longer exists in Compose foundation 1.10, so
+  the pan/pinch detector is a small custom `awaitEachGesture` implementation (touch-slop
+  gated, consumes position changes when active so card taps stay clean).
+- **Integration**: tapping a terminal node navigates into the EXISTING terminal detail
+  route (seen-marking, preview/live) — no stubs. No new dependencies (Compose + org.json).
