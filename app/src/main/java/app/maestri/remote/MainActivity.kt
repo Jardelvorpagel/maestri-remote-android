@@ -3,6 +3,7 @@ package app.maestri.remote
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.ComponentActivity
 import androidx.fragment.app.FragmentActivity
 import app.maestri.ui.settings.AppLockGate
 import app.maestri.ui.settings.AppLockStore

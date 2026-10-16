@@ -45,6 +45,18 @@ object NotificationsNav {
 fun NotificationsSettingsScreen(router: NotificationsRouter) {
     val context = LocalContext.current.applicationContext
     var master by remember { mutableStateOf(router.systemPostNotificationsEnabled()) }
+
+    // review round 1: the OS grant can be revoked/granted in system settings while this
+    // screen is open — re-read the master state on every ON_RESUME (single-purpose observer).
+    val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(router) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) master = router.systemPostNotificationsEnabled()
+        }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
+
     var chatOn by remember { mutableStateOf(router.isChannelEnabled(NotificationsRouter.CHAN_CHAT)) }
     var agentsOn by remember { mutableStateOf(router.isChannelEnabled(NotificationsRouter.CHAN_AGENTS)) }
     var systemOn by remember { mutableStateOf(router.isChannelEnabled(NotificationsRouter.CHAN_SYSTEM)) }

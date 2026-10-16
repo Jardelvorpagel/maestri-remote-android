@@ -194,7 +194,9 @@ class NotificationsRouter(
             // Row 6 — maestro request stands (needsAttention true WITH a request message).
             val mNew = card.maestroRequestMessage
             val mOld = before.maestroRequestMessage
-            if (mNew != null && mNew != mOld) {
+            val stampNew = card.maestroCreatedAt // review round 1: the maestro dedup stamp —
+            // re-stamping the SAME message text (edited/re-minted request) must re-notify
+            if (mNew != null && (mNew != mOld || stampNew != before.maestroCreatedAt)) {
                 post(
                     notificationId = stableId("maestro:${card.id}"),
                     channelId = CHAN_SYSTEM,
@@ -203,7 +205,7 @@ class NotificationsRouter(
                     body = mNew,
                     deeplink = feedLink(new.workspaceId, new.workspaceName),
                 )
-            } else if (mNew == null && mOld != null) {
+            } else if (mNew == null && (mOld != null || stampNew != before.maestroCreatedAt)) {
                 nm.cancel(stableId("maestro:${card.id}"))
             }
 
@@ -247,6 +249,25 @@ class NotificationsRouter(
                     body = card.preview.lastOrNull() ?: NS.attentionBody,
                     deeplink = terminalLink(new.workspaceId, card.id, card.name),
                 )
+            }
+        }
+
+        // ---- floor-level attention (review round 1): a floor's aggregate attention
+        // (0→N) posts one floor-level row on the agents channel; (N→0) cancels it.
+        // Terminal-level rows above are unchanged.
+        for (floor in new.floors) {
+            val floorBefore = oldFloors[floor.id]
+            if ((floor.attentionCount ?: 0) > 0 && (floorBefore?.attentionCount ?: 0) == 0) {
+                post(
+                    notificationId = stableId("atf:${floor.id}"),
+                    channelId = CHAN_AGENTS,
+                    channelGate = isChannelEnabled(CHAN_AGENTS),
+                    title = floor.name,
+                    body = floor.statusText ?: NS.attentionBody,
+                    deeplink = feedLink(new.workspaceId, new.workspaceName),
+                )
+            } else if ((floor.attentionCount ?: 0) == 0 && (floorBefore?.attentionCount ?: 0) > 0) {
+                nm.cancel(stableId("atf:${floor.id}"))
             }
         }
 
