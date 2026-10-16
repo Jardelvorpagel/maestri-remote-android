@@ -26,6 +26,8 @@ import app.maestri.ui.screens.CanvasScreen
 import app.maestri.ui.screens.FeedScreen
 import app.maestri.ui.screens.PairingScreen
 import app.maestri.ui.screens.TerminalScreen
+import app.maestri.ui.chatDestinations
+import app.maestri.ui.ChatNav
 import app.maestri.ui.screens.WorkspacesScreen
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.flow.collect
@@ -128,8 +130,12 @@ fun Root(session: WireSession) {
                         terminalName = terminalName,
                         wsId = wsId,
                         onBack = { nav.popBackStack() },
+                        onEnterChat = { chatTerminalId, chatTerminalName ->
+                            nav.navigate(ChatNav.route(wsId, chatTerminalId, chatTerminalName))
+                        },
                     )
                 }
+                chatDestinations(session, nav)
             }
         }
     }
