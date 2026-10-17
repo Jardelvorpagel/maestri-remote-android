@@ -14,11 +14,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,7 +28,29 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Offset
+import androidx.compose.ui.text.font.FontFamily
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.Motion
 import app.maestri.ui.Style.MaestriRadii
+import app.maestri.ui.Style.RootTitle
+import app.maestri.ui.Style.Palette
+import app.maestri.ui.Style.warmRing
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
 
@@ -57,6 +77,11 @@ fun SettingsScreen(
     val context = LocalContext.current as? ComponentActivity
     var pickerOpen by remember { mutableStateOf(false) }
     val canBiometrics = remember { context != null && AppLockGate.hasStrongBiometry(context) }
+    // real terminal font size (design "JetBrains Mono NF · 13") — same DataStore the
+    // Aa stepper writes; a mirror instance, nothing user-identifying stored/changed.
+    val fontStore = remember(context) { context?.let { TerminalFontStore(it) } }
+    val fontSp =
+        (fontStore?.sizeSp?.collectAsState())?.value ?: TerminalFontStore.DEFAULT_SP
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -67,94 +92,86 @@ fun SettingsScreen(
                     .clickable { onBack() }
                     .padding(end = 12.dp),
             )
-            Text(
+            RootTitle(
                 SettingsStrings.settings,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
         Spacer(Modifier.height(16.dp))
-
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(MaestriRadii.Card),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text(SettingsStrings.privacy, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(6.dp))
-
-                if (canBiometrics) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.weight(1f)) {
-                            Text(SettingsStrings.requireBiometrics, fontSize = 16.sp) // ADAPTED per ruling A
-                            Text(
-                                SettingsStrings.explainer,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Switch(
-                            checked = enabled,
-                            onCheckedChange = { v -> scope.launch { appLock.setEnabled(v) } },
-                        )
-                    }
-                    if (enabled) {
-                        Spacer(Modifier.height(8.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { pickerOpen = true },
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    when (grace) {
-                                        0 -> SettingsStrings.graceImmediately
-                                        300 -> SettingsStrings.graceAfter5Minutes
-                                        else -> SettingsStrings.graceAfter1Minute
-                                    },
-                                    fontSize = 16.sp,
-                                )
-                            }
-                            Text("›", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                } else {
+        // design-v2 09: grouped ring cards — h2sec group labels, sgroup cards,
+        // 56pt rows, mono values (WarmSilver), 51x31 terracotta toggle.
+        GroupLabel("SECURITY")
+        SettingsGroup {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f)) {
+                    Text(SettingsStrings.requireBiometrics, fontSize = 13.5.sp, color = Palette.Ivory)
                     Text(
-                        SettingsStrings.requireBiometrics,
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        SettingsStrings.explainer,
+                        fontSize = 12.sp,
+                        color = Palette.WarmSilver,
                     )
-                    // No Class-3 biometry: credential-only lock stays available on relaunch
-                    // (BIOMETRIC_STRONG|DEVICE_CREDENTIAL falls back to the OS credential
-                    // screen — spec decision B default). The toggle row still works.
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Spacer(Modifier.weight(1f))
-                        Switch(
-                            checked = enabled,
-                            onCheckedChange = { v -> scope.launch { appLock.setEnabled(v) } },
-                        )
-                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                SettingsToggle(checked = enabled, onCheckedChange = { v -> scope.launch { appLock.setEnabled(v) } })
+            }
+            if (enabled) {
+                DividerHair()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp)
+                        .clickable { pickerOpen = true },
+                ) {
+                    Text("Lock after…", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f)) // CANDIDATE label
+                    Text(
+                        when (grace) {
+                            0 -> SettingsStrings.graceImmediately
+                            300 -> SettingsStrings.graceAfter5Minutes
+                            else -> SettingsStrings.graceAfter1Minute
+                        },
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Palette.WarmSilver,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
                 }
             }
         }
 
         Spacer(Modifier.height(12.dp))
-        // Link row to the P4-A notifications settings (route name is the sibling lane's
-        // constant; navigates only when that lane's route is installed — flagged W-4).
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(MaestriRadii.Card),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { openNotificationsRoute?.invoke("notifications-settings") },
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(16.dp)) {
-                Text(SettingsStrings.notifications, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                Text("›", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        GroupLabel("APP")
+        SettingsGroup {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clickable { openNotificationsRoute?.invoke("notifications-settings") },
+            ) {
+                Text(SettingsStrings.notifications, fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+            }
+            DividerHair()
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                Text("Terminal font", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text(
+                    "JetBrains Mono NF · " + fontSp,
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Palette.WarmSilver,
+                )
+            }
+            DividerHair()
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                Text("Push", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f)) // CANDIDATE label
+                Text(
+                    "unavailable · Foreground WSS", // honest: our push lane is foreground WSS (Option A)
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Palette.WarmSilver,
+                )
             }
         }
     }
@@ -201,5 +218,106 @@ private fun GraceRow(label: String, seconds: Int, current: Int, onPick: (Int) ->
         RadioButton(selected = current == seconds, onClick = { onPick(seconds) })
         Spacer(Modifier.width(8.dp))
         Text(label)
+    }
+}
+
+/** design-v2 09 h2sec: 10sp/500, 1px tracking, uppercase, warm silver. */
+@Composable
+private fun GroupLabel(text: String) {
+    Text(
+        text,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 1.sp,
+        color = Palette.WarmSilver,
+        modifier = Modifier.padding(start = 2.dp, top = 4.dp),
+    )
+}
+
+/** .sgroup: rounded ring card, padding 4x16. */
+@Composable
+private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
+    val colors = LocalMaestriColors.current
+    Surface(
+        color = colors.canvasSurface,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(MaestriRadii.Card),
+        modifier = Modifier
+            .fillMaxWidth()
+            .warmRing(colors.hairline, radius = MaestriRadii.Card),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            content = content,
+        )
+    }
+}
+
+/** .rrow hairline separator. */
+@Composable
+private fun DividerHair() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 1.dp)
+            .height(1.dp)
+            .background(LocalMaestriColors.current.hairline),
+    )
+}
+
+/** .tog: 51x31 pill; ON = terracotta (inset white 10% + glow .30); OFF = surface + ring; 25dp ivory knob. */
+@Composable
+private fun SettingsToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    val colors = LocalMaestriColors.current
+    val knobStart by animateDpAsState(
+        targetValue = if (checked) 24.dp else 2.dp,
+        animationSpec = tween(Motion.Fast, easing = Motion.Ease),
+        label = "lock-toggle-knob",
+    )
+    Box(
+        modifier = Modifier
+            .size(width = 51.dp, height = 31.dp)
+            .clip(CircleShape)
+            .background(
+                if (checked) {
+                    Brush.linearGradient(
+                        0f to Palette.TerracottaLight,
+                        1f to Palette.Terracotta,
+                        start = Offset(0f, 0f),
+                        end = Offset(1f, 1f),
+                    )
+                } else {
+                    colors.canvasSurface
+                },
+                CircleShape,
+            )
+            .let {
+                if (checked) {
+                    it.shadow(
+                            elevation = 6.dp,
+                            shape = CircleShape,
+                            ambientColor = Palette.Terracotta.copy(alpha = 0.30f),
+                            spotColor = Palette.Terracotta.copy(alpha = 0.30f),
+                        )
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+                } else {
+                    it.border(1.dp, colors.hairline, CircleShape)
+                }
+            }
+            .clickable { onCheckedChange(!checked) },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(start = knobStart)
+                .size(25.dp)
+                .clip(CircleShape)
+                .background(Palette.Ivory, CircleShape)
+                .shadow(
+                    elevation = 2.dp,
+                    shape = CircleShape,
+                    ambientColor = Color.Black.copy(alpha = 0.35f),
+                    spotColor = Color.Black.copy(alpha = 0.35f),
+                ),
+        )
     }
 }

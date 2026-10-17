@@ -10,13 +10,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,8 +24,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriRadii
+import app.maestri.ui.Style.Palette
+import app.maestri.ui.Style.warmRing
 import androidx.compose.foundation.shape.RoundedCornerShape
 import java.util.concurrent.Executor
 
@@ -108,32 +123,83 @@ internal fun applyRecentsBlanking(activity: FragmentActivity, locked: Boolean) {
 @Composable
 private fun AppLockCover(store: AppLockStore, activity: FragmentActivity?, interactive: Boolean) {
     val colors = LocalMaestriColors.current
-    Surface(modifier = Modifier.fillMaxSize(), color = colors.canvasChrome) {
+    // design-v2 09 .lockov px-perfect: scrim NearBlack @ .85 — translucency over live
+    // content, NO backdrop blur (Compose 1.7; artifact blur noted, ruling: skip).
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {}, // absorb taps: nothing behind stays interactive
+        color = Palette.NearBlack.copy(alpha = 0.85f),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
+                .padding(horizontal = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp, alignment = Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // .lk: 68dp circle, ring-depth (warm ring + whisper shadow)
+            Box(
+                modifier = Modifier
+                    .size(68.dp)
+                    .warmRing(colors.hairline, radius = 68.dp)
+                    .clip(CircleShape)
+                    .background(colors.canvasSurface, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("🔒", fontSize = 24.sp)
+            }
             Text(
                 SettingsStrings.lockHeadline,
-                fontSize = 22.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = Palette.Ivory,
             )
-            Spacer(Modifier.height(18.dp))
+            Text(
+                SettingsStrings.explainer,
+                fontSize = 12.sp,
+                color = Palette.WarmSilver,
+            )
+            val grace by store.graceSeconds.collectAsState()
             Button(
                 onClick = if (interactive) {
                     { activity?.let { AppLockGate.launchPrompt(it) { store.unlock() } } }
                 } else {
                     { }
                 },
-                shape = RoundedCornerShape(MaestriRadii.Control),
+                shape = RoundedCornerShape(MaestriRadii.Card),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp) // .unlock-btn min-height 52
+                    .shadow(
+                        elevation = 12.dp,
+                        shape = RoundedCornerShape(MaestriRadii.Card),
+                        ambientColor = Palette.Terracotta.copy(alpha = 0.32f),
+                        spotColor = Palette.Terracotta.copy(alpha = 0.32f),
+                    )
+                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(MaestriRadii.Card)),
             ) {
-                Text(SettingsStrings.unlock)
+                Text(
+                    SettingsStrings.unlock,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Palette.Ivory,
+                )
             }
+            // .lockchip: grace + fallback, mono 11
+            Text(
+                "grace: " + when (grace) {
+                    0 -> SettingsStrings.graceImmediately
+                    300 -> SettingsStrings.graceAfter5Minutes
+                    else -> SettingsStrings.graceAfter1Minute
+                } + " · fallback = device PIN", // CANDIDATE fallback literal
+                fontSize = 11.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                color = Palette.WarmSilver,
+            )
         }
     }
 }
@@ -168,5 +234,10 @@ fun AppLockGate(
         }
     }
 
-    if (locked || loading) AppLockCover(store, activity, interactive = locked) else content()
+    Box(Modifier.fillMaxSize()) {
+        content()
+        if (locked || loading) {
+            AppLockCover(store, activity, interactive = locked)
+        }
+    }
 }
