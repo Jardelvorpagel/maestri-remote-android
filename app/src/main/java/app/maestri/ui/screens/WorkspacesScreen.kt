@@ -54,6 +54,7 @@ import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriRadii
 import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.Rhythm
+import app.maestri.ui.Style.RootTitle
 import app.maestri.ui.Style.cardShape
 import app.maestri.ui.Style.monoHud
 import app.maestri.ui.Style.softHalo
@@ -135,10 +136,8 @@ fun WorkspacesScreen(
             Box(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxSize().statusBarsPadding().padding(Rhythm.Gutter.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
+                        RootTitle(
                             "Workspaces",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f),
                         )
                         val p = session.serverInfo

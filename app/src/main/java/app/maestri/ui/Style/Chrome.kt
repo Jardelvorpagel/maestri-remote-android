@@ -65,9 +65,9 @@ fun MaestriSpine(
             .border(1.dp, c.hairline)
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         ) {
             SpineTab(0, active, badges[0] ?: 0, enabled = true, onClick = onWorkspaces)
             SpineTab(1, active, badges[1] ?: 0, enabled = onFeed != null, onClick = { onFeed?.invoke() })
@@ -86,6 +86,13 @@ private fun SpineTab(
 ) {
     val c = LocalMaestriColors.current
     val on = index == active
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) Motion.PressScale else 1f,
+        animationSpec = tween(Motion.Fast, easing = Motion.Ease),
+        label = "spine-tab-press",
+    )
     val tint = when {
         !enabled -> c.secondaryLabel.copy(alpha = 0.45f)
         on -> c.accent
@@ -93,9 +100,15 @@ private fun SpineTab(
     }
     Column(
         Modifier
+            .scale(scale)
             .height(56.dp)
             .padding(horizontal = 14.dp)
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(
+                enabled = enabled,
+                interactionSource = source,
+                indication = null,
+                onClick = onClick,
+            )
             .semantics { contentDescription = Chrome.tabLabels[index] },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
@@ -104,7 +117,7 @@ private fun SpineTab(
         Text(
             if (badge > 0) "${Chrome.tabLabels[index]} · $badge" else Chrome.tabLabels[index],
             color = tint,
-            fontSize = 10.5.sp,
+            fontSize = 11.5.sp,
             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
         )
     }

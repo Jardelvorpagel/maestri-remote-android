@@ -59,6 +59,7 @@ import kotlin.math.roundToInt
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.Rhythm
+import app.maestri.ui.Style.RootTitle
 import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.BackLabel
 import app.maestri.ui.Style.pillShape
@@ -155,7 +156,7 @@ fun FeedScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { BackLabel("Back") }
             Column(Modifier.weight(1f)) {
-                Text(wsName, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                RootTitle(wsName)
                 val s = snapshot
                 if (s != null) {
                     Text(

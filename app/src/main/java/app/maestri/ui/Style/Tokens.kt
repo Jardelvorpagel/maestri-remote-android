@@ -37,6 +37,15 @@ object Palette {
     val Warn = Color(0xFFEAB308)
     val Crimson = Color(0xFFB53333)
 
+    /**
+     * Lifted crimson for SMALL error text on the dark warm field (spec §2 fix, wave 3 residual 2).
+     * `#B53333` measures **3.06:1** on `#141413` — under the 4.5:1 text floor; this lifts it to
+     * **5.23:1** on `#141413` while keeping the crimson hue. Fills/rings keep [Crimson]
+     * (`#B53333`, 5.46:1 on the parchment branch). Higher-contrast alternative considered:
+     * `#FF6B5E` (6.60:1) — rejected as too bright a salmon for the warm family.
+     */
+    val ErrorLifted = Color(0xFFE0604F)
+
     /** Accessibility focus rings only; also the literal named in the Settings row. */
     val FocusBlue = Color(0xFF3898EC)
 

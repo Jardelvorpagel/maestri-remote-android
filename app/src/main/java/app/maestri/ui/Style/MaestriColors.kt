@@ -25,6 +25,11 @@ data class MaestriColors(
     val positive: Color,
     val secondaryLabel: Color,
     // ---- v2 additions (defaults keep any un-updated construction valid) ----
+    /**
+     * Small error TEXT on the active branch: lifted crimson on the dark warm field (5.23:1 on
+     * `#141413`), crimson on parchment. Fills/rings keep [danger] wherever they paint a surface.
+     */
+    val errorText: Color = danger,
     /** Card/list surface on the app background. */
     val card: Color = canvasSurface,
     /** Ring-depth hairline (`box-shadow: 0 0 0 1px`) replacing hard borders. */
@@ -55,6 +60,7 @@ val DarkMaestriColors = MaestriColors(
     danger = Palette.Crimson,
     positive = Palette.Success,
     secondaryLabel = Palette.WarmSilver,
+    errorText = Palette.ErrorLifted,
     card = Palette.DarkSurface,
     hairline = Palette.DarkWarm,
     onAccent = Palette.Ivory,
@@ -78,6 +84,7 @@ val LightMaestriColors = MaestriColors(
     danger = Palette.Crimson,
     positive = Color(0xFF12813C),
     secondaryLabel = Color(0xFF6B6A62),
+    errorText = Palette.Crimson,
     card = Color(0xFFFEFDFA),
     hairline = Palette.PaperRing,
     onAccent = Palette.Ivory,
@@ -107,8 +114,8 @@ val MaestriDarkScheme: ColorScheme = darkColorScheme(
     onSurface = Palette.Ivory,
     surfaceVariant = Palette.DarkSurface,
     onSurfaceVariant = Palette.WarmSilver,
-    error = Palette.Crimson,
-    onError = Palette.Ivory,
+    error = Palette.ErrorLifted,
+    onError = Palette.NearBlack,
     outline = Palette.DarkWarm,
     outlineVariant = Palette.DarkWarm,
 )
