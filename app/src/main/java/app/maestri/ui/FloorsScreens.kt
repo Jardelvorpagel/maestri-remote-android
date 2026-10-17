@@ -157,6 +157,15 @@ fun FloorsScreen(
     var showDelete by remember { mutableStateOf<FloorRow?>(null) }
     val scope = rememberCoroutineScope()
 
+    suspend fun refresh() {
+        try {
+            summary = api.floorsSummary(wsId)
+            err = null
+        } catch (e: Exception) {
+            err = errText(e)
+        }
+    }
+
     suspend fun submitQuick() {
         val b = quickBranch.trim()
         if (b.isBlank() || quickBusy) return
@@ -171,15 +180,6 @@ fun FloorsScreen(
         } finally {
             quickBusy = false
             refresh()
-        }
-    }
-
-    suspend fun refresh() {
-        try {
-            summary = api.floorsSummary(wsId)
-            err = null
-        } catch (e: Exception) {
-            err = errText(e)
         }
     }
     LaunchedEffect(wsId) {
@@ -369,6 +369,7 @@ fun FloorsScreen(
         ModalBottomSheet(onDismissRequest = { showDelete = null }) {
             DeleteFloorSheet(api = api, wsId = wsId, row = f, onDone = { showDelete = null })
         }
+    }
     }
 }
 
