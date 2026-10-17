@@ -42,6 +42,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -59,11 +60,22 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.Palette
+import app.maestri.ui.Style.MaestriType
+import app.maestri.ui.Style.containerShape
 import app.maestri.ui.Style.controlShape
+import app.maestri.ui.Style.pillShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import app.maestri.ui.Style.IconOnly
+
+/** v2 parchment tokens (spec frame 06 §4:74). On-sheet literals; the light scheme's own
+ *  secondary (#6B6A62) is the ink-2 — kept local so no shared token file is touched. */
+private val ParchmentInk = Palette.NearBlack          // ink on paper
+private val ParchmentInk2 = Color(0xFF6B6A62)         // ink-2: body text on paper
+private val ParchmentStone = Palette.StoneGray        // mono metadata (◷ saved)
+private val ParchmentRing = Palette.PaperRing         // warm #D1CFC5 ring
 
 @Composable
 fun NoteEditorScreen(
@@ -113,29 +125,31 @@ fun NoteEditorScreen(
         onDispose { model.saveOnExit() }
     }
 
-    Column(Modifier.fillMaxSize().background(LocalMaestriColors.current.canvasChrome)) {
+    // The claude paper moment: this screen's chrome is ALWAYS the Anthropic near-black
+    // (#141413) with the parchment (#F5F4ED) sheet inside — in both appearances.
+    Column(Modifier.fillMaxSize().background(Palette.NearBlack)) {
         when (val s = state) {
             is EditorState.Loading -> {
                 EditorTopBar(model, s, onBack, toast)
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(S.LOADING_NOTE, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(S.LOADING_NOTE, color = Palette.Ivory)
                 }
             }
             is EditorState.Unavailable -> {
                 EditorTopBar(model, s, onBack, toast)
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(s.headline, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                        Text(s.headline, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ivory)
                         if (s.detail.isNotBlank()) {
                             Spacer(Modifier.height(6.dp))
-                            Text(s.detail, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(s.detail, fontSize = 13.sp, color = Palette.WarmSilver)
                         }
                     }
                 }
             }
             is EditorState.Ready -> {
                 EditorTopBar(model, s, onBack, toast)
-                ReadyEditor(model, s, toast)
+                ReadyEditor(model, s, onBack, toast)
             }
         }
     }
@@ -491,18 +505,7 @@ private fun EditorTopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TextButton(onClick = onBack) { IconOnly(Icons.Filled.ArrowBack, size = 22.dp) }
-        Column(Modifier.weight(1f)) {
-            Text(
-                ready?.content?.displayName ?: "",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            ready?.content?.fileName?.takeIf { it.isNotBlank() }?.let { fileName ->
-                Text(fileName, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
+        Spacer(Modifier.weight(1f))
         if (ready != null && !ready.readOnly) {
             Box {
                 TextButton(onClick = { menuOpen = true }) { IconOnly(Icons.Filled.MoreVert, size = 22.dp) }
@@ -512,14 +515,25 @@ private fun EditorTopBar(
                         text = { Text(S.CHANGE_NOTE_COLOR) },
                         onClick = { menuOpen = false; showColorSheet = true },
                     )
-                    DropdownMenuItem(
-                        text = { Text(if (ready.locked) S.UNLOCK_CONTENTS else S.LOCK_CONTENTS) },
-                        onClick = {
-                            menuOpen = false
-                            scope.launch { model.setContentLock(!ready.locked, toast) }
-                        },
-                    )
                 }
+            }
+            // ◐ = content lock, 44pt action (spec frame 06). Ink when locked, stone when open.
+            EditorGlyphAction(
+                glyph = "◐",
+                description = if (ready.locked) S.UNLOCK_CONTENTS else S.LOCK_CONTENTS,
+                tint = if (ready.locked) Palette.Ivory else ParchmentStone,
+                size = 22.dp,
+            ) {
+                scope.launch { model.setContentLock(!ready.locked, toast) }
+            }
+            // ✓ = done, 44pt — active (terracotta) while the save state is live: dirty or saving.
+            EditorGlyphAction(
+                glyph = "✓",
+                description = "Done",
+                tint = if (ready.dirty || ready.saving) Palette.Terracotta else ParchmentStone,
+                size = 26.dp,
+            ) {
+                onBack()
             }
         }
     }
@@ -544,10 +558,30 @@ private fun EditorTopBar(
     }
 }
 
+/** A 44pt touch-target glyph action (the canvas GlassPill glyph precedent, quiet variant). */
+@Composable
+private fun EditorGlyphAction(
+    glyph: String,
+    description: String,
+    tint: Color,
+    size: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier.size(MaestriTarget).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(glyph, fontSize = 20.sp, color = tint)
+    }
+}
+
+private val MaestriTarget = 44.dp
+
 @Composable
 private fun ReadyEditor(
     model: NoteEditorModel,
     state: EditorState.Ready,
+    onBack: () -> Unit,
     toast: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -567,21 +601,64 @@ private fun ReadyEditor(
             EditorBanner(title = S.UNSAVED_EDITS_RESTORED, body = banner)
         }
 
-        BasicTextField(
-            value = state.text,
-            onValueChange = model::onText,
-            readOnly = state.readOnly,
-            modifier = Modifier
+        // The parchment sheet (spec frame 06): #F5F4ED paper on the #141413 chrome, warm
+        // #D1CFC5 ring, container corner. Ink/ink-2 are fixed paper literals — the sheet is
+        // the light paper moment in both appearances.
+        Column(
+            Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 15.sp,
-                lineHeight = 22.sp,
-            ),
-        )
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .background(Palette.Parchment, containerShape())
+                .border(1.dp, ParchmentRing, containerShape())
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+        ) {
+            // Host-derived first-line chip: the fileName the host derives from the first
+            // line (e.g. "alpha docs" → "alpha-docs.md"); rides along on every save echo.
+            state.content.fileName?.takeIf { it.isNotBlank() }?.let { fileName ->
+                Box(
+                    Modifier
+                        .background(Palette.Paper, pillShape())
+                        .border(1.dp, ParchmentRing, pillShape())
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                ) {
+                    Text(
+                        fileName,
+                        fontSize = 11.sp,
+                        fontFamily = MaestriType.Mono,
+                        color = ParchmentInk2,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+
+            // Serif title input — 21sp / weight 500 / ink. Commits as the rename (custom
+            // name path); the host re-derives the file name from the first line while the
+            // note has no custom name.
+            TitleInput(model, state, scope, toast)
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(ParchmentRing.copy(alpha = 0.7f)))
+            Spacer(Modifier.height(12.dp))
+
+            // Sans body — 13.5sp on a 1.6 line (21.6sp), ink-2. Never serif here.
+            BasicTextField(
+                value = state.text,
+                onValueChange = model::onText,
+                readOnly = state.readOnly,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                textStyle = androidx.compose.ui.text.TextStyle(
+                    fontSize = 13.5.sp,
+                    lineHeight = 21.6.sp,
+                    color = ParchmentInk2,
+                ),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(Palette.Terracotta),
+            )
+        }
 
         StatusFooter(model, state, scope, toast)
     }
@@ -601,6 +678,52 @@ private fun ReadyEditor(
     }
 }
 
+/** Serif 21/500 title field. Local while focused; focus loss + a changed, non-blank value
+ *  commits through the rename route (hasCustomName = true per the host contract). */
+@Composable
+private fun TitleInput(
+    model: NoteEditorModel,
+    state: EditorState.Ready,
+    scope: CoroutineScope,
+    toast: (String) -> Unit,
+) {
+    var title by remember(state.content.displayName) { mutableStateOf(state.content.displayName) }
+    var focused by remember { mutableStateOf(false) }
+    val commit: (Boolean) -> Unit = { lost ->
+        if (lost && focused) {
+            if (title.isBlank() || title == state.content.displayName) {
+                title = state.content.displayName // blank = no-op per the host contract
+            } else {
+                val next = title
+                scope.launch { model.rename(next, toast) }
+            }
+        }
+        if (lost) focused = false
+    }
+    BasicTextField(
+        value = title,
+        onValueChange = {
+            title = it
+        },
+        readOnly = state.readOnly,
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { s ->
+                focused = s.isFocused
+                if (!s.isFocused) commit(true)
+            },
+        textStyle = androidx.compose.ui.text.TextStyle(
+            fontFamily = MaestriType.Serif,   // serif ONLY on the title (ruling)
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Medium,   // 500
+            color = ParchmentInk,
+            lineHeight = 26.sp,
+        ),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(Palette.Terracotta),
+    )
+}
+
 @Composable
 private fun StatusFooter(
     model: NoteEditorModel,
@@ -616,23 +739,34 @@ private fun StatusFooter(
     ) {
         when (val st = state.status) {
             SaveStatus.Quiet ->
-                Text(S.ALL_CHANGES_SAVED, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // ◷ saved — mono, stone (spec frame 06).
+                Text(
+                    "◷ ${S.ALL_CHANGES_SAVED}",
+                    fontSize = 12.sp,
+                    fontFamily = MaestriType.Mono,
+                    color = ParchmentStone,
+                )
             SaveStatus.Dirty -> {
                 Text(
                     S.THIS_NOTE_HAS_UNSAVED_CHANGES,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = Palette.Ivory,
                 )
                 Text(
                     if (state.locked) S.YOUR_UNSAVED_EDITS_STAY_ON_THIS_DEVICE
                     else S.SAVING_CONTINUES_IN_THE_BACKGROUND,
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Palette.WarmSilver,
                 )
             }
             SaveStatus.SavedButNewer ->
-                Text(S.SAVED_YOU_HAVE_NEWER_EDITS, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    S.SAVED_YOU_HAVE_NEWER_EDITS,
+                    fontSize = 12.sp,
+                    fontFamily = MaestriType.Mono,
+                    color = ParchmentStone,
+                )
             is SaveStatus.Failed -> Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     st.message,
@@ -663,7 +797,7 @@ private fun EditorBanner(title: String, body: String) {
         Column {
             Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = LocalMaestriColors.current.warning)
             Spacer(Modifier.height(2.dp))
-            Text(body, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+            Text(body, fontSize = 12.sp, color = Palette.Ivory)
         }
     }
 }
@@ -704,7 +838,7 @@ private fun RenameDialog(
             )
         },
         confirmButton = { TextButton(onClick = { onConfirm(name) }) { Text("OK") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = { onDismiss() }) { Text("Cancel") } },
         containerColor = LocalMaestriColors.current.canvasSurface,
     )
 }
@@ -743,13 +877,13 @@ private fun ColorSheet(
                                     .background(swatchColor(name), CircleShape)
                                     .border(
                                         width = if (selected) 2.dp else 1.dp,
-                                        color = if (selected) MaterialTheme.colorScheme.onSurface else LocalMaestriColors.current.canvasChromeElevated,
+                                        color = if (selected) Palette.Parchment else ParchmentRing,
                                         shape = CircleShape,
                                     )
                                     .clickable { onColor(name) },
                             )
                             Spacer(Modifier.height(2.dp))
-                            Text(name, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            Text(name, fontSize = 9.sp, color = Palette.WarmSilver, maxLines = 1)
                         }
                     }
                 }
