@@ -49,31 +49,44 @@ object AppLockGate {
 
     /**
      * Launch one prompt per attempt (spec 4.7). Title = the corpus reason string;
-     * negative = "Unlock"; fallback = DEVICE_CREDENTIAL. Errors keep the gate locked
-     * (no retry loop); hardware lockout surfaces the system's own text. Biometric
-     * outcomes are never logged beyond the boolean state transition.
+     * allowed = BIOMETRIC_STRONG | DEVICE_CREDENTIAL — the API contract FORBIDS
+     * setNegativeButtonText when DEVICE_CREDENTIAL is allowed (the credential
+     * screen owns its own cancel). The previous build crashed prompt-prepare on
+     * device with IllegalArgumentException "Negative text must not be set if
+     * device credential authentication is allowed" (3 tablet crashes
+     * 17:54/17:56/21:21), so the negative branch is dropped entirely; no
+     * biometric-only alternative is retained.
+     *
+     * Spec 4.5-companion hardening: the whole prompt prepare/launch is wrapped in
+     * [runCatching] — a prepare error leaves the gate LOCKED on the cover (Unlock
+     * re-taps re-attempt, each attempt contained) and can never kill the process
+     * while the lock is enabled. Outcomes are never logged beyond the state
+     * transition.
      */
     fun launchPrompt(activity: FragmentActivity, onUnlocked: () -> Unit) {
         val executor: Executor = ContextCompat.getMainExecutor(activity)
-        val prompt = BiometricPrompt(
-            activity,
-            executor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    onUnlocked()
-                }
-                // onAuthenticationError: stay locked (cover + Unlock button) — spec 4.7.
-            },
-        )
-        val info = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(SettingsStrings.unlockPromptTitle)
-            .setNegativeButtonText(SettingsStrings.unlock)
-            .setAllowedAuthenticators(
-                BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                    BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+        runCatching {
+            val prompt = BiometricPrompt(
+                activity,
+                executor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        onUnlocked()
+                    }
+                    // onAuthenticationError: stay locked (cover + Unlock button) — spec 4.7.
+                },
             )
-            .build()
-        prompt.authenticate(info)
+            val info = BiometricPrompt.PromptInfo.Builder()
+                .setTitle(SettingsStrings.unlockPromptTitle)
+                // NO setNegativeButtonText here: illegal whenever DEVICE_CREDENTIAL
+                // is allowed (API contract); the credential screen owns its cancel.
+                .setAllowedAuthenticators(
+                    BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                        BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+                )
+                .build()
+            prompt.authenticate(info)
+        }
     }
 }
 
