@@ -264,6 +264,21 @@ class WireSession(context: Context) {
         terminalStream.open(terminalStreamUrlFor(terminalId))
     }
 
+    /** Optimistic overlay for canvas writes (frames/removals awaiting the host's snapshot). */
+    val canvasOptimism = app.maestri.wire.CanvasOptimism()
+
+    // ------------------------------------------------------------------ canvas writes
+    //
+    // Every canvas route lives under the workspace. Bodies are built by CanvasWrites (path + body
+    // shapes recovered from the host); a failure surfaces to the caller — canvas writes are never
+    // retried automatically, because an ambiguous outcome must not be sent twice.
+
+    suspend fun canvasWrite(
+        path: String,
+        body: JSONObject? = null,
+        method: String = "POST",
+    ): JSONObject = apiGuard { p -> client.api(p.host, p.port, path, p.token, method, body) }
+
     val feedState: StateFlow<SocketState> get() = feed.state
     val feedSnapshot: StateFlow<FeedSnapshot?> get() = feed.snapshot
 }

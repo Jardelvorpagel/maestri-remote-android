@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,19 +46,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.Amber
-import app.maestri.ui.Green
-import app.maestri.ui.Red
-import app.maestri.ui.Surface1
-import app.maestri.ui.Surface2
 import app.maestri.ui.iconGlyph
 import app.maestri.wire.FeedItem
+import app.maestri.wire.FloorMeta
 import app.maestri.wire.FeedSnapshot
 import app.maestri.wire.NoteCard
 import app.maestri.wire.SocketState
 import app.maestri.wire.TerminalCard
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.controlShape
+import app.maestri.ui.Style.BackLabel
+import app.maestri.ui.Style.GlyphOrIcon
 
 /**
  * Live feed for one workspace: `WS /api/feed/stream?ws=…&token=…`.
@@ -73,6 +74,7 @@ fun FeedScreen(
     onBack: () -> Unit,
     onOpenCanvas: () -> Unit,
     onOpenTerminal: (terminalId: String, terminalName: String) -> Unit,
+    onOpenFloors: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val snapshot by session.feed.snapshot.collectAsState()
@@ -110,7 +112,7 @@ fun FeedScreen(
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { BackLabel("Back") }
             Column(Modifier.weight(1f)) {
                 Text(wsName, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val s = snapshot
@@ -146,20 +148,33 @@ fun FeedScreen(
                     .padding(vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Floor-chips lane: head of the row opens the floors + git screens;
+                // the mirror chips keep their floor-switching semantics, now with the
+                // FloorMeta state glyph (⚠ attention/blocked — clone-missing and copy
+                // errors travel only on the floors screens' FloorRow, not in models).
+                TextButton(onClick = onOpenFloors, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text("${app.maestri.ui.FloorsStrings.floors} ›", fontSize = 13.sp)
+                }
                 FilterChip(
                     selected = floor == null,
                     onClick = { floor = null },
                     label = { Text("Host view") },
                 )
                 floors.forEach { f ->
+                    val glyph = floorStateGlyph(f)
                     FilterChip(
                         selected = floor == (f.id ?: "ground"),
                         onClick = { floor = f.id ?: "ground" },
                         label = {
-                            Text(
-                                (if (f.statusText != null) "${f.name} · ${truncate(f.statusText, 26)}" else f.name),
-                                maxLines = 1,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (glyph != null) {
+                                    Text(glyph, fontSize = 12.sp, modifier = Modifier.padding(end = 3.dp))
+                                }
+                                Text(
+                                    (if (f.statusText != null) "${f.name} · ${truncate(f.statusText, 26)}" else f.name),
+                                    maxLines = 1,
+                                )
+                            }
                         },
                     )
                 }
@@ -167,7 +182,7 @@ fun FeedScreen(
         }
 
         initialError?.let {
-            Text(it, color = Red, fontSize = 12.sp)
+            Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
         }
 
         val snap = snapshot
@@ -210,12 +225,22 @@ private fun snapshotItemKey(item: FeedItem): String = when (item) {
 
 private fun truncate(s: String, max: Int) = if (s.length > max) s.take(max - 1) + "…" else s
 
+/** State glyph from FloorMeta (chips lane): needs-attention ⚠ when the row carries
+ *  attention or a blocked status; normal floors get no glyph (hasActivity/activity dot
+ *  already surfaces elsewhere). clone-missing/copy ERROR are not on FloorMeta — the
+ *  floors list screen (FloorRow.isCloneMissing) owns those; honest limitation. */
+private fun floorStateGlyph(f: FloorMeta): String? = when {
+    (f.attentionCount ?: 0) > 0 -> "⚠"
+    f.statusState == "blocked" -> "⚠"
+    else -> null
+}
+
 @Composable
 fun ConnChip(state: SocketState, err: String?) {
     val (color, label) = when (state) {
-        SocketState.OPEN -> Green to "live"
-        SocketState.CONNECTING -> Amber to "connecting"
-        SocketState.CLOSED -> Red to "down"
+        SocketState.OPEN -> MaterialTheme.colorScheme.primary to "live"
+        SocketState.CONNECTING -> LocalMaestriColors.current.warning to "connecting"
+        SocketState.CLOSED -> MaterialTheme.colorScheme.error to "down"
         SocketState.IDLE -> Color.Gray to "off"
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -223,7 +248,7 @@ fun ConnChip(state: SocketState, err: String?) {
         Spacer(Modifier.width(4.dp))
         Text(label, fontSize = 11.sp, color = color)
         if (state == SocketState.CLOSED && err != null) {
-            Text(" · $err", fontSize = 10.sp, color = Red, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(" · $err", fontSize = 10.sp, color = MaterialTheme.colorScheme.error, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -243,7 +268,7 @@ private fun FeedItemRow(
             PendingPromptCard(item.terminal, item.prompt, onOpen, session, scope)
         is FeedItem.NoteFeedItem -> NoteItem(item.note)
         is FeedItem.UnknownFeedItem -> {
-            Card(colors = CardDefaults.cardColors(containerColor = Surface1), modifier = Modifier.fillMaxWidth()) {
+            Card(colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface), modifier = Modifier.fillMaxWidth()) {
                 Text(
                     "unsupported item (${item.kind.ifBlank { "unknown" }})",
                     fontSize = 12.sp,
@@ -264,14 +289,14 @@ private fun TerminalCardView(
 ) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = if (pending || t.needsAttention) Surface2 else Surface1
+            containerColor = if (pending || t.needsAttention) LocalMaestriColors.current.canvasChromeElevated else LocalMaestriColors.current.canvasSurface
         ),
         onClick = { onOpen(t.id, t.name) },
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(iconGlyph(t.icon), fontSize = 16.sp, modifier = Modifier.width(26.dp))
+                GlyphOrIcon(t.icon, fontSize = 16.sp, modifier = Modifier.width(26.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -280,7 +305,7 @@ private fun TerminalCardView(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        if (t.isManager) Text("  (maestro)", fontSize = 10.sp, color = Amber)
+                        if (t.isManager) Text("  (maestro)", fontSize = 10.sp, color = LocalMaestriColors.current.warning)
                     }
                     Text(
                         buildString {
@@ -305,7 +330,7 @@ private fun TerminalCardView(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF0B0C0E), RoundedCornerShape(6.dp))
+                        .background(Color(0xFF0B0C0E), controlShape())
                         .padding(8.dp)
                 ) {
                     lines.forEach { line ->
@@ -324,7 +349,7 @@ private fun TerminalCardView(
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "maestro: ${truncate(it, 120)}",
-                    color = Amber,
+                    color = LocalMaestriColors.current.warning,
                     fontSize = 12.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -338,12 +363,12 @@ private fun TerminalCardView(
 @Composable
 private fun MaestroRequestBanner(t: TerminalCard, onOpen: (terminalId: String, terminalName: String) -> Unit) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = Amber.copy(alpha = 0.12f)),
+        colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.warning.copy(alpha = 0.12f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("⚑ Maestro request", color = Amber, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Text("⚑ Maestro request", color = LocalMaestriColors.current.warning, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 Text(" · ${t.name}", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.height(4.dp))
@@ -365,10 +390,11 @@ private fun MaestroRequestBanner(t: TerminalCard, onOpen: (terminalId: String, t
     }
 }
 
+@Composable
 private fun attentionColor(t: TerminalCard, pending: Boolean): Color = when {
-    pending || t.needsAttention -> Red
-    t.isActive == true -> Green
-    t.isLive -> Amber
+    pending || t.needsAttention -> MaterialTheme.colorScheme.error
+    t.isActive == true -> MaterialTheme.colorScheme.primary
+    t.isLive -> LocalMaestriColors.current.warning
     else -> Color.Gray
 }
 
@@ -376,7 +402,7 @@ private fun attentionColor(t: TerminalCard, pending: Boolean): Color = when {
 private fun PromptQuestion(prompt: String) {
     Text(
         prompt,
-        color = Amber,
+        color = LocalMaestriColors.current.warning,
         fontFamily = FontFamily.Monospace,
         fontSize = 12.sp,
         maxLines = 3,
@@ -401,7 +427,7 @@ fun PendingPromptCard(   // public: also used by TerminalScreen
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("S/n · ", color = Amber, fontWeight = FontWeight.Bold)
+                Text("S/n · ", color = LocalMaestriColors.current.warning, fontWeight = FontWeight.Bold)
                 Text(
                     t.name + (t.accountName?.let { " · $it" } ?: ""),
                     fontWeight = FontWeight.SemiBold,
@@ -456,7 +482,7 @@ fun PendingPromptCard(   // public: also used by TerminalScreen
             }
             fail?.let {
                 Spacer(Modifier.height(6.dp))
-                Text(it, color = Amber, fontSize = 12.sp)
+                Text(it, color = LocalMaestriColors.current.warning, fontSize = 12.sp)
             }
         }
     }
@@ -464,7 +490,7 @@ fun PendingPromptCard(   // public: also used by TerminalScreen
 
 @Composable
 private fun NoteItem(n: NoteCard) {
-    Card(colors = CardDefaults.cardColors(containerColor = Surface1), modifier = Modifier.fillMaxWidth()) {
+    Card(colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 n.displayName,

@@ -109,6 +109,13 @@ data class FloorMeta(
     val attentionCount: Int?,
     val hasActivity: Boolean?,
     val isDormant: Boolean?,
+    // ---- P4-A additive (NotificationsRouter): optional fields, appended only.
+    val branch: String?,
+    val isCloneMissing: Boolean?,
+    val pullState: String?,        // FloorPullRequest.state: open | merged | closed
+    val pullAttention: String?,    // conflicts | checksFailing | changesRequested | approved | checksRunning
+    val pullTitle: String?,
+    val pullNumber: Int?,
 ) {
     companion object {
         fun parse(o: JSONObject): FloorMeta = FloorMeta(
@@ -123,6 +130,35 @@ data class FloorMeta(
             attentionCount = if (o.has("attentionCount")) o.optInt("attentionCount") else null,
             hasActivity = if (o.has("hasActivity")) o.optBoolean("hasActivity") else null,
             isDormant = if (o.has("isDormant")) o.optBoolean("isDormant") else null,
+            branch = if (o.has("branch") && !o.isNull("branch")) o.optString("branch") else null,
+            isCloneMissing = if (o.has("isCloneMissing")) o.optBoolean("isCloneMissing") else null,
+            pullState = o.optJSONObject("pullRequest")?.let { pr ->
+                if (pr.has("state") && !pr.isNull("state")) pr.optString("state") else null
+            },
+            pullAttention = o.optJSONObject("pullRequest")?.optString("attention")?.ifBlank { null },
+            pullTitle = o.optJSONObject("pullRequest")?.optString("title")?.ifBlank { null },
+            pullNumber = o.optJSONObject("pullRequest")?.optInt("number")?.takeIf { it > 0 },
+        )
+    }
+}
+
+/** P4-A additive: a pending floor clone (wire truth: pendingFloors: [{id, name, branch, completedItems, totalItems, error?}]). */
+data class PendingFloorMeta(
+    val id: String,
+    val name: String,
+    val branch: String?,
+    val completedItems: Int,
+    val totalItems: Int,
+    val error: String?,
+) {
+    companion object {
+        fun parse(o: JSONObject): PendingFloorMeta = PendingFloorMeta(
+            id = o.optString("id"),
+            name = o.optString("name"),
+            branch = if (o.has("branch") && !o.isNull("branch")) o.optString("branch") else null,
+            completedItems = o.optInt("completedItems", 0),
+            totalItems = o.optInt("totalItems", 0),
+            error = o.optString("error", "").ifBlank { null },
         )
     }
 }
@@ -149,6 +185,9 @@ data class TerminalCard(
     val isActive: Boolean?,
     val accountName: String?,
     val maestroRequestMessage: String?,  // {message, createdAt} → message only
+    // ---- P4-A additive (NotificationsRouter): optional fields, appended only — positional callers unaffected.
+    val maestroCreatedAt: String? = null,  // {message, createdAt} → createdAt, maestro dedup key only (default = caller-safe, matches pendingFloors pattern)
+    val chatPreview: ChatCardPreview? = null,  // present while the chat face is ON (banked wire truth; default = caller-safe, matches pendingFloors pattern)
 ) {
     companion object {
         fun parse(o: JSONObject): TerminalCard = TerminalCard(
@@ -173,6 +212,30 @@ data class TerminalCard(
             isActive = if (o.has("isActive")) o.optBoolean("isActive") else null,
             accountName = if (o.has("accountName")) o.getString("accountName") else null,
             maestroRequestMessage = o.optJSONObject("maestroRequest")?.optString("message"),
+            maestroCreatedAt = o.optJSONObject("maestroRequest")?.optString("createdAt"),
+            chatPreview = o.optJSONObject("chatPreview")?.let { c -> runCatching { ChatCardPreview.parse(c) }.getOrNull() },
+        )
+    }
+}
+
+/**
+ * P4-A additive: the terminal-card chat miniatura — at most four recent entries plus an
+ * unreadCount when the host is showing the chat (wire truth, Chat do terminal section).
+ * Powers the feed-diffed chat notification row WITHOUT opening a second chat stream.
+ */
+data class ChatCardPreview(
+    val entries: List<ChatEntry>,
+    val unreadCount: Int?,
+) {
+    companion object {
+        fun parse(c: JSONObject): ChatCardPreview = ChatCardPreview(
+            entries = c.optJSONArray("entries")?.let { a ->
+                (0 until a.length()).mapNotNull { idx ->
+                    val e = a.optJSONObject(idx) ?: return@mapNotNull null
+                    runCatching { ChatEntry.parse(e) }.getOrNull()
+                }
+            } ?: emptyList(),
+            unreadCount = if (c.has("unreadCount")) c.optInt("unreadCount") else null,
         )
     }
 }
@@ -247,6 +310,7 @@ data class CanvasNode(
     val isNodeLocked: Boolean,
     val groupId: String?,
     val terminal: TerminalCard?,    // present when kind == "terminal" and payload parses
+    val text: CanvasTextBlock?,     // present when kind == "text": the styled text payload
 ) {
     companion object {
         fun parse(o: JSONObject): CanvasNode {
@@ -266,8 +330,37 @@ data class CanvasNode(
                 terminal = if (kind == "terminal") o.optJSONObject("terminal")?.let {
                     runCatching { TerminalCard.parse(it) }.getOrNull()
                 } else null,
+                text = if (kind == "text") o.optJSONObject("text")?.let {
+                    runCatching { CanvasTextBlock.parse(it) }.getOrNull()
+                } else null,
             )
         }
+    }
+}
+
+/**
+ * The styled payload a `kind == "text"` node carries: the block's content plus its styling.
+ *
+ * The host hands back only what has been set, so every field but the content is optional: weight and
+ * family default to what a fresh block uses ("regular"/"sans") and an unset colour is absent.
+ */
+data class CanvasTextBlock(
+    val text: String,
+    val fontSize: Int,
+    val fontWeight: String,
+    val fontFamily: String,
+    val color: String?,
+    val isMonospaced: Boolean,
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasTextBlock = CanvasTextBlock(
+            text = o.optString("text", ""),
+            fontSize = o.optDouble("fontSize", 14.0).toInt().coerceIn(8, 200),
+            fontWeight = o.optString("fontWeight", "regular").takeIf { it.isNotBlank() } ?: "regular",
+            fontFamily = o.optString("fontFamily", "sans").takeIf { it.isNotBlank() } ?: "sans",
+            color = if (o.has("color") && !o.isNull("color")) o.getString("color") else null,
+            isMonospaced = o.optBoolean("isMonospaced", false),
+        )
     }
 }
 
@@ -303,6 +396,10 @@ data class CanvasConnection(
  * unknown members are ignored per contract, and v1 renders none of them, so absent
  * handling = survive. Mutation events carry no canvas state (attribution only), so the
  * snapshot is the sole source of truth for this object.
+ *
+ * P1a renders and writes drawings and cable ties, so those two members are parsed now;
+ * `groups` is still not modeled — a group's identity reaches the client through its
+ * members' `groupId`, which is all the group actions here need.
  */
 data class CanvasSnapshot(
     val origin: CanvasPoint,
@@ -310,6 +407,8 @@ data class CanvasSnapshot(
     val bounds: CanvasRect?,
     val nodes: List<CanvasNode>,
     val connections: List<CanvasConnection>,
+    val drawings: List<CanvasDrawing> = emptyList(),
+    val cableTies: List<CanvasCableTie> = emptyList(),
 ) {
     companion object {
         fun parse(o: JSONObject): CanvasSnapshot {
@@ -330,8 +429,84 @@ data class CanvasSnapshot(
                 bounds = o.optJSONObject("bounds")?.let { runCatching { CanvasRect.parse(it) }.getOrNull() },
                 nodes = nodes,
                 connections = connections,
+                drawings = o.optJSONArray("drawings")?.let { a ->
+                    (0 until a.length()).mapNotNull { idx ->
+                        runCatching { CanvasDrawing.parse(a.getJSONObject(idx)) }.getOrNull()
+                    }
+                } ?: emptyList(),
+                cableTies = o.optJSONArray("cableTies")?.let { a ->
+                    (0 until a.length()).mapNotNull { idx ->
+                        runCatching { CanvasCableTie.parse(a.getJSONObject(idx)) }.getOrNull()
+                    }
+                } ?: emptyList(),
             )
         }
+    }
+}
+
+/**
+ * A drawing the host serializes with the same 14 fields its create route requires. Points are local
+ * to `origin`; `size`/`originalSize` are bare `[w, h]` pairs on the wire (tolerated as `{x, y}`
+ * here because earlier captures showed both shapes).
+ */
+data class CanvasDrawing(
+    val id: String,
+    val tool: String,
+    val points: List<CanvasPoint>,
+    val origin: CanvasPoint,
+    val size: CanvasPoint,
+    val color: String,
+    val lineWidth: Double,
+    val opacity: Double,
+    val zIndex: Int,
+    val rotation: Double,
+    val isLocked: Boolean,
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasDrawing = CanvasDrawing(
+            id = o.getString("id"),
+            tool = o.optString("tool", "pen"),
+            // Points are bare [x, y] pairs (the write schema is explicit about this).
+            points = o.optJSONArray("points")?.let { a ->
+                (0 until a.length()).mapNotNull { idx ->
+                    val p = a.optJSONArray(idx) ?: return@mapNotNull null
+                    runCatching { CanvasPoint(p.getDouble(0), p.getDouble(1)) }.getOrNull()
+                }
+            } ?: emptyList(),
+            origin = parseVec(o.opt("origin")) ?: CanvasPoint(0.0, 0.0),
+            size = parseVec(o.opt("size")) ?: CanvasPoint(0.0, 0.0),
+            color = o.optString("color", ""),
+            lineWidth = o.optDouble("lineWidth", 3.0),
+            opacity = o.optDouble("opacity", 1.0),
+            zIndex = o.optInt("zIndex", 0),
+            rotation = o.optDouble("rotation", 0.0),
+            isLocked = o.optBoolean("isLocked", false),
+        )
+
+        /** `[x, y]` or `{x, y}` — both have been seen for drawing vectors. */
+        private fun parseVec(v: Any?): CanvasPoint? = when (v) {
+            is JSONArray -> runCatching { CanvasPoint(v.getDouble(0), v.getDouble(1)) }.getOrNull()
+            is JSONObject -> runCatching { CanvasPoint.parse(v) }.getOrNull()
+            else -> null
+        }
+    }
+}
+
+/** A tie knot binding the ropes that cross under it (`memberConnectionIds` in crossing order). */
+data class CanvasCableTie(
+    val id: String,
+    val position: CanvasPoint,
+    val memberConnectionIds: List<String>,
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasCableTie = CanvasCableTie(
+            id = o.getString("id"),
+            position = o.optJSONObject("position")?.let { runCatching { CanvasPoint.parse(it) }.getOrNull() }
+                ?: CanvasPoint(0.0, 0.0),
+            memberConnectionIds = o.optJSONArray("memberConnectionIds")?.let { a ->
+                (0 until a.length()).map { a.optString(it) }
+            } ?: emptyList(),
+        )
     }
 }
 
@@ -363,6 +538,8 @@ data class FeedSnapshot(
     val epoch: String,
     val receivedOrder: Long,   // monotonic receive counter for HTTP-vs-socket ordering
     val canvas: CanvasSnapshot?,   // capability canvasMirroring: one floor's canvas per snapshot
+    // ---- P4-A additive (NotificationsRouter): optional, appended only (default keeps positional callers safe).
+    val pendingFloors: List<PendingFloorMeta> = emptyList(),
 ) {
     /** Terminal + pendingPrompt terminal ids -> all terminal cards in this snapshot. */
     val terminalCards: List<TerminalCard>
@@ -410,6 +587,12 @@ data class FeedSnapshot(
                 }
             } ?: emptyList()
 
+            val pending = o.optJSONArray("pendingFloors")?.let { a ->
+                (0 until a.length()).mapNotNull { idx ->
+                    runCatching { PendingFloorMeta.parse(a.getJSONObject(idx)) }.getOrNull()
+                }
+            } ?: emptyList()
+
             return FeedSnapshot(
                 workspaceId = ws?.optString("id", "") ?: "",
                 workspaceName = ws?.optString("name", "") ?: "",
@@ -423,6 +606,7 @@ data class FeedSnapshot(
                 canvas = o.optJSONObject("canvas")?.let {
                     runCatching { CanvasSnapshot.parse(it) }.getOrNull()
                 },
+                pendingFloors = pending,
             )
         }
     }
@@ -436,17 +620,21 @@ data class MutationEvent(
     val sequence: Long,
     val epoch: String,
     val kind: String,
+    /** Node the mutation is about, when the kind carries one (nodeMoved/nodeRemoved/…). */
+    val nodeId: String? = null,
 ) {
     fun dedupeKey(): String = "$epoch/$sequence"
 
     companion object {
         fun parse(o: JSONObject): MutationEvent? {
             val m = o.optJSONObject("mutation") ?: return null
+            val kind = m.optJSONObject("kind")
             return MutationEvent(
                 mutationId = if (m.has("mutationId")) m.getString("mutationId") else null,
                 sequence = m.optLong("sequence", -1L),
                 epoch = m.optString("epoch", ""),
-                kind = m.optJSONObject("kind")?.optString("kind") ?: "",
+                kind = kind?.optString("kind") ?: "",
+                nodeId = kind?.optString("nodeId")?.takeIf { it.isNotBlank() },
             )
         }
     }

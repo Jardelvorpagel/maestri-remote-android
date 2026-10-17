@@ -45,17 +45,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.Amber
-import app.maestri.ui.Green
-import app.maestri.ui.Red
-import app.maestri.ui.Surface1
-import app.maestri.ui.Surface2
 import app.maestri.wire.FeedItem
 import app.maestri.wire.FeedSnapshot
 import app.maestri.wire.SocketState
 import app.maestri.wire.TerminalCard
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.controlShape
+import app.maestri.ui.Style.TerminalThemes
+import app.maestri.ui.Style.BackLabel
 
 /**
  * Terminal detail: preview (live snapshot) OR the live stream, prompt composer,
@@ -75,6 +74,7 @@ fun TerminalScreen(
     terminalName: String,
     wsId: String,
     onBack: () -> Unit,
+    onEnterChat: ((String, String) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val snapshot by session.feed.snapshot.collectAsState()
@@ -180,7 +180,7 @@ fun TerminalScreen(
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { BackLabel("Back") }
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -209,6 +209,13 @@ fun TerminalScreen(
                 )
             }
             ConnChip(feedState, feedError)
+            if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
+                app.maestri.ui.screens.EnterChatModeButton(
+                    session = session,
+                    terminalId = terminalId,
+                    onChatReady = { onEnterChat?.invoke(terminalId, terminalName) },
+                )
+            }
         }
 
         if (pendingPrompt != null) {
@@ -224,7 +231,7 @@ fun TerminalScreen(
 
         notice?.let {
             Spacer(Modifier.height(6.dp))
-            Text(it, color = Amber, fontSize = 12.sp)
+            Text(it, color = LocalMaestriColors.current.warning, fontSize = 12.sp)
         }
 
         Spacer(Modifier.height(10.dp))
@@ -282,11 +289,12 @@ fun TerminalScreen(
 
 // --------------------------------------------------------------------------- views
 
+@Composable
 private fun attentionDot(t: TerminalCard?, pending: Boolean): Color = when {
     t == null -> Color.Gray
-    pending || t.needsAttention -> Red
-    t.isActive == true -> Green
-    t.isLive -> Amber
+    pending || t.needsAttention -> MaterialTheme.colorScheme.error
+    t.isActive == true -> MaterialTheme.colorScheme.primary
+    t.isLive -> LocalMaestriColors.current.warning
     else -> Color.Gray
 }
 
@@ -295,7 +303,7 @@ private fun PreviewPanel(card: TerminalCard?) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Surface1, RoundedCornerShape(8.dp))
+            .background(LocalMaestriColors.current.canvasSurface, controlShape())
             .padding(10.dp)
     ) {
         Text("Preview", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -315,7 +323,7 @@ private fun PreviewPanel(card: TerminalCard?) {
                         fontSize = 11.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        color = Color(0xFF9FB3A1),
+                        color = TerminalThemes.previewForeground(),
                     )
                 }
             }

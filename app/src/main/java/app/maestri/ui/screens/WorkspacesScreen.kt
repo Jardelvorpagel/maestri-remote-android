@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.material3.Card
@@ -34,9 +36,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.Amber
-import app.maestri.ui.Green
-import app.maestri.ui.Red
 import app.maestri.ui.iconGlyph
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -44,10 +43,13 @@ import kotlinx.coroutines.launch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import app.maestri.wire.WorkspaceMeta
 import app.maestri.wire.session.WireSession
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.GlyphOrIcon
 
 /**
  * Workspace list: `GET /api/workspaces` polled every 15 s (the docs' attention-watch
@@ -58,6 +60,8 @@ import app.maestri.wire.session.WireSession
 fun WorkspacesScreen(
     session: WireSession,
     onOpenWorkspace: (wsId: String, wsName: String) -> Unit,
+    onOpenFloors: (wsId: String, wsName: String) -> Unit = { _, _ -> },
+    onOpenSettings: (() -> Unit)? = null,
 ) {
     var list by remember { mutableStateOf<List<WorkspaceMeta>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -119,6 +123,15 @@ fun WorkspacesScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    if (onOpenSettings != null) {
+                        Text(
+                            "⚙",
+                            fontSize = 18.sp,
+                            modifier = Modifier
+                                .padding(start = 10.dp)
+                                .clickable { onOpenSettings?.invoke() },
+                        )
+                    }
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -134,7 +147,7 @@ fun WorkspacesScreen(
                     }
                 }
                 err?.let {
-                    Text(it, color = Red, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
                 }
 
                 LazyColumn(
@@ -157,8 +170,8 @@ fun WorkspacesScreen(
                         ) {
                             Column(Modifier.padding(14.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        iconGlyph(ws.icon),
+                                    GlyphOrIcon(
+                                        ws.icon,
                                         fontSize = 18.sp,
                                         modifier = Modifier.width(28.dp),
                                     )
@@ -174,12 +187,12 @@ fun WorkspacesScreen(
                                     if (ws.attentionCount > 0) {
                                         Box(
                                             modifier = Modifier
-                                                .background(Red.copy(alpha = 0.18f), CircleShape)
+                                                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.18f), CircleShape)
                                                 .padding(6.dp),
                                         ) {
                                             Text(
                                                 "${ws.attentionCount}",
-                                                color = Red,
+                                                color = MaterialTheme.colorScheme.error,
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 modifier = Modifier.padding(horizontal = 6.dp),
@@ -191,20 +204,32 @@ fun WorkspacesScreen(
                                         Box(
                                             Modifier
                                                 .size(10.dp)
-                                                .background(Green, CircleShape),
+                                                .background(MaterialTheme.colorScheme.primary, CircleShape),
                                         )
                                     }
                                 }
                                 Spacer(Modifier.height(6.dp))
-                                Text(
-                                    buildString {
-                                        append("${ws.runningTerminalCount}/${ws.terminalCount} running")
-                                        if (ws.isLoaded) append(" · loaded") else append(" · not loaded")
-                                        ws.groupName?.let { append(" · $it") }
-                                    },
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        buildString {
+                                            append("${ws.runningTerminalCount}/${ws.terminalCount} running")
+                                            if (ws.isLoaded) append(" · loaded") else append(" · not loaded")
+                                            ws.groupName?.let { append(" · $it") }
+                                        },
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    // Floor-chips lane: every row opens the workspace's floors
+                                    // + git screens (route via FloorsNav.link — MainActivity).
+                                    TextButton(
+                                        enabled = !ws.isLocked,
+                                        onClick = { onOpenFloors(ws.id, ws.name) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp),
+                                    ) {
+                                        Text("${app.maestri.ui.FloorsStrings.floors} ›", fontSize = 12.sp)
+                                    }
+                                }
                             }
                         }
                     }

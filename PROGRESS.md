@@ -39,3 +39,27 @@ Deliberately out of scope for the B1+B2 corrective wave; recorded so they are no
 - **Known issue found (not fixed):** the app draws edge-to-edge without inset padding, so its top chrome (Feed's **Canvas** button, canvas header chips) sits under the system status bar; taps there are swallowed by the status bar on both the AVD and the tablet.
 - **STEER (post-gate) — insets fix:** app now applies `WindowInsets.statusBars` as top padding on the top chrome of Workspaces / Feed / Canvas / Terminal (`statusBarsPadding()` in `WorkspacesScreen.kt:105`, `FeedScreen.kt:109`, `CanvasScreen.kt:253`, `TerminalScreen.kt:180`); the immersive dark background is untouched (padding only). Tablet status-bar inset measured at 70 px and every header moved exactly +70 px (workspace card y 545→615, Feed Canvas button 59→129, canvas Follow chip 45→115, terminal Back 59→129) — direct `input tap` now drives the Canvas button and the canvas/terminal chips (previously dead zone).
 - **STEER (post-gate) — followMac per SERVER (iOS parity):** key changed to `followmac.<serverKey>` (no workspace segment) in `PairingStore.kt:170-190`; camera stays per workspace (`camera.<serverKey>.<wsId>`). Verified: turning Follow on in one workspace's canvas shows "Following" already in another workspace's canvas (Knowledge), and it survives an app restart (`followmac…=true` in DataStore); only one followmac key exists next to the per-ws camera keys. The old per-workspace followmac entry from the previous build remains as an unread leftover.
+
+## P1a — Canvas writes (branch `feature/canvas-writes`)
+
+- **Write layer** `wire/CanvasWrites.kt`: route paths + request bodies for every write recovered from
+  the host schemas (node create/frame/rename/lock/duplicate/text/delete, batch delete, connections
+  create+delete, groups create/rename/color/ungroup, ties create/move/delete, drawings create/delete),
+  plus `CanvasOptimism` — the optimistic overlay keyed by `(epoch, sequence)` that drops every
+  override on a new epoch and never re-sends an ambiguous write (`mutationId` is correlation only).
+- **Snapshot model**: `drawings` and `cableTies` are now parsed (they were deliberately ignored in
+  v1); `MutationEvent` carries `nodeId`, and the feed exposes the last mutation event so the canvas
+  can retire a pending write when the host echoes its `mutationId`.
+- **Canvas UI** (`CanvasWritesUi.kt` + `CanvasScreen.kt`): one gesture machine for the whole canvas —
+  hold (platform long-press wait) then drag moves a node, hold then drag on empty marquee-selects,
+  hold without moving opens the node options, a quick drag pans (two fingers pan+pinch), tap selects
+  (terminal opens, text opens the inline editor), pen mode draws with one finger and yields to two.
+  Node moves are optimistic, snapped to the 20-pt grid on commit; a locked node refuses the drag with
+  the iOS sentence. Create menu with 2-step placement (note/text/folder), rename/lock/duplicate/
+  connect/disconnect/delete menus, batch delete for a multi-selection, group name/colour/ungroup,
+  tie create (two rope taps) + knot drag + cut, pen draw + erase-last.
+- **Strings**: `ui/CanvasStrings.kt` holds 97 literals from the parity table verbatim (canvas_menu,
+  node_actions, drawings, color_vocab, accessibility_hints).
+- **PairingScreen** got the same `statusBarsPadding()` as the other four screens.
+- `assembleDebug` green. No tablet install from this lane (the gate does that), no writes to any
+  production workspace, and no commits to `main`.
