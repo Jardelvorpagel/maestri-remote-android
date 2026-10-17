@@ -46,6 +46,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import app.maestri.ui.ChatNav
 import app.maestri.wire.NotificationsRouter
+import app.maestri.ui.NotificationsNav
 import app.maestri.ui.notificationsDestination
 import app.maestri.ui.screens.WorkspacesScreen
 import app.maestri.wire.DeepLinkBus
@@ -169,6 +170,11 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                             onOpenWorkspace = { wsId, wsName -> nav.navigate("feed/$wsId/${enc(wsName)}") },
                             onOpenFloors = { wsId, wsName -> nav.navigate(FloorsNav.link(wsId, wsName)) },
                             onOpenSettings = { nav.navigate("settings") },
+                            // ＋ pill = pair another machine (the pairing flow — recoverable path
+                            // from the lane brief); 🔔 pill = the P4-A notifications surface.
+                            onAddMachine = { reauth = true },
+                            onOpenNotifications = { nav.navigate(NotificationsNav.ROUTE) },
+                            notificationsArmed = router.systemPostNotificationsEnabled(),
                         )
                         MaestriSpine(
                             active = 0,

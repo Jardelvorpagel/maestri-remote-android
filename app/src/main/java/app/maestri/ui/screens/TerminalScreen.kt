@@ -55,7 +55,9 @@ import androidx.compose.ui.platform.LocalContext
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.controlShape
+import app.maestri.ui.Style.pillShape
 import app.maestri.ui.settings.TerminalFontStore
+import app.maestri.wire.ChatApi
 import app.maestri.ui.Style.TerminalThemes
 import app.maestri.ui.Style.BackLabel
 
@@ -85,6 +87,7 @@ fun TerminalScreen(
     val fontStore = remember(ctx) { TerminalFontStore(ctx.applicationContext) }
     val fontSp by fontStore.sizeSp.collectAsState()
     var showTypeScale by remember { mutableStateOf(false) }
+    var fullscreen by remember { mutableStateOf(false) }
     val snapshot by session.feed.snapshot.collectAsState()
     val feedState by session.feed.state.collectAsState()
     val feedError by session.feed.lastError.collectAsState()
@@ -177,6 +180,19 @@ fun TerminalScreen(
         }
     }
 
+    /** Chat key on the quickkey rail: the same enable-chat handshake the nav button runs. */
+    fun enterChatMode() {
+        val enter = onEnterChat ?: return
+        scope.launch {
+            try {
+                ChatApi(session).chatSetFace(terminalId, true, null)
+                enter(terminalId, terminalName)
+            } catch (e: Exception) {
+                notice = "chat mode failed: ${e.message}"
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- layout
 
     val card: TerminalCard? = snapshot?.terminalCards?.firstOrNull { it.id == terminalId }
@@ -217,8 +233,27 @@ fun TerminalScreen(
                 )
             }
             ConnChip(feedState, feedError)
+            // Mono workspace chip (design v2 §4-03): floor name when the card carries one,
+            // else the short workspace id — never a styled/serif value.
+            Text(
+                (card?.floorName?.takeIf { it.isNotBlank() } ?: wsId.take(8)),
+                fontFamily = MaestriType.Mono,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                modifier = Modifier
+                    .background(LocalMaestriColors.current.canvasSurface, pillShape())
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            // Aa stepper chip: current persisted size, tap = the stepper row.
             TextButton(onClick = { showTypeScale = !showTypeScale }) {
                 Text("Aa $fontSp", fontFamily = MaestriType.Mono, fontSize = 12.sp)
+            }
+            if (live && canStream) {
+                TextButton(onClick = { fullscreen = !fullscreen }) {
+                    Text(if (fullscreen) "\u2921" else "\u2922", fontSize = 18.sp)
+                }
             }
             if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
                 app.maestri.ui.screens.EnterChatModeButton(
@@ -229,7 +264,7 @@ fun TerminalScreen(
             }
         }
 
-        if (showTypeScale) {
+        if (showTypeScale && !fullscreen) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "Terminal font · ${MaestriType.MonoName} · $fontSp",
@@ -251,7 +286,7 @@ fun TerminalScreen(
             Spacer(Modifier.height(10.dp))
         }
 
-        if (pendingPrompt != null) {
+        if (pendingPrompt != null && !fullscreen) {
             Spacer(Modifier.height(10.dp))
             PendingPromptCard(card ?: TerminalCard(
                 id = terminalId, nodeId = "", name = terminalName, agentType = "", icon = null,
@@ -267,6 +302,7 @@ fun TerminalScreen(
             Text(it, color = LocalMaestriColors.current.warning, fontSize = 12.sp)
         }
 
+        if (!fullscreen) {
         Spacer(Modifier.height(10.dp))
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(
@@ -282,6 +318,7 @@ fun TerminalScreen(
             ) { Text(if (canStream) "Live" else "Live (cap off)") }
         }
         Spacer(Modifier.height(10.dp))
+        }
 
         if (live && canStream) {
             LiveTerminalView(
@@ -293,8 +330,13 @@ fun TerminalScreen(
                 canResize = canResize,
                 isOwner = isOwner,
                 fontSizeSp = fontSp,
+                fullscreen = fullscreen,
+                onChat = if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
+                    ({ enterChatMode() })
+                } else null,
                 onInput = { s -> session.terminalStream.sendInput(s) },
                 onResizeRequest = { showResize = true },
+                modifier = if (fullscreen) Modifier.weight(1f) else Modifier,
             )
             if (showResize) {
                 ResizeDialog(
@@ -311,13 +353,15 @@ fun TerminalScreen(
             PreviewPanel(card)
         }
 
-        Spacer(Modifier.height(12.dp))
-        PromptComposer(
-            value = promptText,
-            onChange = { promptText = it },
-            onSend = ::sendPrompt,
-            sending = sending,
-        )
+        if (!fullscreen) {
+            Spacer(Modifier.height(12.dp))
+            PromptComposer(
+                value = promptText,
+                onChange = { promptText = it },
+                onSend = ::sendPrompt,
+                sending = sending,
+            )
+        }
     }
 }
 

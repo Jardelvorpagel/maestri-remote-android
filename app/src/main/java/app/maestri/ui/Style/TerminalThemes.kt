@@ -49,6 +49,29 @@ object TerminalThemes {
     /** Chrome gray that ships beside the Tokyo runs (RECOVERED). */
     val chromeGray = Color(0xFFE9E9ED)
 
+    /**
+     * Tokyo Night chrome literals, verbatim from the design v2 spec (§2). The ANSI table
+     * above is the recovered run; these are the surface/ink/ink-accent values the terminal
+     * container draws with (bg, border, code bg) plus the prompt blue and the cursor block.
+     */
+    object TokyoNight {
+        val background = Color(0xFF1A1B26)
+        val foreground = Color(0xFFA9B1D6)
+        val blue = Color(0xFF7AA2F7)
+        val green = Color(0xFF9ECE6A)
+        val magenta = Color(0xFFBB9AF7)
+        val dim = Color(0xFF565F89)
+        val border = Color(0xFF23233A)
+        val codeBackground = Color(0xFF151518)
+
+        /** Prompt ink: blue at weight 700 (spec §4-03). */
+        val prompt = blue
+
+        /** 7 px block cursor cell. */
+        val cursor = blue
+        val cursorBlock = "\u258A"
+    }
+
     val embedded: List<TerminalPalette> = listOf(tokyoNight, tokyoDaylight)
 
     /**

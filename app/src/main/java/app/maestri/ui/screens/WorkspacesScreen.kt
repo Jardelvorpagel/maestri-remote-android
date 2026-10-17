@@ -1,14 +1,18 @@
 package app.maestri.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -17,43 +21,56 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.background
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.ui.iconGlyph
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+
+import app.maestri.ui.Style.Chrome
+import app.maestri.ui.Style.GlyphOrIcon
+import app.maestri.ui.Style.IconPill
+import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.MaestriRadii
+import app.maestri.ui.Style.Palette
+import app.maestri.ui.Style.Rhythm
+import app.maestri.ui.Style.cardShape
+import app.maestri.ui.Style.monoHud
+import app.maestri.ui.Style.softHalo
+import app.maestri.ui.Style.warmRing
 import app.maestri.wire.WorkspaceMeta
 import app.maestri.wire.session.WireSession
-import app.maestri.ui.Style.LocalMaestriColors
-import app.maestri.ui.Style.GlyphOrIcon
+import app.maestri.ui.FloorsStrings
 
 /**
- * Workspace list: `GET /api/workspaces` polled every 15 s (the docs' attention-watch
- * recipe) + pull-to-refresh. Attention badge = red dot with the count when > 0.
+ * Workspace list — design-v2 "modern" parity (spec frame 01): ring-depth cards
+ * (`Modifier.warmRing` + 12 radius + warm card), glass chips (translucent + hairline +
+ * halo; Compose 1.7 has no backdrop blur — documented deviation), 44 pt icon squircle,
+ * card meta on HUD mono, locked card dimmed to 45 %, thumb action bar of 4 × 44 pt
+ * icon pills bottom-right above the spine, terracotta active states. MaestriSpine
+ * stays where it is (MainActivity overlay — untouched).
+ *
+ * Serif 30 pt root title is deferred (wave 4) per the brief.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,6 +79,12 @@ fun WorkspacesScreen(
     onOpenWorkspace: (wsId: String, wsName: String) -> Unit,
     onOpenFloors: (wsId: String, wsName: String) -> Unit = { _, _ -> },
     onOpenSettings: (() -> Unit)? = null,
+    /** ＋ pill: open the pairing flow (the only way to add a machine). */
+    onAddMachine: (() -> Unit)? = null,
+    /** 🔔 pill: the notifications settings route (P4-A). */
+    onOpenNotifications: (() -> Unit)? = null,
+    /** 🔔 pill's terracotta active state = system notifications actually armed. */
+    notificationsArmed: Boolean = false,
 ) {
     var list by remember { mutableStateOf<List<WorkspaceMeta>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -69,6 +92,8 @@ fun WorkspacesScreen(
     var err by remember { mutableStateOf<String?>(null) }
     val snack = remember { SnackbarHostState() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // 🔔 pill's terracotta ACTIVE state = notifications actually armed. The router lives
+    // in Root (MainActivity wiring), which passes the read-once system answer in.
 
     // Entering the workspace list leaves any feed socket from before behind.
     LaunchedEffect(Unit) {
@@ -107,131 +132,241 @@ fun WorkspacesScreen(
             },
             modifier = Modifier.padding(pad).fillMaxSize(),
         ) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Workspaces",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    val p = session.serverInfo
-                    if (p != null) {
+            Box(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().statusBarsPadding().padding(Rhythm.Gutter.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${p.name} · ${p.role ?: "?"}",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "Workspaces",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
                         )
-                    }
-                    if (onOpenSettings != null) {
-                        Text(
-                            "⚙",
-                            fontSize = 18.sp,
-                            modifier = Modifier
-                                .padding(start = 10.dp)
-                                .clickable { onOpenSettings?.invoke() },
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "live · polled 15 s · tap to open the feed",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(12.dp))
-
-                if (loading && list.isEmpty()) {
-                    Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                }
-                err?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
-                }
-
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(list, key = { it.id }) { ws ->
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            ),
-                            onClick = {
-                                if (ws.isLocked) {
-                                    scope.launch { snack.showSnackbar("Workspace locked on the host plan — feed unavailable") }
-                                } else {
-                                    onOpenWorkspace(ws.id, ws.name)
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Column(Modifier.padding(14.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    GlyphOrIcon(
-                                        ws.icon,
-                                        fontSize = 18.sp,
-                                        modifier = Modifier.width(28.dp),
-                                    )
-                                    Text(
-                                        ws.name,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 16.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    // attention badge: red dot w/ count
-                                    if (ws.attentionCount > 0) {
-                                        Box(
-                                            modifier = Modifier
-                                                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.18f), CircleShape)
-                                                .padding(6.dp),
-                                        ) {
-                                            Text(
-                                                "${ws.attentionCount}",
-                                                color = MaterialTheme.colorScheme.error,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 6.dp),
-                                            )
-                                        }
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    if (ws.hasActivity) {
-                                        Box(
-                                            Modifier
-                                                .size(10.dp)
-                                                .background(MaterialTheme.colorScheme.primary, CircleShape),
-                                        )
-                                    }
-                                }
-                                Spacer(Modifier.height(6.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        buildString {
-                                            append("${ws.runningTerminalCount}/${ws.terminalCount} running")
-                                            if (ws.isLoaded) append(" · loaded") else append(" · not loaded")
-                                            ws.groupName?.let { append(" · $it") }
-                                        },
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    // Floor-chips lane: every row opens the workspace's floors
-                                    // + git screens (route via FloorsNav.link — MainActivity).
-                                    TextButton(
-                                        enabled = !ws.isLocked,
-                                        onClick = { onOpenFloors(ws.id, ws.name) },
-                                        contentPadding = PaddingValues(horizontal = 8.dp),
-                                    ) {
-                                        Text("${app.maestri.ui.FloorsStrings.floors} ›", fontSize = 12.sp)
-                                    }
-                                }
-                            }
+                        val p = session.serverInfo
+                        if (p != null) {
+                            Text(
+                                "${p.name} · ${p.role ?: "?"}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
+                        if (onOpenSettings != null) {
+                            Text(
+                                "⚙",
+                                fontSize = 18.sp,
+                                modifier = Modifier
+                                    .padding(start = 10.dp)
+                                    .padding(vertical = 11.dp) // 44 pt touch on the header gear too
+                                    .clickable { onOpenSettings?.invoke() },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "live · polled 15 s · tap to open the feed",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+
+                    if (loading && list.isEmpty()) {
+                        Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                    err?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    }
+
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        // clear the thumb action bar + spine (Rhythm.SpineHeight + bar + gap)
+                        contentPadding = PaddingValues(bottom = 132.dp),
+                    ) {
+                        items(list, key = { it.id }) { ws ->
+                            WorkspaceCard(
+                                ws = ws,
+                                onOpen = { onOpenWorkspace(ws.id, ws.name) },
+                                onLocked = {
+                                    scope.launch { snack.showSnackbar("Workspace locked on the host plan — feed unavailable") }
+                                },
+                                onOpenFloors = { onOpenFloors(ws.id, ws.name) },
+                            )
+                        }
+                    }
+                }
+
+                // Thumb action bar (spec frame 01): 4 × 44 pt icon pills, bottom-right,
+                // above the spine. Real affordances wired; unavailable ones disabled with
+                // semantics — never dead-looking-active.
+                Row(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = Rhythm.Gutter.dp, bottom = 96.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    IconPill(
+                        glyph = "＋",
+                        label = "Pair another computer",
+                        enabled = onAddMachine != null,
+                        onClick = { onAddMachine?.invoke() },
+                    )
+                    IconPill(
+                        glyph = "⚙",
+                        label = "Settings",
+                        enabled = onOpenSettings != null,
+                        onClick = { onOpenSettings?.invoke() },
+                    )
+                    IconPill(
+                        glyph = "🔔",
+                        label = "Notifications",
+                        active = notificationsArmed,
+                        enabled = onOpenNotifications != null,
+                        onClick = { onOpenNotifications?.invoke() },
+                    )
+                    // The mock's 4th pill is the host's add-workspace hotkey (⌃⌥↩, 13 px) —
+                    // no touch equivalent; shipped honest-disabled at the mock's size.
+                    HotkeyPill()
+                }
+            }
+        }
+    }
+}
+
+/** The mock's ⌃⌥↩ pill: 44 pt circle, 12 sp glyph, honest-disabled (host-only shortcut). */
+@Composable
+private fun HotkeyPill() {
+    val c = LocalMaestriColors.current
+    Box(
+        Modifier
+            .size(Rhythm.TouchTarget.dp)
+            .background(c.glass, CircleShape)
+            .border(1.dp, c.hairline, CircleShape)
+            .alpha(0.4f),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("⌥⌄↩", color = c.secondaryLabel, fontSize = 12.sp)
+    }
+}
+
+/**
+ * One workspace card, claude ring depth: warm card surface, 12 radius, hairline ring
+ * (+ crimson ring while the card carries attention), 44 pt icon squircle, name 15/600,
+ * HUD-mono meta line, glass `Floors ›` chip. Locked card: 45 % + a locked chip instead
+ * of the floors affordance (the feed behind it is unavailable).
+ */
+@Composable
+private fun WorkspaceCard(
+    ws: WorkspaceMeta,
+    onOpen: () -> Unit,
+    onLocked: () -> Unit,
+    onOpenFloors: () -> Unit,
+) {
+    val c = LocalMaestriColors.current
+    val chipRadius = RoundedCornerShape(15.dp)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .then(if (ws.isLocked) Modifier.alpha(0.45f) else Modifier)
+            .warmRing(
+                if (ws.attentionCount > 0) c.danger.copy(alpha = 0.55f) else c.hairline,
+                MaestriRadii.Card,
+            )
+            .background(c.card, cardShape())
+            .clickable { if (ws.isLocked) onLocked() else onOpen() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 44 pt icon squircle: accent 18–22 % mix + accent glyph. WorkspaceMeta has
+            // NO vendor datum (no dominant-agent field), so the mock's per-vendor mix
+            // can't be honest here — terracotta mix for every card (flagged).
+            Box(
+                Modifier
+                    .size(Rhythm.TouchTarget.dp)
+                    .background(c.accentSoft, RoundedCornerShape(MaestriRadii.Control)),
+                contentAlignment = Alignment.Center,
+            ) {
+                GlyphOrIcon(ws.icon, fontSize = 19.sp, tint = c.accent)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    ws.name,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    buildString {
+                        append("${ws.runningTerminalCount}/${ws.terminalCount} running")
+                        if (ws.isLoaded) append(" · loaded") else append(" · not loaded")
+                        ws.groupName?.let { append(" · $it") }
+                    },
+                    style = monoHud(11, color = Palette.StoneGray),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (ws.attentionCount > 0) {
+                // attention badge: crimson count pill
+                Box(
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .background(c.danger.copy(alpha = 0.18f), CircleShape)
+                        .padding(6.dp),
+                ) {
+                    Text(
+                        "${ws.attentionCount}",
+                        color = c.danger,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                    )
+                }
+            }
+            if (ws.hasActivity) {
+                Box(
+                    Modifier
+                        .padding(start = 8.dp)
+                        .size(8.dp)
+                        .background(c.accent, CircleShape),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            if (ws.isLocked) {
+                // locked chip replaces the floors affordance (mock frame 01)
+                Box(
+                    Modifier
+                        .defaultMinSize(minHeight = 30.dp)
+                        .softHalo(radius = 15.dp, elevation = 2.dp)
+                        .background(c.glass, chipRadius)
+                        .border(1.dp, c.hairline, chipRadius)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text("Locked", style = monoHud(11, color = Palette.StoneGray))
+                }
+            } else {
+                // Glass chip: translucent + hairline ring + whisper halo. 44 pt touch via
+                // heightIn (visual stays the mock's compact chip inside a taller target).
+                Box(
+                    Modifier
+                        .softHalo(radius = 15.dp, elevation = 2.dp)
+                        .heightIn(min = Rhythm.TouchTarget.dp)
+                        .background(c.glass, chipRadius)
+                        .border(1.dp, c.hairline, chipRadius)
+                        .clickable(onClick = onOpenFloors),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        Text(
+                            FloorsStrings.floors,
+                            fontSize = 11.5.sp,
+                            color = c.secondaryLabel,
+                            maxLines = 1,
+                        )
+                        Text(" ›", fontSize = 11.5.sp, color = Palette.StoneGray)
                     }
                 }
             }
