@@ -49,6 +49,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import app.maestri.wire.WorkspaceMeta
 import app.maestri.wire.session.WireSession
 import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.GlyphOrIcon
 
 /**
  * Workspace list: `GET /api/workspaces` polled every 15 s (the docs' attention-watch
@@ -169,8 +170,8 @@ fun WorkspacesScreen(
                         ) {
                             Column(Modifier.padding(14.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        iconGlyph(ws.icon),
+                                    GlyphOrIcon(
+                                        ws.icon,
                                         fontSize = 18.sp,
                                         modifier = Modifier.width(28.dp),
                                     )

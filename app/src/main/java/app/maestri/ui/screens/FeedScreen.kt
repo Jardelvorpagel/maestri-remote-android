@@ -58,6 +58,7 @@ import kotlinx.coroutines.launch
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.controlShape
 import app.maestri.ui.Style.BackLabel
+import app.maestri.ui.Style.GlyphOrIcon
 
 /**
  * Live feed for one workspace: `WS /api/feed/stream?ws=…&token=…`.
@@ -295,7 +296,7 @@ private fun TerminalCardView(
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(iconGlyph(t.icon), fontSize = 16.sp, modifier = Modifier.width(26.dp))
+                GlyphOrIcon(t.icon, fontSize = 16.sp, modifier = Modifier.width(26.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(

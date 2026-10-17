@@ -82,6 +82,7 @@ import app.maestri.ui.Style.pillShape
 import app.maestri.ui.Style.cardShape
 import app.maestri.ui.Style.controlShape
 import app.maestri.ui.Style.BackLabel
+import app.maestri.ui.Style.GlyphOrIcon
 
 /**
  * Canvas v1 — read-only spatial mirror of the floor's canvas that rides inside every
@@ -937,7 +938,7 @@ private fun CanvasTerminalNode(
         ) {
             Column(Modifier.fillMaxSize().padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(iconGlyph(t.icon), fontSize = 22.sp, modifier = Modifier.width(36.dp))
+                    GlyphOrIcon(t.icon, fontSize = 22.sp, modifier = Modifier.width(36.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(

@@ -16,6 +16,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,9 +89,11 @@ internal fun applyRecentsBlanking(activity: FragmentActivity, locked: Boolean) {
     }
 }
 
-/** Lock cover: full-bleed canvas chrome, headline + Unlock (verbatim strings only). */
+/** Lock cover: full-bleed canvas chrome, headline + Unlock (verbatim strings only).
+ *  [interactive] false during the cold-start loading window — locked-looking, no
+ *  prompt is launched for a lock that may still resolve to disabled. */
 @Composable
-private fun AppLockCover(store: AppLockStore, activity: FragmentActivity?) {
+private fun AppLockCover(store: AppLockStore, activity: FragmentActivity?, interactive: Boolean) {
     val colors = LocalMaestriColors.current
     Surface(modifier = Modifier.fillMaxSize(), color = colors.canvasChrome) {
         Column(
@@ -109,7 +112,11 @@ private fun AppLockCover(store: AppLockStore, activity: FragmentActivity?) {
             )
             Spacer(Modifier.height(18.dp))
             Button(
-                onClick = { activity?.let { AppLockGate.launchPrompt(it) { store.unlock() } } },
+                onClick = if (interactive) {
+                    { activity?.let { AppLockGate.launchPrompt(it) { store.unlock() } } }
+                } else {
+                    { }
+                },
                 shape = RoundedCornerShape(MaestriRadii.Control),
             ) {
                 Text(SettingsStrings.unlock)
@@ -125,19 +132,28 @@ fun AppLockGate(
     content: @Composable () -> Unit,
 ) {
     val locked = store.locked
+    val enabledOrNull by store.enabledOrNull.collectAsState()
+    // Spec 4.5 cold-start race: while the initial DataStore read is pending the
+    // enabled state is true-or-unknown, so the gate presents locked-looking until
+    // the read resolves (then either releases, or locks + prompts immediately).
+    val loading = enabledOrNull == null
     val activity = LocalContext.current as? FragmentActivity
 
-    // FLAG_SECURE recents blanking while locked (spec 4.6, ADAPTED-CANDIDATE, one bool).
+    // FLAG_SECURE recents blanking while locked (spec 4.6, ADAPTED-CANDIDATE, one
+    // bool). During the loading window the cover itself already looks like the
+    // lock screen, so a mid-load recents snapshot is visually covered.
     LaunchedEffect(locked) {
         if (activity != null) applyRecentsBlanking(activity, locked)
     }
 
-    // Auto-shown prompt on the frame where the gate engages (spec 3 mapping table).
+    // Auto-shown prompt on the frame where the gate engages (spec 3 mapping table)
+    // — including the frozen moment the cold read resolves to enabled: flipping
+    // locked = true re-runs this effect, forcing the prompt immediately.
     LaunchedEffect(locked) {
         if (locked && activity != null) {
             AppLockGate.launchPrompt(activity) { store.unlock() }
         }
     }
 
-    if (locked) AppLockCover(store, activity) else content()
+    if (locked || loading) AppLockCover(store, activity, interactive = locked) else content()
 }

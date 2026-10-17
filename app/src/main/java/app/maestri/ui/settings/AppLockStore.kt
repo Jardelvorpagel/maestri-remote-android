@@ -10,10 +10,12 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 private val Context.appLockDataStore by preferencesDataStore(name = "maestri_app_lock")
 
@@ -33,16 +35,52 @@ class AppLockStore(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** Cold-start truth (spec 4.5 conservative design): null while the initial
+     *  DataStore read is pending, then true/false. The gate presents locked-looking
+     *  for the whole null window, so the first frames after a process death can
+     *  never render the app while the enabled state is still unknown. */
+    private val _enabledOrNull = MutableStateFlow<Boolean?>(null)
+    private val _graceOrNull = MutableStateFlow<Int?>(null)
+
+    /** Read-resolution state: null = loading, else resolved enabled. */
+    val enabledOrNull: StateFlow<Boolean?> = _enabledOrNull
+
     val enabled: StateFlow<Boolean> =
-        context.appLockDataStore.data
-            .map { it[Keys.ENABLED] ?: false }
+        _enabledOrNull
+            .map { it ?: false }
             .stateIn(scope, SharingStarted.Eagerly, false)
 
     /** Seconds; default 60 = "After 1 Minute" (spec default, CANDIDATE). */
     val graceSeconds: StateFlow<Int> =
-        context.appLockDataStore.data
-            .map { it[Keys.GRACE] ?: 60 }
+        _graceOrNull
+            .map { it ?: 60 }
             .stateIn(scope, SharingStarted.Eagerly, 60)
+
+    init {
+        scope.launch {
+            var first = true
+            context.appLockDataStore.data.collect { prefs ->
+                _enabledOrNull.value = prefs[Keys.ENABLED] ?: false
+                _graceOrNull.value = prefs[Keys.GRACE] ?: 60
+                if (first) {
+                    first = false
+                    onColdReadResolved()
+                }
+            }
+        }
+    }
+
+    /**
+     * Spec 4.5: a killed process re-locks on relaunch (leftAt is never persisted,
+     * so it reads 0 and the away-math arms). If the re-entry's onStart beat the
+     * first DataStore read, the arm decision had to wait for this moment —
+     * resolve by engaging the lock now when enabled; the gate's
+     * LaunchedEffect(locked) then launches the biometric prompt immediately on
+     * the next frame. Resolving to disabled just releases the loading cover.
+     */
+    private fun onColdReadResolved() {
+        if (_enabledOrNull.value == true && !locked) locked = true
+    }
 
     suspend fun setEnabled(value: Boolean) {
         context.appLockDataStore.edit { it[Keys.ENABLED] = value }
@@ -53,7 +91,8 @@ class AppLockStore(private val context: Context) {
     }
 
     // ── In-memory lock state. App-scoped so rotation never drops the gate (spec 4.8);
-    // deliberately NOT persisted: a killed process re-locks on relaunch (spec 4.5).
+    // deliberately NOT persisted: a killed process re-locks on relaunch (spec 4.5) —
+    // the cold-start loading window above covers the frames until the read lands.
     /** armed = whether the lock test on (re)entry should engage. */
     @Volatile var rearmArmed: Boolean = false
         private set
