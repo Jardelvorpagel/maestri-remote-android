@@ -78,11 +78,27 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.Palette
+import app.maestri.ui.Style.softHalo
+import app.maestri.ui.Style.warmRing
 import app.maestri.ui.Style.pillShape
 import app.maestri.ui.Style.cardShape
 import app.maestri.ui.Style.controlShape
 import app.maestri.ui.Style.BackLabel
 import app.maestri.ui.Style.GlyphOrIcon
+import app.maestri.ui.Style.vendorColor
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import app.maestri.ui.Style.MaestriRadii
+import app.maestri.ui.Style.Overline
+import android.graphics.PathEffect
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 /**
  * Canvas v1 — read-only spatial mirror of the floor's canvas that rides inside every
@@ -127,6 +143,10 @@ fun CanvasScreen(
     // Persisted per-workspace view state, as iOS keeps it in UserDefaults
     // (`remote.camera.<serverId>.<wsId>` = [x,y,zoom] plus the view's followMac flag).
     var following by remember { mutableStateOf(false) }
+
+    // design-v2 modern (todo #31): Stack (single-column cards + board preview strip)
+    // is the PRIMARY state; Board = the full spatial stage. Defaults to Stack (spec §4).
+    var viewMode by remember { mutableStateOf(CanvasViewMode.Stack) }
     var cameraReady by remember { mutableStateOf(false) }
     var saveJob by remember { mutableStateOf<Job?>(null) }
 
@@ -292,7 +312,8 @@ fun CanvasScreen(
         // Full-screen gesture surface BEHIND the overlay chrome. Pointer positions arrive as stage
         // px; the helpers above turn them into canvas points for hit-testing and for optimistic
         // frames, so a move never has to round-trip through the host to be visible.
-        Box(
+        // (Board state only — Stack renders the card list below.)
+        if (viewMode == CanvasViewMode.Board) Box(
             Modifier
                 .fillMaxSize()
                 .pointerInput(following, ctl.mode, penActive, canvas) {
@@ -411,58 +432,33 @@ fun CanvasScreen(
                     )
                 }
             }
-            FollowChip(following = following, enabled = canvas != null) { on ->
-                following = on
-                if (on) fitted = true    // mirror takes over from here
-                scope.launch { session.store.saveFollowMac(serverKey, on) }
-                if (!on) persistCamera() // keep where we stopped
+            // design-v2 modern: segmented Stack⇄Board (44pt, ivory-on-charcoal thumb).
+            CanvasViewSegmented(
+                mode = viewMode,
+                onStack = { viewMode = CanvasViewMode.Stack },
+                onBoard = { viewMode = CanvasViewMode.Board },
+            )
+            // Camera chrome is a Board-state concern; Stack keeps the socket chip only.
+            if (viewMode == CanvasViewMode.Board) {
+                FollowChip(following = following, enabled = canvas != null) { on ->
+                    following = on
+                    if (on) fitted = true    // mirror takes over from here
+                    scope.launch { session.store.saveFollowMac(serverKey, on) }
+                    if (!on) persistCamera() // keep where we stopped
+                }
+                TextButton(
+                    onClick = { fitted = false },
+                    enabled = canvas != null && !following,
+                ) { Text("⤢ Fit") }
+                ConnChip(socketState, socketError)
+            } else {
+                ConnChip(socketState, socketError)
             }
-            TextButton(
-                onClick = { fitted = false },
-                enabled = canvas != null && !following,
-            ) { Text("⤢ Fit") }
-            ConnChip(socketState, socketError)
         }
 
         // Write tools + the mode banner sit in their own row so the header keeps its layout.
         Column(Modifier.fillMaxWidth().align(Alignment.TopStart).padding(top = 56.dp).statusBarsPadding()) {
-            CanvasToolbar(
-                mode = ctl.mode,
-                canTie = (canvas?.connections?.size ?: 0) >= 1,
-                onAdd = { addMenu = true },
-                onDraw = {
-                    penActive = !penActive
-                    ctl.enterMode(CanvasMode.Idle)
-                },
-                onTie = {
-                    penActive = false
-                    ctl.enterMode(CanvasMode.TieLinking(""))
-                },
-                onErase = { ctl.eraseLastDrawing() },
-                onCancelMode = {
-                    ctl.enterMode(CanvasMode.Idle)
-                    penActive = false
-                },
-                onGroup = {
-                    val gid = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }?.groupId
-                    if (gid == null) ctl.groupSelected(ctl.selection.keys.toList())
-                    else ctl.groupActionsFor = gid          // already grouped: this chip renames it
-                },
-                onUngroup = {
-                    val gid = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }?.groupId
-                    val members = canvas?.nodes?.filter { it.groupId == gid }?.map { it.id }
-                    if (gid == null || members.isNullOrEmpty()) ctl.error(CanvasStrings.thisGroupIsNoLongerOnTheCanvas)
-                    else ctl.ungroup(members)              // one workspace-level ungroup for the whole group
-                },
-                onColor = {
-                    val node = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }
-                    ctl.colorFor = node?.groupId?.let { ColorTarget.Group(it) }
-                        ?: node?.let { ColorTarget.Node(it) }
-                },
-                onDeleteSelected = { ctl.askDelete(ctl.selection.keys.toList()) },
-                selectionCount = ctl.selection.size,
-            )
-            if (penActive) {
+            if (viewMode == CanvasViewMode.Board && penActive) {
                 Row(
                     Modifier
                         .padding(horizontal = 12.dp, vertical = 4.dp)
@@ -479,11 +475,11 @@ fun CanvasScreen(
             }
         }
 
-        // Zoom badge.
-        Box(
+        // Zoom badge — Board state only, lifted above the floating toolbar's clearance band.
+        if (viewMode == CanvasViewMode.Board) Box(
             Modifier
                 .align(Alignment.BottomStart)
-                .padding(16.dp)
+                .padding(start = 16.dp, bottom = 88.dp)
                 .background(LocalMaestriColors.current.canvasSurface.copy(alpha = 0.85f), pillShape())
                 .padding(horizontal = 10.dp, vertical = 4.dp)
         ) {
@@ -494,12 +490,110 @@ fun CanvasScreen(
             )
         }
 
+        // design-v2 modern: the floating 7-pill thumb toolbar (spec §4 04) — glass
+        // rgba(20,20,19,.72) pills (hairline ring + halo; no backdrop blur in Compose 1.7),
+        // 44pt targets, ✕ destructive in Error Crimson, z-index 10, 88px content band so
+        // it never covers the stage. Board state only.
+        // The 7-pill toolbar rides BOTH states (the example page shows it over the
+        // stack preview); tap-needing modes (＋/✎/⌘) auto-switch to Board above.
+        val selCount = ctl.selection.size
+        Row(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 24.dp)
+                .zIndex(10f),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GlassPill("＋", "Add node", false, true, false) { addMenu = true; viewMode = CanvasViewMode.Board }
+                GlassPill("✎", "Draw with one finger", penActive, true, false) {
+                    penActive = !penActive
+                    ctl.enterMode(CanvasMode.Idle)
+                    if (penActive) viewMode = CanvasViewMode.Board
+                }
+                GlassPill("⌘", "Tie two ropes", false, (canvas?.connections?.size ?: 0) >= 1, false) {
+                    penActive = false
+                    ctl.enterMode(CanvasMode.TieLinking(""))
+                    viewMode = CanvasViewMode.Board
+                }
+                GlassPill("⌫", "Erase last drawing", false, true, false) { ctl.eraseLastDrawing() }
+                GlassPill("◐", "Change color", false, selCount > 0, false) {
+                    val node = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }
+                    ctl.colorFor = node?.groupId?.let { ColorTarget.Group(it) }
+                        ?: node?.let { ColorTarget.Node(it) }
+                }
+                GlassPill("⊞", "Group or rename group", true, selCount > 0, false) {
+                    val sel = canvas?.nodes?.filter { ctl.selection.containsKey(it.id) }.orEmpty()
+                    val gid = sel.firstOrNull()?.groupId
+                    if (gid == null) ctl.groupSelected(ctl.selection.keys.toList())
+                    else ctl.groupActionsFor = gid          // already grouped: renames it
+                }
+                GlassPill("✕", CanvasStrings.deleteSelectedNodes, false, selCount > 0, true) {
+                    ctl.askDelete(ctl.selection.keys.toList())
+                }
+            }
+        }
+        if (viewMode == CanvasViewMode.Stack) {
+            // ── Stack state (primary): single-column node cards + board preview strip (spec §4)
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(top = 64.dp, start = 16.dp, end = 16.dp, bottom = 76.dp)
+            ) {
+                if (canvas == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("no snapshot yet…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    CanvasStackSummary(canvas)
+                    val visible = canvas.nodes.filter { optimism.removed[it.id] != true }
+                    if (visible.isEmpty()) {
+                        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Text(CanvasStrings.stackEmpty, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    } else {
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            visible.forEach { node ->
+                                StackNodeCard(
+                                    node = node,
+                                    snap = snap,
+                                    selected = ctl.selection[node.id] == true,
+                                    onClick = { openOrSelect(node) },
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Overline("Board preview")
+                    Spacer(Modifier.height(6.dp))
+                    CanvasPreviewStrip(canvas)
+                }
+            }
+        }
+
         // ------------------------------------------------------------------ overlays
         ctl.menuFor?.let { node ->
             NodeContextMenu(
                 node = node,
                 connections = canvas?.connections.orEmpty(),
                 onDismiss = { ctl.menuFor = null },
+                onUngroup = {
+                    ctl.menuFor = null
+                    val g = node.groupId
+                    val members = canvas?.nodes?.filter { it.groupId == g }?.map { it.id }
+                    if (g != null && !members.isNullOrEmpty()) {
+                        ctl.ungroup(members)    // one workspace-level ungroup for the whole group
+                    } else {
+                        ctl.error(CanvasStrings.thisGroupIsNoLongerOnTheCanvas)
+                    }
+                },
                 onRename = {
                     ctl.menuFor = null
                     ctl.renameFor = node
@@ -1055,6 +1149,417 @@ private fun UnknownNodeBox(node: CanvasNode, selected: Boolean) {
             }
         }
     }
+}
+
+// ============================================================================ design-v2 modern
+// (todo #31 — the 04 Canvas pushed frame: Stack ⇄ Board; stack = single-column
+// cards + board preview strip; board keeps the full spatial stage behind a
+// floating 7-pill glass thumb toolbar.)
+
+/** Canvas page states: Stack is primary (spec §4); Board = the full spatial stage. */
+private enum class CanvasViewMode { Stack, Board }
+
+/** Canvas host palette literals — surviving contracts, verbatim hue (spec §2/§4). */
+private val RopeInk = Color(0xFFF0A65E)      // rope #F0A65E
+private val NoteYellow = Color(0xFFF5D142)   // host note-yellow #F5D142 (.12 fill / .35 ring rendered)
+
+/** Track for the Stack⇄Board segmented: card-2 lift, hairline ring, 3px inner padding, 44pt tall. */
+@Composable
+private fun CanvasViewSegmented(
+    mode: CanvasViewMode,
+    onStack: () -> Unit,
+    onBoard: () -> Unit,
+) {
+    Row(
+        Modifier
+            .height(44.dp)
+            .background(Palette.ScreenLift, RoundedCornerShape(MaestriRadii.Control))
+            .border(1.dp, Palette.DarkWarm, RoundedCornerShape(MaestriRadii.Control))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SegmentedSpan(CanvasStrings.stackMode, mode == CanvasViewMode.Stack, onStack)
+        SegmentedSpan(CanvasStrings.boardMode, mode == CanvasViewMode.Board, onBoard)
+    }
+}
+
+@Composable
+private fun SegmentedSpan(label: String, active: Boolean, onClick: () -> Unit) {
+    // Active segment = ivory-on-charcoal (dispatch ruling; captured art) — terracotta stays CTA-only.
+    Box(
+        Modifier
+            .fillMaxHeight()
+            .background(
+                if (active) Palette.NearBlack else Color.Transparent,
+                RoundedCornerShape(MaestriRadii.Control),
+            )
+            .border(1.dp, if (active) Palette.DarkWarm else Color.Transparent, RoundedCornerShape(MaestriRadii.Control))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (active) Palette.Ivory else Palette.StoneGray,
+        )
+    }
+}
+
+/**
+ * The thumb toolbar pill — spec glass = rgba(20,20,19,.72) (#141413 @ .72) with a
+ * hairline ring + soft halo. Backdrop blur is not expressible in Compose 1.7, so
+ * glass = translucency + ring + halo (wave-3 deviation, everywhere it appears).
+ * [active] = terracotta ring + terracotta glyph (the .ipill.ac state), [destructive]
+ * = Error Crimson glyph per spec.
+ */
+@Composable
+private fun GlassPill(
+    glyph: String,
+    label: String,
+    active: Boolean,
+    enabled: Boolean,
+    destructive: Boolean,
+    onClick: () -> Unit,
+) {
+    val c = LocalMaestriColors.current
+    val tint = when {
+        !enabled -> c.secondaryLabel.copy(alpha = 0.4f)
+        destructive -> Palette.Crimson
+        active -> Palette.Terracotta
+        else -> c.secondaryLabel
+    }
+    Box(
+        Modifier
+            .size(44.dp)
+            .background(Palette.NearBlack.copy(alpha = 0.72f), CircleShape)
+            .softHalo(radius = 22.dp, color = if (active) Palette.Terracotta else Palette.NearBlack)
+            .border(1.dp, if (active) Palette.Terracotta else Palette.DarkWarm, CircleShape)
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(glyph, fontSize = 17.sp, color = tint)
+    }
+}
+
+/** Section overline above the stack cards: real counts + the surviving palette legend. */
+@Composable
+private fun CanvasStackSummary(canvas: app.maestri.wire.CanvasSnapshot) {
+    val floors = canvas.nodes.mapNotNull { it.terminal?.floorName }.distinct().size
+    Overline("Nodes · ${canvas.nodes.size} pts · $floors ${if (floors == 1) "floor" else "floors"} · rope #F0A65E · note #F5D142")
+}
+
+/**
+ * Single-column stack card. Terminal nodes = the dev-1 status-card form (vendor dot,
+ * name, mono agent/status row, preview tail, floor pill); note nodes = the host
+ * note-yellow tint with a serif 500 title + the fichário chip (contract); text nodes
+ * = body card; anything else = the simple titled box.
+ */
+@Composable
+private fun StackNodeCard(
+    node: CanvasNode,
+    snap: FeedSnapshot?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val c = LocalMaestriColors.current
+    val isNote = node.kind == "note"
+    val isText = node.kind == "text" && node.text != null
+    val ring = when {
+        selected -> 2.dp to c.accent
+        isNote -> 1.dp to NoteYellow.copy(alpha = 0.35f)
+        else -> 1.dp to Palette.DarkWarm
+    }
+    val cardBase = Palette.DarkSurface
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .background(
+                when {
+                    isNote -> lerp(cardBase, NoteYellow, 0.14f)
+                    else -> cardBase
+                },
+                RoundedCornerShape(MaestriRadii.Card),
+            )
+            .warmRing(hairline = ring.second, radius = MaestriRadii.Card)
+            .padding(14.dp)
+    ) {
+        when {
+            node.kind == "terminal" && node.terminal != null -> {
+                val t = node.terminal
+                val pending = snap?.pendingPromptIds?.contains(t.id) == true
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).background(
+                            vendorColor(t.agentType) ?: Palette.Claude, CircleShape))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            t.name,
+                            fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (t.isManager) {
+                            Spacer(Modifier.width(6.dp))
+                            Text("(maestro)", fontSize = 11.sp, color = c.warning)
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Box(Modifier.size(10.dp).background(
+                            when {
+                                pending || t.needsAttention -> Palette.Crimson
+                                t.isActive == true -> Palette.Success
+                                t.isLive -> Palette.Warn
+                                else -> Palette.StoneGray
+                            }, CircleShape))
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        ((if (t.isRunning) "running" else "stopped") +
+                            (if (t.agentType.isNotBlank()) " · ${t.agentType}" else "") +
+                            (if (t.isActive == true) " · working" else "") +
+                            (if (t.needsAttention) " · attention" else "")),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.5.sp,
+                        color = Palette.StoneGray,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    t.preview.lastOrNull()?.takeIf { it.isNotBlank() }?.let { line ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            line,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.5.sp,
+                            color = Palette.WarmSilver,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    t.floorName?.let { fn ->
+                        Spacer(Modifier.height(6.dp))
+                        Box(Modifier.background(Palette.ScreenLift, pillShape()).padding(horizontal = 10.dp, vertical = 3.dp)) {
+                            Text(fn, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, color = Palette.StoneGray)
+                        }
+                    }
+                }
+            }
+            isNote -> {
+                Column {
+                    // Example-faithful: serif 500 title (note-yellow ink) + fichário chip inline right.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            node.title.ifBlank { "note" },
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Medium,   // spec: serif @ 500 only
+                            fontSize = 13.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            color = NoteYellow,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Box(Modifier.border(1.dp, NoteYellow.copy(alpha = 0.30f), pillShape()).padding(horizontal = 10.dp, vertical = 3.dp)) {
+                            Text(CanvasStrings.fichárioChip, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, color = NoteYellow)
+                        }
+                    }
+                    node.subtitle?.takeIf { it.isNotBlank() }?.let {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            it,
+                            fontSize = 12.5.sp,
+                            lineHeight = 12.5.sp * 1.55f,
+                            color = Palette.WarmSilver,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            isText -> {
+                Text(
+                    node.text?.text ?: node.title,
+                    fontSize = 13.sp,
+                    color = Palette.Ivory,
+                    maxLines = 3, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            else -> {
+                Column {
+                    Text(
+                        node.title.ifBlank { node.kind },
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    node.subtitle?.let {
+                        Text(it, fontSize = 11.sp, color = Palette.StoneGray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text(
+                        if (node.isNodeLocked) "locked on your computer · ${node.kind}" else node.kind,
+                        fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = Palette.StoneGray,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Board preview strip (stack state bottom): 20px grid, node blips scaled from real
+ * frames, rope curves between node centers (dashed when the host sends no points),
+ * non-interactive — it previews the board, it is not the board. Spec 20-pt rhythm
+ * (the mock's 24px grid was a mock-local value; the spec + dispatch say 20).
+ */
+@Composable
+private fun CanvasPreviewStrip(canvas: app.maestri.wire.CanvasSnapshot) {
+    val stripH = 172.dp
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .height(stripH)
+            .warmRing(hairline = Palette.DarkWarm, radius = MaestriRadii.Card)
+            .background(Palette.ScreenLift, RoundedCornerShape(MaestriRadii.Card))
+            .clip(RoundedCornerShape(MaestriRadii.Card))
+    ) {
+        val w = maxWidth.value
+        val h = stripH.value
+        val padDp = 16f
+        val bounds = canvasBoundsOf(canvas)
+        val cw = bounds.width.coerceAtLeast(1f)
+        val ch = bounds.height.coerceAtLeast(1f)
+        val scale = minOf((w - 2f * padDp) / cw, (h - 2f * padDp) / ch).coerceIn(0.02f, 0.5f)
+        val offX = (w - cw * scale) / 2f - bounds.left * scale
+        val offY = (h - ch * scale) / 2f - bounds.top * scale
+        val byId = remember(canvas) { canvas.nodes.associateBy { it.id } }
+        val gridColor = Palette.WarmSilver.copy(alpha = 0.05f)
+
+        // 20px grid + rope curves BEHIND the blips.
+        Canvas(Modifier.fillMaxSize()) {
+            val step = 20.dp.toPx()
+            var gx = 0f
+            while (gx <= size.width) {
+                drawLine(gridColor, Offset(gx, 0f), Offset(gx, size.height), strokeWidth = 1f)
+                gx += step
+            }
+            var gy = 0f
+            while (gy <= size.height) {
+                drawLine(gridColor, Offset(0f, gy), Offset(size.width, gy), strokeWidth = 1f)
+                gy += step
+            }
+            fun bx(v: Double) = (v * scale + offX) * density   // strip dp → px
+            fun byy(v: Double) = (v * scale + offY) * density
+            canvas.connections.forEach { conn ->
+                val from = byId[conn.fromNodeId]?.frame ?: return@forEach
+                val to = byId[conn.toNodeId]?.frame ?: return@forEach
+                val x0 = bx(from.centerX).toFloat()
+                val y0 = byy(from.centerY).toFloat()
+                val x1 = bx(to.centerX).toFloat()
+                val y1 = byy(to.centerY).toFloat()
+                val dx = x1 - x0
+                val dy = y1 - y0
+                val len = kotlin.math.sqrt(dx * dx + dy * dy).coerceAtLeast(1f)
+                // perpendicular bow — the mock's graceful rope curve
+                val cxp = (x0 + x1) / 2f - dy / len * (len * 0.12f)
+                val cyp = (y0 + y1) / 2f + dx / len * (len * 0.12f)
+                val path = Path().apply {
+                    moveTo(x0, y0)
+                    quadraticBezierTo(cxp, cyp, x1, y1)
+                }
+                when {
+                    conn.isActive -> {
+                        drawPath(path, RopeInk.copy(alpha = 0.30f), style = Stroke(width = 5f, cap = StrokeCap.Round))
+                        drawPath(path, RopeInk, style = Stroke(width = 2f, cap = StrokeCap.Round))
+                    }
+                    conn.points.isEmpty() -> drawPath(
+                        path, Palette.WarmSilver.copy(alpha = 0.55f),
+                        style = Stroke(width = 1.5f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 12f))),
+                    )
+                    else -> drawPath(
+                        path, Palette.WarmSilver.copy(alpha = 0.55f),
+                        style = Stroke(width = 1.5f, cap = StrokeCap.Round),
+                    )
+                }
+            }
+        }
+
+        // Pinned blips: real frames scaled into the strip (min readable size; clipped).
+        canvas.nodes.forEach { n ->
+            val bw = (n.frame.width * scale).toFloat().coerceAtLeast(30f)
+            val bh = (n.frame.height * scale).toFloat().coerceAtLeast(20f)
+            val x = (n.frame.x * scale).toFloat() + offX
+            val y = (n.frame.y * scale).toFloat() + offY
+            val isNote = n.kind == "note"
+            Box(
+                Modifier
+                    .offset(x = x.dp, y = y.dp)
+                    .size(bw.dp, bh.dp)
+                    .background(
+                        if (isNote) lerp(Palette.DarkSurface, NoteYellow, 0.14f) else Palette.DarkSurface,
+                        RoundedCornerShape(8.dp),
+                    )
+                    .border(
+                        1.dp,
+                        if (isNote) NoteYellow.copy(alpha = 0.35f) else Palette.DarkWarm,
+                        RoundedCornerShape(8.dp),
+                    )
+                    .padding(horizontal = 7.dp, vertical = 4.dp),
+            ) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (n.kind == "terminal" && n.terminal != null) {
+                            Box(Modifier.size(5.dp).background(vendorColor(n.terminal.agentType) ?: Palette.Claude, CircleShape))
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(
+                            n.title.ifBlank { n.kind },
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 9.5.sp,
+                            color = if (isNote) NoteYellow else Palette.Ivory,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (isNote) {
+                        n.subtitle?.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                it,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp,
+                                color = NoteYellow.copy(alpha = 0.70f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    } else {
+                        n.terminal?.let { t ->
+                            Text(
+                                (if (t.isActive == true) "working" else if (t.isLive) "live" else if (t.isRunning) "running" else "stopped") +
+                                    (if (t.agentType.isNotBlank()) " · ${t.agentType}" else ""),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp,
+                                color = Palette.StoneGray,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Canvas-space union bounds for the strip's fit math (host bounds when present). */
+private fun canvasBoundsOf(canvas: app.maestri.wire.CanvasSnapshot): Rect {
+    val b = canvas.bounds
+    if (b != null && b.width > 0 && b.height > 0) {
+        return Rect(b.x.toFloat(), b.y.toFloat(), (b.x + b.width).toFloat(), (b.y + b.height).toFloat())
+    }
+    return canvas.nodes
+        .map { Rect(it.frame.x.toFloat(), it.frame.y.toFloat(), (it.frame.x + it.frame.width).toFloat(), (it.frame.y + it.frame.height).toFloat()) }
+        .reduceOrNull { a, r ->
+            Rect(minOf(a.left, r.left), minOf(a.top, r.top), maxOf(a.right, r.right), maxOf(a.bottom, r.bottom))
+        }
+        ?: Rect(0f, 0f, 800f, 600f)
 }
 
 /** #RRGGBB → Color, verbatim hex; anything malformed → fallback. */

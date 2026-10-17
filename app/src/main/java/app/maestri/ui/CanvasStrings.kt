@@ -49,6 +49,11 @@ object CanvasStrings {
     const val newNote = "New Note"
     const val addToFichário = "Add to Fichário"
     const val opensThisFichárioSPages = "Opens this fichário's pages"
+    // design-v2 modern (2026-10-17): segmented Stack⇄Board + stack-state vocabulary.
+    const val stackMode = "Stack"
+    const val boardMode = "Board"
+    const val fichárioChip = "fichário"
+    const val stackEmpty = "No nodes on this canvas yet — switch to Board to add them"
     const val aFichárioConnectsToTerminals = "A fichário connects to terminals."
     const val aPortalConnectsToTerminalsAndOtherPortals = "A portal connects to terminals and other portals."
     const val aTerminalConnectsToTerminalsNotesFicháriosAndPortals = "A terminal connects to terminals, notes, fichários and portals."

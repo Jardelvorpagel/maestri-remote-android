@@ -1050,6 +1050,9 @@ fun NodeContextMenu(
     onDisconnectAll: () -> Unit,
     onDelete: () -> Unit,
     onEditText: (() -> Unit)?,
+    // design-v2 modern: the floating toolbar's ⊞ pill is group-or-rename; UNGROUP
+    // rides here so the 7-pill spec toolbar loses no action.
+    onUngroup: (() -> Unit)? = null,
 ) {
     val mine = connections.filter { it.fromNodeId == node.id || it.toNodeId == node.id }
     MenuCard(onDismiss) {
@@ -1063,6 +1066,7 @@ fun NodeContextMenu(
         if (onEditText != null) MenuItem("Edit text", onEditText)
         MenuItem(if (node.isNodeLocked) "Unlock" else "Lock", onLock)
         MenuItem("Duplicate", onDuplicate)
+        if (onUngroup != null && node.groupId != null) MenuItem(CanvasStrings.ungroup + " · " + (node.groupId ?: ""), onUngroup)
         MenuItem(CanvasStrings.connectToAnotherNode, onConnect)
         if (mine.size > 1) MenuItem(CanvasStrings.removeAllConnections, onDisconnectAll)
         MenuItem(CanvasStrings.removeConnection, onDisconnectAll)
