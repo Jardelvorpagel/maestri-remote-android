@@ -96,7 +96,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import app.maestri.ui.Style.MaestriRadii
 import app.maestri.ui.Style.Overline
-import android.graphics.PathEffect
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 
@@ -532,7 +532,6 @@ fun CanvasScreen(
                     ctl.askDelete(ctl.selection.keys.toList())
                 }
             }
-        }
         if (viewMode == CanvasViewMode.Stack) {
             // ── Stack state (primary): single-column node cards + board preview strip (spec §4)
             Column(
