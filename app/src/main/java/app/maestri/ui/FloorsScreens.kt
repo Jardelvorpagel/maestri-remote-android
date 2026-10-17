@@ -293,6 +293,8 @@ fun FloorsScreen(
                     )
                 }
             }
+        }
+    }
 
             // frame-07 bottom: active ＋ pill + mono input pill (44pt) — quick-create a
             // worktree floor from a typed branch (existingBranch when the name is taken).
@@ -346,8 +348,6 @@ fun FloorsScreen(
                     }
                 }
             }
-        }
-    }
 
     if (showCreate) {
         ModalBottomSheet(onDismissRequest = { showCreate = false }) {
