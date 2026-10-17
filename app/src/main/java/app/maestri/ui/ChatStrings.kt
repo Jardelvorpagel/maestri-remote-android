@@ -29,6 +29,8 @@ object ChatStrings {
     // ---- scroll + history ---------------------------------------------------
 
     const val loadEarlierMessages = "Load earlier messages"
+    /** loadEarlier() honest-disable: hasOlderOnRecord == false — the retained tail ends here */
+    const val noEarlierMessagesOnRecord = "No earlier messages on record"
     const val earlierConversationHappenedInTheTerminal = "Earlier conversation happened in the terminal"
     const val scrollToBottom = "Scroll to bottom"
 

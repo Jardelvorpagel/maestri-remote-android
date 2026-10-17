@@ -61,6 +61,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.Alignment
@@ -209,9 +210,35 @@ fun ChatThreadScreen(
     }
     holder.setPinned(atBottom) // bookkeeping only
 
-    // new tail while pinned → stay on the newest entry (jump, content just grew)
+    // design-v2 strict pill (Mac ChatScrollAffordance parity): "scroll to bottom" shows
+    // ONLY when the user is away from the bottom AND a new entry arrived while away —
+    // never on a plain upward scroll, never while pinned (new entries land there anyway).
+    var newWhileAway by remember { mutableStateOf(false) }
+    val atBottomNow by rememberUpdatedState(atBottom)
+
+    // new tail: pinned → stay on the newest entry (jump, content just grew); away →
+    // raise the strict pill; conversation switch → neither (the switch effect re-seeds).
+    // The raise is ID-keyed (prevNewestId changed = a genuinely new newest entry), so
+    // deletes of old entries (size shrinks, newest unchanged) never raise the pill.
+    // lastConvSeen guards thread switches: same-size same-key snapshots on a switch must
+    // not raise it either.
+    val lastConvSeen = remember { mutableStateOf<String?>(null) }
+    val prevNewestId = remember { mutableStateOf<String?>(null) }
     LaunchedEffect(snapshot?.entries?.size, snapshot?.conversationId) {
-        if (atBottom && snapshot != null) listState.scrollToItem(0)
+        val snap = snapshot ?: return@LaunchedEffect
+        val newest = snap.entries.firstOrNull()?.id
+        if (lastConvSeen.value != snap.conversationId) {
+            lastConvSeen.value = snap.conversationId
+            prevNewestId.value = newest
+        } else if (atBottomNow) {
+            prevNewestId.value = newest
+            listState.scrollToItem(0)
+        } else if (newest != null && newest != prevNewestId.value) {
+            newWhileAway = true
+        }
+    }
+    LaunchedEffect(atBottom) {
+        if (atBottom) newWhileAway = false
     }
     // conversation switch (thread change) = re-seed scroll at the bottom (contract)
     LaunchedEffect(snapshot?.conversationId) {
@@ -288,7 +315,7 @@ fun ChatThreadScreen(
                     openAttachmentPreview = { t -> attachmentPreviewTarget = t },
                     onOpenThreads = { showThreadSheet = true },
                 )
-                if (!atBottom) {
+                if (!atBottom && newWhileAway) {
                     TextButton(
                         onClick = { scope.launch { listState.animateScrollToItem(0) } },
                         modifier = Modifier
@@ -735,7 +762,14 @@ class ChatFaceState(
                         fullHistoryLoaded = true
                         paging.value = false
                     }
-                    else -> paging.value = false
+                    else -> {
+                        // hasOlderOnRecord == false — the retained tail ends here; the host
+                        // holds nothing older. This branch USED to be a silent no-op (the
+                        // device's dead tap: button rendered, nothing happened). Honest now:
+                        // the reason surfaces in the notice line. Never silent again.
+                        _notice.value = S.noEarlierMessagesOnRecord
+                        paging.value = false
+                    }
                 }
             } catch (e: ApiException) {
                 _notice.value = "HTTP ${e.status}: ${e.message}"
@@ -1519,7 +1553,6 @@ private fun EntryList(
     ) {
         if (showBoundary) {
             item(key = "boundary") { BoundaryCard() }
-        } else if (showLoadEarlier) {
         }
         val freshIds = holder.freshEntryIds
         itemsIndexed(entries.asReversed(), key = { _, e -> e.id }) { revIdx, entry ->
@@ -1554,7 +1587,12 @@ private fun EntryList(
         }
         // design-v2 05: chain tail = visual top (reverseLayout column) — bottom-anchored
         // transcript sits under the thread chips; "load earlier" heads the older pages.
-        if (entries.isNotEmpty()) {
+        // GATE = the actionable tri-state only: hasOlderOnRecord true, or ABSENT (old-host
+        // GET-merge pending). false = the boundary card above is the whole truth — the
+        // pre-fix unconditional render put a button here that tapped into the silent
+        // false-branch, which is exactly the observed device no-op. Never render a
+        // button whose only outcome is silence.
+        if (entries.isNotEmpty() && showLoadEarlier) {
             item(key = "load-earlier") {
                 if (paging) {
                     LoadingPill(S.loadEarlierMessages, {})
