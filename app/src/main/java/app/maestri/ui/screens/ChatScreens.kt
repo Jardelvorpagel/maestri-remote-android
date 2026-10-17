@@ -115,7 +115,7 @@ import app.maestri.ui.Style.vendorColor
 import app.maestri.ui.Style.softHalo
 import app.maestri.ui.Style.Palette
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.graphics.Offset
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
@@ -1402,7 +1402,9 @@ private fun ChatTopBar(
             }
         }
     }
-}@OptIn(ExperimentalFoundationApi::class)
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ThreadChipsRow(
     holder: ChatFaceState,
