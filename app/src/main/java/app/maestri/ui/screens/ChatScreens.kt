@@ -21,7 +21,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -40,6 +45,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -60,6 +66,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -102,6 +109,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.Motion
+import app.maestri.ui.Style.Rhythm
 import app.maestri.ui.Style.pillShape
 import app.maestri.ui.Style.cardShape
 import app.maestri.ui.Style.controlShape
@@ -537,7 +546,26 @@ class ChatFaceState(
      * snapshot replacement — the newest frame replaces state. A conversation-id change
      * (thread select) replaces the transcript and restarts scroll + send state.
      */
+    /** Incoming-motion diff (design-v2): ids appearing at the NEWEST end after seeding. */
+    private val _freshEntryIds = MutableStateFlow<Set<String>>(emptySet())
+    val freshEntryIds: StateFlow<Set<String>> = _freshEntryIds
+    private val seenEntryIds = LinkedHashSet<String>()
+    private var chatSeeded = false
+
     private fun applyFullSnapshot(snap: ChatSnapshot) {
+        if (!chatSeeded) {
+            chatSeeded = true // first (seeding) snapshot: mark nothing incoming
+        } else {
+            val freshIds = snap.entries.asSequence().take(6) // newest end of the reverse list
+                .map { it.id }.filter { it !in seenEntryIds }.toSet()
+            if (freshIds.isNotEmpty()) {
+                _freshEntryIds.value = (_freshEntryIds.value + freshIds).toList().takeLast(24).toSet()
+                seenEntryIds.addAll(freshIds)
+                if (seenEntryIds.size > 400) {
+                    val it = seenEntryIds.iterator(); it.next(); it.remove()
+                }
+            }
+        }
         _snapshot.value = snap
         refreshVerb()
         // send correlation bookkeeping
@@ -682,7 +710,7 @@ class ChatFaceState(
                             val known = snap.entries.mapTo(mutableSetOf()) { it.id }
                             val head = all.takeWhile { it.id !in known }
                             if (head.isNotEmpty()) {
-                                _snapshot.value = snap.copy(entries = head + snap.entries)
+                                applyFullSnapshot(snap.copy(entries = head + snap.entries))
                             }
                         }
                         fullHistoryLoaded = true
@@ -1400,9 +1428,11 @@ private fun EntryList(
                 }
             }
         }
+        val freshIds = holder.freshEntryIds
         itemsIndexed(entries.asReversed(), key = { _, e -> e.id }) { revIdx, entry ->
             val isLast = revIdx == 0
             EntryBubble(
+                freshIds = freshIds,
                 entry = entry,
                 showNoReply = isLast && entry.isUser && snapshot.status == "idle",
                 talkingTo = snapshot.talkingToAgentName,
@@ -1452,6 +1482,7 @@ private fun BoundaryCard() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EntryBubble(
+    freshIds: StateFlow<Set<String>>,
     entry: ChatEntry,
     showNoReply: Boolean,
     talkingTo: String?,
@@ -1502,7 +1533,23 @@ private fun EntryBubble(
                 modifier = Modifier.padding(start = 4.dp, bottom = 1.dp),
             )
             else -> {
-                // message + final: canonical entry; user rides their composer segments
+                // message + final: canonical entry; user rides their composer segments.
+                // design-v2: .press scale .97 (Motion.Fast) + .incoming rise/fade (Motion.Slow).
+                val freshSet by freshIds.collectAsState()
+                val incoming = entry.id in freshSet
+                val inAnim = remember(entry.id) { Animatable(if (incoming) 0f else 1f) }
+                LaunchedEffect(entry.id, incoming) {
+                    if (incoming && !inAnim.isRunning) {
+                        inAnim.animateTo(1f, tween(Motion.Slow, easing = Motion.Ease))
+                    }
+                }
+                val bubbleSource = remember { MutableInteractionSource() }
+                val bubblePressed by bubbleSource.collectIsPressedAsState()
+                val press by animateFloatAsState(
+                    targetValue = if (bubblePressed) Motion.PressScale else 1f,
+                    animationSpec = tween(Motion.Fast, easing = Motion.Ease),
+                    label = "bubble-press",
+                )
                 Surface(
                     color = if (isUser) LocalMaestriColors.current.bubbleMine else LocalMaestriColors.current.bubbleAgent,
                     shape = RoundedCornerShape(
@@ -1513,7 +1560,16 @@ private fun EntryBubble(
                     ),
                     modifier = Modifier
                         .widthIn(max = 340.dp)
-                        .combinedClickable(onClick = {}, onLongClick = onLongPress),
+                        .graphicsLayer {
+                            scaleX = press; scaleY = press
+                            alpha = inAnim.value
+                            translationY = (1f - inAnim.value) * 12.dp.toPx()
+                        }
+                        .combinedClickable(
+                            interactionSource = bubbleSource,
+                            onClick = {},
+                            onLongClick = onLongPress,
+                        ),
                 ) {
                     Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
                         when {
@@ -1858,10 +1914,22 @@ private fun ComposerPill(
                             color = MaterialTheme.colorScheme.onSurface,
                         ),
                     )
+                    val sendSource = remember { MutableInteractionSource() }
+                    val sendPressed by sendSource.collectIsPressedAsState()
+                    val sendPress by animateFloatAsState(
+                        targetValue = if (sendPressed) Motion.PressScale else 1f,
+                        animationSpec = tween(Motion.Fast, easing = Motion.Ease),
+                        label = "send-press",
+                    )
                     Button(
                         onClick = onSend,
                         enabled = flight == null && (text.isNotBlank() || staged.isNotEmpty()),
-                        modifier = Modifier.padding(start = 6.dp),
+                        interactionSource = sendSource,
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .heightIn(min = Rhythm.TouchTarget.dp)
+                            .widthIn(min = 64.dp)
+                            .graphicsLayer { scaleX = sendPress; scaleY = sendPress },
                     ) {
                         Text(
                             when (flight?.stage) {
@@ -2325,9 +2393,17 @@ fun EnterChatModeButton(
     onChatReady: () -> Unit,
 ) {
     var busy by remember { mutableStateOf(false) }
-    TextButton(
+    val chrome = LocalMaestriColors.current
+    val enterSource = remember { MutableInteractionSource() }
+    val enterPressed by enterSource.collectIsPressedAsState()
+    val enterPress by animateFloatAsState(
+        targetValue = if (enterPressed) Motion.PressScale else 1f,
+        animationSpec = tween(Motion.Fast, easing = Motion.Ease),
+        label = "enter-chat-press",
+    )
+    Button(
         onClick = {
-            if (busy) return@TextButton
+            if (busy) return@Button
             busy = true
             session.scope.launch {
                 try {
@@ -2341,6 +2417,11 @@ fun EnterChatModeButton(
             }
         },
         enabled = !busy,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp),
-    ) { Text(S.enterChatMode, fontSize = 11.sp) }
+        interactionSource = enterSource,
+        colors = ButtonDefaults.buttonColors(containerColor = chrome.accent, contentColor = chrome.onAccent),
+        modifier = Modifier
+            .heightIn(min = Rhythm.TouchTarget.dp)
+            .graphicsLayer { scaleX = enterPress; scaleY = enterPress },
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+    ) { Text(S.enterChatMode, fontSize = 12.sp) }
 }
