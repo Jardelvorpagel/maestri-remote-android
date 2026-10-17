@@ -82,6 +82,8 @@ object FloorsStrings {
     const val statusDone = "Done"
 
     // landing
+    // frame-07 action-row literal (mock: "Land" as 48pt filled primary)
+    const val land = "Land"
     const val landFloor = "Land floor"
     const val landing = "Landing"
     const val couldntLoadTheLanding = "Couldn't Load the Landing"
@@ -208,4 +210,14 @@ object FloorsStrings {
     const val showsTheRepositorySChanges = "Shows the repository's changes"
     const val binary = "Binary"
     const val symbolicLink = "Symbolic link"
+    // frame-07 chip/button vocabulary (worktree cards). "Needs attention" = corpus
+    // literal (feed attention chips); "clean" is composed from the corpus sentence
+    // "The working tree is clean." (CANDIDATE as a bare chip label); Review/Dismiss/
+    // Copy again are the mock's action-row words (Dismiss = corpus; the others CANDIDATE).
+    const val needsAttention = "Needs attention"
+    const val cleanFloor = "clean"
+    const val reviewAction = "Review ↗"
+
+    const val newFloorFromBranch = "New floor from branch…"
+    const val copyAgain = "Copy again"
 }

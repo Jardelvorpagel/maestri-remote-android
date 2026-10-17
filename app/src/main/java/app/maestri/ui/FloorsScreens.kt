@@ -17,6 +17,7 @@ package app.maestri.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -28,9 +29,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -56,6 +65,13 @@ import kotlinx.coroutines.launch
 import androidx.compose.material3.MaterialTheme
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.controlShape
+import app.maestri.ui.Style.cardShape
+import app.maestri.ui.Style.warmRing
+import app.maestri.ui.Style.softHalo
+import app.maestri.ui.Style.MaestriRadii
+import app.maestri.ui.Style.Rhythm
+import app.maestri.ui.Style.Palette
+import app.maestri.ui.Style.MaestriType
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import app.maestri.ui.Style.BackLabel
@@ -133,7 +149,30 @@ fun FloorsScreen(
     var err by remember { mutableStateOf<String?>(null) }
     var showCreate by remember { mutableStateOf(false) }
     var busyId by remember { mutableStateOf<String?>(null) }
+    var quickBranch by remember { mutableStateOf("") }
+    var quickBusy by remember { mutableStateOf(false) }
+    var quickErr by remember { mutableStateOf<String?>(null) }
+    var actionErr by remember { mutableStateOf<String?>(null) }
+    var showLand by remember { mutableStateOf<FloorRow?>(null) }
+    var showDelete by remember { mutableStateOf<FloorRow?>(null) }
     val scope = rememberCoroutineScope()
+
+    suspend fun submitQuick() {
+        val b = quickBranch.trim()
+        if (b.isBlank() || quickBusy) return
+        quickBusy = true
+        try {
+            val existing = api.branches(wsId).branches.any { it.equals(b, ignoreCase = true) }
+            api.createFloor(wsId, name = b, gitIsolation = true, branch = b, existingBranch = existing)
+            quickBranch = ""
+            quickErr = null
+        } catch (e: Exception) {
+            quickErr = errText(e)   // host's own words (409 branch clash etc.) — verbatim
+        } finally {
+            quickBusy = false
+            refresh()
+        }
+    }
 
     suspend fun refresh() {
         try {
@@ -151,17 +190,42 @@ fun FloorsScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { BackLabel("Back") }
-            Column(Modifier.weight(1f)) {
-                Text(S.floors, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                Text(wsName, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Button(onClick = { showCreate = true }) { IconLabel(Icons.Filled.Add, S.newFloor) }
+    Box(Modifier.fillMaxSize().statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().padding(12.dp)) {
+        // frame-07 pushed lnav (48 px band): serif 24·500 title + ws meta + 44pt ＋ opens
+        // the full create sheet; the bottom quick-create covers the one-tap path.
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(48.dp)) {
+            TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { BackLabel("Back") }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                S.floors,
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.Medium,
+                fontSize = 24.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                wsName,
+                fontSize = 11.5.sp,
+                color = Palette.StoneGray,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            Text(
+                "＋",
+                fontSize = 22.sp,
+                color = LocalMaestriColors.current.accent,
+                modifier = Modifier
+                    .padding(horizontal = 11.dp, vertical = 11.dp)   // 44pt touch
+                    .clickable { showCreate = true },
+            )
         }
         ErrorLine(err)
-
+        ErrorLine(actionErr)
+        ErrorLine(quickErr)
         val s = summary
         if (s == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -172,7 +236,10 @@ fun FloorsScreen(
             val pending = s.pendingFloors.reversed()
             val floors = s.floors.filter { !it.isGround }.reversed()
             val ground = s.floors.filter { it.isGround }
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()).padding(bottom = 76.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
 
                 pending.forEach { p ->
                     PendingFloorCard(p, busyId = busyId, onDismiss = {
@@ -190,11 +257,93 @@ fun FloorsScreen(
                 }
 
                 floors.forEach { f ->
-                    FloorListRow(f, onOpen = { if (!f.isRemoving) onOpenOverview(f.id ?: "ground", f.name) })
+                    FloorListRow(
+                        f,
+                        onOpen = { if (!f.isRemoving) onOpenOverview(f.id ?: "ground", f.name) },
+                        onLand = { if (!f.isRemoving) showLand = f },
+                        onDismissAction = { if (!f.isRemoving) showDelete = f },
+                        onCopyAgain = {
+                            busyId = f.id
+                            actionErr = null
+                            scope.launch {
+                                try {
+                                    api.createFloor(
+                                        wsId,
+                                        name = f.name,
+                                        gitIsolation = true,
+                                        branch = f.branch,
+                                        existingBranch = true,
+                                    )
+                                } catch (e: Exception) {
+                                    actionErr = errText(e)
+                                } finally {
+                                    busyId = null
+                                    refresh()
+                                }
+                            }
+                        },
+                    )
                 }
 
                 ground.forEach { g ->
-                    FloorListRow(g, onOpen = { onOpenOverview("ground", g.name) })
+                    FloorListRow(
+                        g,
+                        onOpen = { onOpenOverview("ground", g.name) },
+                        onLand = {}, onDismissAction = {}, onCopyAgain = {},
+                    )
+                }
+            }
+
+            // frame-07 bottom: active ＋ pill + mono input pill (44pt) — quick-create a
+            // worktree floor from a typed branch (existingBranch when the name is taken).
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(LocalMaestriColors.current.canvasChrome)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "＋",
+                    fontSize = 18.sp,
+                    color = if (quickBranch.isNotBlank() && !quickBusy) LocalMaestriColors.current.accent
+                            else LocalMaestriColors.current.secondaryLabel,
+                    modifier = Modifier
+                        .padding(horizontal = 13.dp, vertical = 13.dp)
+                        .clickable(enabled = !quickBusy && quickBranch.isNotBlank()) { scope.launch { submitQuick() } },
+                )
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .background(LocalMaestriColors.current.card, RoundedCornerShape(22.dp))
+                        .border(1.dp, LocalMaestriColors.current.hairline, RoundedCornerShape(22.dp))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    BasicTextField(
+                        value = quickBranch,
+                        onValueChange = { quickBranch = it },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { if (!quickBusy && quickBranch.isNotBlank()) scope.launch { submitQuick() } }),
+                        textStyle = TextStyle(
+                            fontFamily = MaestriType.Mono,
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        cursorBrush = SolidColor(LocalMaestriColors.current.accent),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (quickBranch.isBlank()) {
+                        Text(
+                            S.newFloorFromBranch,
+                            style = TextStyle(fontFamily = MaestriType.Mono, fontSize = 11.5.sp, color = Palette.StoneGray),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -209,12 +358,29 @@ fun FloorsScreen(
             )
         }
     }
+
+    // frame-07 card actions hoist the sheets the overview used to own
+    showLand?.let { f ->
+        ModalBottomSheet(onDismissRequest = { showLand = null }) {
+            LandFloorSheet(api = api, wsId = wsId, floor = f, onDone = { showLand = null })
+        }
+    }
+    showDelete?.let { f ->
+        ModalBottomSheet(onDismissRequest = { showDelete = null }) {
+            DeleteFloorSheet(api = api, wsId = wsId, row = f, onDone = { showDelete = null })
+        }
+    }
 }
 
 
 @Composable
 private fun PendingFloorCard(p: PendingFloorRow, busyId: String?, onDismiss: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasChromeElevated), modifier = Modifier.fillMaxWidth()) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .warmRing(LocalMaestriColors.current.hairline, MaestriRadii.Card)
+            .background(LocalMaestriColors.current.card, cardShape()),
+    ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
@@ -242,53 +408,150 @@ private fun PendingFloorCard(p: PendingFloorRow, busyId: String?, onDismiss: () 
     }
 }
 
+
+/** Frame-07 status chip: mono-less pill, ring = status colour at ~50 % (mock chips). */
 @Composable
-private fun FloorListRow(f: FloorRow, onOpen: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface), modifier = Modifier.fillMaxWidth(), onClick = onOpen) {
-        Column(Modifier.padding(12.dp)) {
+private fun FloorStatusChip(text: String, tint: Color, busy: Boolean = false) {
+    val c = LocalMaestriColors.current
+    Box(
+        Modifier
+            .softHalo(radius = 15.dp, elevation = 2.dp)
+            .background(c.glass, RoundedCornerShape(15.dp))
+            .border(1.dp, tint.copy(alpha = 0.55f), RoundedCornerShape(15.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (busy) CircularProgressIndicator(Modifier.size(10.dp), strokeWidth = 1.5.dp, color = tint)
+            Text(text, fontSize = 11.5.sp, color = tint, maxLines = 1)
+        }
+    }
+}
+
+/** Frame-07 48pt action row button (.rowbtn / .ac = terracotta filled, the primary). */
+@Composable
+private fun RowScope.RowBtn(label: String, fill: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = LocalMaestriColors.current
+    Box(
+        Modifier
+            .weight(1f)
+            .heightIn(min = Rhythm.TouchTarget.dp)
+            .background(
+                if (fill) c.accent else c.canvasChrome,
+                controlShape(),
+            )
+            .then(
+                if (fill) Modifier.border(1.dp, c.accent, controlShape())
+                else Modifier.border(1.dp, c.hairline.copy(alpha = 0.6f), controlShape())
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.4f),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (fill) c.onAccent else c.secondaryLabel,
+            maxLines = 1,
+        )
+    }
+}
+
+/** Worktree card, frame 07: title-row + mono identity line + 48pt action rows.
+ *  Card ring turns Crimson when the floor needs attention (clone missing / blocked
+ *  status / attention). The chip ladder is honest to FloorRow's parsed fields — the
+ *  mock's "PR · ready" chip needs the floor's pullRequest datum, which FloorRow does
+ *  not parse (wire parse addition banned this lane); flagged as the open item. */
+@Composable
+private fun FloorListRow(
+    f: FloorRow,
+    onOpen: () -> Unit,
+    onLand: () -> Unit,
+    onDismissAction: () -> Unit,
+    onCopyAgain: () -> Unit,
+) {
+    val c = LocalMaestriColors.current
+    val attention = f.isCloneMissing || f.statusState == "blocked" || f.attentionCount > 0
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .then(if (f.isRemoving) Modifier.alpha(0.45f) else Modifier)
+            .warmRing(
+                if (attention) c.danger.copy(alpha = 0.55f) else c.hairline,
+                MaestriRadii.Card,
+            )
+            .background(c.card, cardShape())
+            .clickable { if (!f.isRemoving) onOpen() }
+            .padding(12.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // ── line 1: name 13.5/600 + status chip
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(statusColor(f.statusState))
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(f.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (f.isGround) Text("  (${S.ground})", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Text(
-                        buildString {
-                            f.branch?.let { append(it) }
-                            if (f.isCloneMissing) {
-                                if (this.isNotEmpty()) append(" · ")
-                                append(S.cloneDirectoryMissing)
-                            }
-                        }.ifBlank { "" },
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (f.attentionCount > 0) {
-                    Text("⚠${f.attentionCount}", color = MaterialTheme.colorScheme.error, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(8.dp))
-                }
-                if (f.hasActivity) StatusDot(MaterialTheme.colorScheme.primary)
-            }
-            if (f.statusText != null || f.isRemoving) {
-                Spacer(Modifier.height(6.dp))
                 Text(
-                    if (f.isRemoving) S.removingFloor else {
-                        var t = "${stateLabel(f.statusState)}: ${f.statusText}"
-                        f.statusProgress?.let { t += " (${(it * 100).toInt()}%)" }
-                        t
+                    f.name,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                when {
+                    f.isRemoving -> FloorStatusChip(S.removingFloor, tint = c.secondaryLabel, busy = true)
+                    f.isCloneMissing -> FloorStatusChip("\u26a0 " + S.needsAttention, tint = c.danger)
+                    f.statusState == "blocked" || f.attentionCount > 0 ->
+                        FloorStatusChip("\u26a0 " + S.needsAttention, tint = c.danger)
+                    else -> FloorStatusChip(S.cleanFloor, tint = c.positive)
+                }
+            }
+            // ── line 2: mono 10.5 identity (branch · kind path) — the mock's sha pair is
+            // not in FloorRow (open item); worktree path is real (feed row `folder`).
+            Text(
+                buildString {
+                    f.branch?.let { append(it) }
+                    f.folder?.let {
+                        if (isNotEmpty()) append("  ·  ")
+                        append(if (f.cloneKind == "copy") "copy " else "worktree ")
+                        append(it)
+                    }
+                    if (f.isCloneMissing) {
+                        if (isNotEmpty()) append("  ·  ")
+                        append(S.cloneDirectoryMissing)
+                    }
+                    if (f.isGround) {
+                        append("${S.ground}")
+                    }
+                },
+                style = TextStyle(fontFamily = MaestriType.Mono, fontSize = 10.5.sp, lineHeight = 16.8.sp, color = Palette.StoneGray),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // ── status line (host words verbatim when present) + attention count
+            if (f.statusText != null || f.attentionCount > 0) {
+                Text(
+                    buildString {
+                        if (f.statusText != null) append("${stateLabel(f.statusState)}: ${f.statusText}")
+                        f.statusProgress?.let { append(" (${(it * 100).toInt()}%)") }
+                        if (f.attentionCount > 0) append(if (isNotEmpty()) "  ·  " else ""); append("⚠${f.attentionCount}")
                     },
-                    fontSize = 11.5.sp,
-                    color = if (f.statusState == "blocked") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    fontSize = 11.sp,
+                    color = if (f.statusState == "blocked") c.danger else c.secondaryLabel,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (f.isCloneMissing) {
-                Spacer(Modifier.height(4.dp))
-                Text(S.cloneDirectoryMissing, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+            // ── 48pt action rows (ground keeps no card actions)
+            if (!f.isGround) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (f.isCloneMissing) {
+                        RowBtn(S.copyAgain, enabled = !f.isRemoving, onClick = onCopyAgain)
+                        RowBtn(S.dismiss, onClick = onDismissAction)
+                    } else {
+                        RowBtn(S.reviewAction, onClick = onOpen)
+                        RowBtn(S.land, fill = true, onClick = onLand)
+                        RowBtn(S.dismiss, onClick = onDismissAction)
+                    }
+                }
             }
         }
     }
