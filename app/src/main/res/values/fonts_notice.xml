@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Provenance + license pointer for the bundled terminal typeface.
+         Shown in the about/licences area; the full texts ship in assets/fonts/. -->
+    <string name="font_jetbrains_mono_nf_name" translatable="false">JetBrains Mono NF</string>
+    <string name="font_jetbrains_mono_nf_notice" translatable="false">JetBrains Mono Nerd Font 3.2.1 — JetBrains Mono 2.304 patched by Nerd Fonts. SIL Open Font License 1.1. Full texts: assets/fonts/OFL-JetBrainsMono.txt, assets/fonts/LICENSE-NerdFonts-patches.txt</string>
+</resources>

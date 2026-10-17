@@ -51,8 +51,11 @@ import app.maestri.wire.SocketState
 import app.maestri.wire.TerminalCard
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalContext
 import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.controlShape
+import app.maestri.ui.settings.TerminalFontStore
 import app.maestri.ui.Style.TerminalThemes
 import app.maestri.ui.Style.BackLabel
 
@@ -77,6 +80,11 @@ fun TerminalScreen(
     onEnterChat: ((String, String) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
+    // Aa stepper (design v2 §5.4): persisted 10–20 terminal type scale.
+    val ctx = LocalContext.current
+    val fontStore = remember(ctx) { TerminalFontStore(ctx.applicationContext) }
+    val fontSp by fontStore.sizeSp.collectAsState()
+    var showTypeScale by remember { mutableStateOf(false) }
     val snapshot by session.feed.snapshot.collectAsState()
     val feedState by session.feed.state.collectAsState()
     val feedError by session.feed.lastError.collectAsState()
@@ -209,6 +217,9 @@ fun TerminalScreen(
                 )
             }
             ConnChip(feedState, feedError)
+            TextButton(onClick = { showTypeScale = !showTypeScale }) {
+                Text("Aa $fontSp", fontFamily = MaestriType.Mono, fontSize = 12.sp)
+            }
             if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
                 app.maestri.ui.screens.EnterChatModeButton(
                     session = session,
@@ -216,6 +227,28 @@ fun TerminalScreen(
                     onChatReady = { onEnterChat?.invoke(terminalId, terminalName) },
                 )
             }
+        }
+
+        if (showTypeScale) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Terminal font · ${MaestriType.MonoName} · $fontSp",
+                    fontFamily = MaestriType.Mono,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(
+                    onClick = { fontStore.setSize(fontSp - 1) },
+                    enabled = fontSp > TerminalFontStore.MIN_SP,
+                ) { Text("−", fontFamily = MaestriType.Mono, fontSize = 14.sp) }
+                Spacer(Modifier.width(6.dp))
+                OutlinedButton(
+                    onClick = { fontStore.setSize(fontSp + 1) },
+                    enabled = fontSp < TerminalFontStore.MAX_SP,
+                ) { Text("+", fontFamily = MaestriType.Mono, fontSize = 14.sp) }
+            }
+            Spacer(Modifier.height(10.dp))
         }
 
         if (pendingPrompt != null) {
@@ -259,6 +292,7 @@ fun TerminalScreen(
                 geometry = streamGeometry,
                 canResize = canResize,
                 isOwner = isOwner,
+                fontSizeSp = fontSp,
                 onInput = { s -> session.terminalStream.sendInput(s) },
                 onResizeRequest = { showResize = true },
             )
@@ -319,7 +353,7 @@ private fun PreviewPanel(card: TerminalCard?) {
                 card.preview.takeLast(12).forEachIndexed { idx, line ->
                     Text(
                         line,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = MaestriType.Mono,
                         fontSize = 11.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

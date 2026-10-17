@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  JetBrains Mono Nerd Font (v3.2.1 patch of JetBrains Mono 2.304).
+  Scoped by design: terminal text, HUD numerics, code spans — never UI chrome.
+  Licenses: assets/fonts/OFL-JetBrainsMono.txt + LICENSE-NerdFonts-patches.txt
+-->
+<font-family xmlns:app="http://schemas.android.com/apk/res-auto">
+    <font app:fontStyle="normal" app:fontWeight="400" app:font="@font/jetbrainsmono_nf_regular" />
+    <font app:fontStyle="normal" app:fontWeight="700" app:font="@font/jetbrainsmono_nf_bold" />
+    <font app:fontStyle="italic" app:fontWeight="400" app:font="@font/jetbrainsmono_nf_italic" />
+</font-family>

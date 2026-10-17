@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import app.maestri.wire.Geometry
 import app.maestri.wire.SocketState
 import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.controlShape
 
 /**
@@ -52,6 +53,7 @@ fun LiveTerminalView(
     geometry: Geometry?,
     canResize: Boolean,
     isOwner: Boolean,
+    fontSizeSp: Int = 13,
     onInput: (String) -> Unit,
     onResizeRequest: () -> Unit,
 ) {
@@ -68,6 +70,7 @@ fun LiveTerminalView(
             Box(Modifier.width(60.dp)) { ConnChip(state, error) }
             Text(
                 "${geometry?.cols ?: "?"}×${geometry?.rows ?: "?"}" + (cursor?.let { "  r${it.second + 1}c${it.first + 1}" } ?: ""),
+                fontFamily = MaestriType.Mono,
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
@@ -120,9 +123,9 @@ fun LiveTerminalView(
         ) {
             Text(
                 text.ifBlank { if (state == SocketState.OPEN) "(empty screen)" else "…waiting for PTY bytes" },
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                lineHeight = 14.sp,
+                fontFamily = MaestriType.Mono,
+                fontSize = fontSizeSp.sp,
+                lineHeight = (fontSizeSp * 1.55f).sp,
                 color = Color(0xFFC9D1C9),
                 modifier = Modifier.padding(8.dp),
             )
@@ -146,6 +149,6 @@ private fun QuickKey(label: String, onClick: () -> Unit) {
             .padding(end = 6.dp)
             .height(30.dp),
     ) {
-        Text(label, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+        Text(label, fontFamily = MaestriType.Mono, fontSize = 12.sp)
     }
 }
