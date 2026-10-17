@@ -224,8 +224,8 @@ fun WorkspacesScreen(
                         enabled = onOpenNotifications != null,
                         onClick = { onOpenNotifications?.invoke() },
                     )
-                    // The mock's 4th pill is the host's add-workspace hotkey (⌃⌥↩, 13 px) —
-                    // no touch equivalent; shipped honest-disabled at the mock's size.
+                    // The mock's 4th pill is the host's add-workspace hotkey (⌃⌥↩ at 13 px
+                    // in the mock) — no touch equivalent; honest-disabled, mock glyph.
                     HotkeyPill()
                 }
             }
@@ -245,7 +245,7 @@ private fun HotkeyPill() {
             .alpha(0.4f),
         contentAlignment = Alignment.Center,
     ) {
-        Text("⌥⌄↩", color = c.secondaryLabel, fontSize = 12.sp)
+        Text("⌃⌥↩", color = c.secondaryLabel, fontSize = 12.sp)  // mock glyph verbatim
     }
 }
 
