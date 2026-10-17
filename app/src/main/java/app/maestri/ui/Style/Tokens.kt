@@ -1,60 +1,124 @@
 package app.maestri.ui.Style
 
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.ui.graphics.Color
 
 /**
- * Literal style tokens recovered from the Maestri iOS/macOS binaries.
- * Evidence and labels (RECOVERED / INFERRED / UNRECOVERABLE) live in
- * knowledge/sources/2026-10-16-maestri-ios-style-tokens.md.
+ * Design v2.1 "claude system" literals (warm-only neutrals, terracotta chrome accent).
+ *
+ * Two families live here on purpose:
+ *  - [Palette] — the v2 warm set, used by the live schemes;
+ *  - the deprecated iOS-parity aliases below — kept so no call site breaks while the
+ *    screens migrate; they resolve to warm equivalents per the v2 deviation log
+ *    (#0A84FF demoted, cool grays dropped).
+ * Evidence: knowledge/sources/2026-10-16-maestri-design-v2-spec.md §2/§8.
  */
 object Palette {
-    // System accents, light-appearance literals (RECOVERED).
-    val Blue = Color(0xFF007AFF)
-    val Red = Color(0xFFFF3B30)
-    val Green = Color(0xFF34C759)
-    val Orange = Color(0xFFFF9500)
-    val Purple = Color(0xFFAF52DE)
-    val Pink = Color(0xFFFF2D55)
-    val Teal = Color(0xFF5AC8FA)
-    val Yellow = Color(0xFFFFCC00)
+    // claude dark branch (Anthropic Near Black family).
+    val NearBlack = Color(0xFF141413)      // page / app background
+    val DarkSurface = Color(0xFF30302E)    // cards, spine, list groups, rings
+    val ScreenLift = Color(0xFF2B2A26)      // pushed-screen lift
+    val Ivory = Color(0xFFFAF9F5)          // primary text on dark
+    val WarmSilver = Color(0xFFB0AEA5)     // secondary text
+    val StoneGray = Color(0xFF87867F)      // metadata, overlines, mono times
+    val DarkWarm = Color(0xFF3D3D3A)       // ring tracks, links on dark
 
-    // Dark-appearance equivalents (RECOVERED; the pair ships together in the binary).
-    val BlueDark = Color(0xFF0A84FF)
-    val RedDark = Color(0xFFFF453A)
-    val GreenDark = Color(0xFF32D74B)
-    val YellowDark = Color(0xFFFFD60A)
-    val PurpleDark = Color(0xFFBF5AF2)
-    val TealDark = Color(0xFF64D2FF)
+    // claude light branch (parchment).
+    val Parchment = Color(0xFFF5F4ED)
+    val Paper = Color(0xFFE8E6DC)
+    val PaperRing = Color(0xFFD1CFC5)
 
-    // Canvas/content chrome (RECOVERED). The brief pins the light chrome at #1A1A1E;
-    // the doc reads the pair as the dark canvas surface — light branch kept per the brief.
-    val ChromeDark = Color(0xFF0A0B0D)
-    val Chrome = Color(0xFF1A1A1E)
-    val ChromeElevated = Color(0xFF1D1D1F)
+    // chrome accent (CTA, active tab, chevrons, pill-active) + its gradient pair.
+    val Terracotta = Color(0xFFC96442)
+    val TerracottaLight = Color(0xFFD97B54)
 
-    // Neutral text (INFERRED from the system label set).
-    val LabelLight = Color(0xFFE6E8EB)
-    val LabelDark = Color(0xFF1C1C1E)
-    val LabelSecondaryLight = Color(0xFFB9BEC7)
-    val LabelSecondaryDark = Color(0xFF6E6E73)
-    val SurfaceLight = Color(0xFFFFFFFF)
-    val SurfaceLightAlt = Color(0xFFF2F2F7)
-    val Gray = Color(0xFF86868B)
-    val GrayLightAlt = Color(0xFFE5E5EA)
+    // claude semantics.
+    val Success = Color(0xFF17A34A)
+    val Warn = Color(0xFFEAB308)
+    val Crimson = Color(0xFFB53333)
 
-    // Vendor agent identities (RECOVERED, names adjacent to the literals).
+    /** Accessibility focus rings only; also the literal named in the Settings row. */
+    val FocusBlue = Color(0xFF3898EC)
+
+    // Vendor agent identities (data roles — dots/arcs/rows only, never chrome).
     val Claude = Color(0xFFD97757)
     val Codex = Color(0xFF10A37F)
     val Gemini = Color(0xFF4285F4)
 
-    // Extended picker literals (RECOVERED; consumer INFERRED).
-    val DeepRed = Color(0xFFC41A16)
-    val DeepGreen = Color(0xFF007400)
-    val Olive = Color(0xFF826B28)
-    val DeepBlue = Color(0xFF0451A5)
-    val Violet = Color(0xFFA831C4)
-    val Steel = Color(0xFF0F7B8D)
+    // ---------------------------------------------------------------- deprecated (v1 iOS)
+    // Kept for the migrating screens; each maps onto the warm ramp above.
+    @Deprecated("v2 warm ramp", ReplaceWith("NearBlack"))
+    val ChromeDark = NearBlack
+    @Deprecated("v2 warm ramp", ReplaceWith("ScreenLift"))
+    val Chrome = ScreenLift
+    @Deprecated("v2 warm ramp", ReplaceWith("DarkSurface"))
+    val ChromeElevated = DarkSurface
+    @Deprecated("v2 warm ramp", ReplaceWith("Ivory"))
+    val LabelLight = Ivory
+    @Deprecated("v2 warm ramp", ReplaceWith("WarmSilver"))
+    val LabelSecondaryLight = WarmSilver
+    @Deprecated("v2 warm ramp", ReplaceWith("StoneGray"))
+    val LabelSecondaryDark = StoneGray
+    @Deprecated("v2 warm ramp", ReplaceWith("Parchment"))
+    val SurfaceLightAlt = Parchment
+    @Deprecated("v2 warm ramp", ReplaceWith("NearBlack"))
+    val LabelDark = NearBlack
+    @Deprecated("v2 warm ramp", ReplaceWith("Paper"))
+    val GrayLightAlt = Paper
+    @Deprecated("v2 accent", ReplaceWith("Terracotta"))
+    val Blue = Terracotta
+    @Deprecated("v2 accent", ReplaceWith("Terracotta"))
+    val BlueDark = Terracotta
+    @Deprecated("v2 accent", ReplaceWith("TerracottaLight"))
+    val TealDark = TerracottaLight
+    @Deprecated("v2 accent", ReplaceWith("Terracotta"))
+    val Steel = Terracotta
+    @Deprecated("v2 accent", ReplaceWith("Terracotta"))
+    val Purple = TerracottaLight
+    @Deprecated("v2 accent", ReplaceWith("TerracottaLight"))
+    val PurpleDark = TerracottaLight
+    @Deprecated("v2 accent", ReplaceWith("Terracotta"))
+    val Pink = TerracottaLight
+    @Deprecated("v2 semantics", ReplaceWith("Success"))
+    val Green = Success
+    @Deprecated("v2 semantics", ReplaceWith("Success"))
+    val GreenDark = Success
+    @Deprecated("v2 semantics", ReplaceWith("Warn"))
+    val Orange = Warn
+    @Deprecated("v2 semantics", ReplaceWith("Warn"))
+    val Yellow = Warn
+    @Deprecated("v2 semantics", ReplaceWith("Warn"))
+    val YellowDark = Warn
+    @Deprecated("v2 semantics", ReplaceWith("Crimson"))
+    val Red = Crimson
+    @Deprecated("v2 semantics", ReplaceWith("Crimson"))
+    val RedDark = Crimson
 }
+
+/** Motion tokens (spec §4: 150 ms press/state, 240 ms transition, one easing). */
+object Motion {
+    const val Fast = 150
+    const val Slow = 240
+    val Ease = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+    /** Press scale for bubbles/pills/cards. */
+    const val PressScale = 0.97f
+}
+
+/** The 4/8/12/16/20 rhythm (claude 8px scale, phone gutter overridden to 16). */
+object Rhythm {
+    val Gutter = 16
+    val Gap = 8
+    val Section = 20
+    val CardPadding = 20
+    /** Spine: 49 nav + 34 gesture zone. */
+    val SpineHeight = 83
+    val TouchTarget = 44
+}
+
+/** Terracotta gradient for primary CTAs (135° = top-left → bottom-right). */
+fun terracottaGradient(dark: Boolean): List<Color> =
+    if (dark) listOf(Palette.TerracottaLight, Palette.Terracotta)
+    else listOf(Palette.TerracottaLight, Palette.Terracotta)
 
 /** Agent identity chips by vendor name (aliases normalised). */
 val VendorColors: Map<String, Color> = mapOf(

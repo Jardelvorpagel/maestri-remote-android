@@ -11,6 +11,11 @@ import app.maestri.ui.Style.MaestriDarkScheme
 import app.maestri.ui.Style.MaestriLightScheme
 import app.maestri.ui.Style.MaestriShapes
 
+/**
+ * v2.1 theme: one warm family, two branches — claude near-black dark and parchment
+ * light — with the terracotta accent. The system appearance still drives the choice
+ * ("dynamic color" = follows system appearance, never Material You).
+ */
 @Composable
 fun MaestriTheme(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()

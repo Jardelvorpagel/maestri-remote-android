@@ -12,6 +12,8 @@ import app.maestri.ui.settings.SettingsScreen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Alignment
+import app.maestri.ui.Style.MaestriSpine
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -156,14 +158,26 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                     router.stop()
                 }
             }
+            // v2 chrome: last-visited workspace/terminal feed the 3-tab spine targets.
+            var lastWs by remember { mutableStateOf<Pair<String, String>?>(null) }
+            var lastTerm by remember { mutableStateOf<Triple<String, String, String>?>(null) }
             NavHost(navController = nav, startDestination = "workspaces") {
                 composable("workspaces") {
-                    WorkspacesScreen(
-                        session = session,
-                        onOpenWorkspace = { wsId, wsName -> nav.navigate("feed/$wsId/${enc(wsName)}") },
-                        onOpenFloors = { wsId, wsName -> nav.navigate(FloorsNav.link(wsId, wsName)) },
-                        onOpenSettings = { nav.navigate("settings") },
-                    )
+                    Box(Modifier.fillMaxSize()) {
+                        WorkspacesScreen(
+                            session = session,
+                            onOpenWorkspace = { wsId, wsName -> nav.navigate("feed/$wsId/${enc(wsName)}") },
+                            onOpenFloors = { wsId, wsName -> nav.navigate(FloorsNav.link(wsId, wsName)) },
+                            onOpenSettings = { nav.navigate("settings") },
+                        )
+                        MaestriSpine(
+                            active = 0,
+                            onWorkspaces = {},
+                            onFeed = lastWs?.let { (id, name) -> { nav.navigate("feed/$id/${enc(name)}") } },
+                            onChat = lastTerm?.let { (id, tid, name) -> { nav.navigate(ChatNav.route(id, tid, name)) } },
+                            modifier = Modifier.align(Alignment.BottomCenter),
+                        )
+                    }
                 }
                 composable(
                     route = "feed/{wsId}/{wsName}",
@@ -174,6 +188,8 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                 ) { entry ->
                     val wsId = entry.arguments?.getString("wsId") ?: return@composable
                     val wsName = entry.arguments?.getString("wsName") ?: "workspace"
+                    LaunchedEffect(wsId) { lastWs = wsId to wsName }
+                    Box(Modifier.fillMaxSize()) {
                     FeedScreen(
                         session = session,
                         wsId = wsId,
@@ -185,6 +201,14 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                         },
                         onOpenFloors = { nav.navigate(FloorsNav.link(wsId, wsName)) },
                     )
+                    MaestriSpine(
+                        active = 1,
+                        onWorkspaces = { nav.navigate("workspaces") { launchSingleTop = true; popUpTo("workspaces") { inclusive = false } } },
+                        onFeed = {},
+                        onChat = lastTerm?.let { (id, tid, name) -> { nav.navigate(ChatNav.route(id, tid, name)) } },
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                    }
                 }
                 composable(
                     route = "canvas/{wsId}/{wsName}",
@@ -216,6 +240,7 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                     val terminalId = entry.arguments?.getString("terminalId") ?: return@composable
                     val terminalName = dec(entry.arguments?.getString("terminalName") ?: "")
                     val wsId = entry.arguments?.getString("wsId") ?: ""
+                    LaunchedEffect(terminalId) { lastTerm = Triple(wsId, terminalId, terminalName) }
                     TerminalScreen(
                         session = session,
                         terminalId = terminalId,
