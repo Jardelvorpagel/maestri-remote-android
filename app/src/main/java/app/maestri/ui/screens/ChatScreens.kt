@@ -1421,7 +1421,10 @@ private fun EntryList(
                     LoadingPill(S.loadEarlierMessages, {})
                 } else {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        TextButton(onClick = { holder.loadEarlier() }) {
+                        TextButton(
+                            onClick = { holder.loadEarlier() },
+                            modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                        ) {
                             Text(S.loadEarlierMessages, fontSize = 12.sp)
                         }
                     }
@@ -1795,7 +1798,10 @@ private fun CodeBlockCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { clipboard.setText(AnnotatedString(code)) }) {
+                TextButton(
+                    onClick = { clipboard.setText(AnnotatedString(code)) },
+                    modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                ) {
                     Text(S.copyCode, fontSize = 11.sp)
                 }
             }
