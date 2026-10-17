@@ -109,6 +109,19 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.monoHud
+import app.maestri.ui.Style.warmRing
+import app.maestri.ui.Style.vendorColor
+import app.maestri.ui.Style.softHalo
+import app.maestri.ui.Style.Palette
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.graphics.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.foundation.border
 import app.maestri.ui.Style.Motion
 import app.maestri.ui.Style.Rhythm
 import app.maestri.ui.Style.pillShape
@@ -273,6 +286,7 @@ fun ChatThreadScreen(
                     listState = listState,
                     openEntryMenu = { t -> entryMenuTarget = t },
                     openAttachmentPreview = { t -> attachmentPreviewTarget = t },
+                    onOpenThreads = { showThreadSheet = true },
                 )
                 if (!atBottom) {
                     TextButton(
@@ -280,8 +294,13 @@ fun ChatThreadScreen(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 8.dp)
-                            .background(LocalMaestriColors.current.canvasChromeElevated, pillShape()),
-                    ) { Text(S.scrollToBottom, fontSize = 12.sp) }
+                            .heightIn(min = Rhythm.TouchTarget.dp)
+                            .background(LocalMaestriColors.current.canvasChromeElevated, pillShape())
+                            .border(1.dp, LocalMaestriColors.current.hairline, pillShape()),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp),
+                    ) {
+                        Text(S.scrollToBottom, style = monoHud(11, color = MaterialTheme.colorScheme.onSurface))
+                    }
                 }
                 if (shellStrip) {
                     ShellStrip(shellPreview)
@@ -1280,10 +1299,31 @@ private fun ChatTopBar(
     onClearHistory: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+    val statusLine = when (snapshot?.status) {
+        "working" -> verb.ifBlank { S.waitingForAReply }
+        "needsAttention" -> S.waitingForAReply
+        "idle" -> "idle"
+        "notRunning" -> S.thisTerminalIsntRunning
+        "unloaded" -> S.thisTerminalIsUnloaded
+        else -> socketState.name.lowercase()
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { BackLabel("Back") }
-            Column(Modifier.weight(1f)) {
+            TextButton(
+                onClick = onBack,
+                modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+            ) { BackLabel("Back") }
+            Column(Modifier.weight(1f).padding(horizontal = 2.dp)) {
+                // design-v2 05 lnav: serif 24·500 root title (title-only serif)
+                Text(
+                    "Chat", // CANDIDATE: literal title, not from the parity corpus
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier
@@ -1297,22 +1337,22 @@ private fun ChatTopBar(
                                 CircleShape,
                             )
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(5.dp))
                     Text(
                         terminalName,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 10.5.sp, // artifact lnav chip: mono 10.5
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                }
-                val statusLine = when (snapshot?.status) {
-                    "working" -> verb.ifBlank { S.waitingForAReply }
-                    "needsAttention" -> S.waitingForAReply
-                    "idle" -> "idle"
-                    "notRunning" -> S.thisTerminalIsntRunning
-                    "unloaded" -> S.thisTerminalIsUnloaded
-                    else -> socketState.name.lowercase()
+                    // vendor dot — only when the talking-to agent names a real vendor
+                    snapshot?.talkingToAgentName?.let { agent ->
+                        vendorColor(agent)?.let { vc ->
+                            Spacer(Modifier.width(4.dp))
+                            Box(Modifier.size(8.dp).background(vc, CircleShape))
+                        }
+                    }
                 }
                 Text(
                     statusLine,
@@ -1322,56 +1362,117 @@ private fun ChatTopBar(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            // thread slots chip — only for hosts that speak `threads`
+            // threads switcher trigger — the artifacts ⧉ glyph
             if (snapshot?.threads != null) {
-                SlotChip(threads = snapshot.threads!!, onClick = onOpenThreads)
+                TextButton(
+                    onClick = onOpenThreads,
+                    modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(6.dp),
+                ) { Text("⧉", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface) }
             }
-            TextButton(onClick = onToggleShellStrip) {
-                Text(
-                    if (shellStripOn) S.hideTerminalPreview else S.showTerminalPreview,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                )
-            }
-            TextButton(onClick = onExitChat) {
-                Text(
-                    if (snapshot?.enabled == true) S.exitChatMode else S.enterChatMode,
-                    fontSize = 11.sp,
-                )
-            }
-            if (snapshot?.canClear == true) {
-                TextButton(onClick = { menuOpen = !menuOpen }) { IconOnly(Icons.Filled.MoreVert) }
-            }
+            TextButton(
+                onClick = { menuOpen = !menuOpen },
+                modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(6.dp),
+            ) { IconOnly(Icons.Filled.MoreVert, size = 18.dp) }
         }
+        // overflow keeps every former inline action reachable (never lose an action)
         if (menuOpen) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { menuOpen = false; onClearHistory() }) {
-                    Text(S.clearChatHistory, fontSize = 12.sp)
+                TextButton(
+                    onClick = { menuOpen = false; onToggleShellStrip() },
+                    modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                ) {
+                    Text(if (shellStripOn) S.hideTerminalPreview else S.showTerminalPreview, fontSize = 12.sp)
+                }
+                TextButton(
+                    onClick = { menuOpen = false; onExitChat() },
+                    modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                ) {
+                    Text(if (snapshot?.enabled == true) S.exitChatMode else S.enterChatMode, fontSize = 12.sp)
+                }
+                if (snapshot?.canClear == true) {
+                    TextButton(
+                        onClick = { menuOpen = false; onClearHistory() },
+                        modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                    ) {
+                        Text(S.clearChatHistory, fontSize = 12.sp)
+                    }
                 }
             }
         }
     }
-}
-
+}@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SlotChip(threads: ChatThreads, onClick: () -> Unit) {
-    val active = threads.items.firstOrNull { it.id == threads.activeSlot }
+private fun ThreadChipsRow(
+    holder: ChatFaceState,
+    threads: ChatThreads?,
+    onOpenThreads: () -> Unit,
+) {
+    if (threads == null) return
+    val chrome = LocalMaestriColors.current
+    val previews by holder.threadPreviews.collectAsState()
     Row(
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier
-            .background(LocalMaestriColors.current.canvasSurface, pillShape())
-            .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 2.dp),
     ) {
-        Box(
-            Modifier
-                .size(9.dp)
-                .background(threadColor(active?.color ?: "graphite"), CircleShape)
-        )
-        Spacer(Modifier.width(5.dp))
-        Text("Slot " + threads.activeSlot, fontSize = 11.sp)
+        threads.items.forEach { slot ->
+            val active = slot.id == threads.activeSlot
+            val preview = previews.firstOrNull { it.id == slot.id }?.entries?.lastOrNull()?.text
+            val previewLabel = preview?.replace("\n", " ")?.trim()?.take(24).orEmpty()
+            val label = slot.id.toString() + " · " +
+                (previewLabel.ifEmpty { if (slot.hasMessages) "has messages" else "empty" })
+            Row( // .tchip — mono 11.5, 8×14, pill, warm ring; .on = accent-hi + accent 55% ring
+                modifier = Modifier
+                    .heightIn(min = Rhythm.TouchTarget.dp)
+                    .clip(pillShape())
+                    .background(chrome.canvasSurface, pillShape())
+                    .let {
+                        if (active) {
+                            it.border(1.dp, Palette.TerracottaLight.copy(alpha = 0.55f), pillShape())
+                        } else {
+                            it.border(1.dp, chrome.hairline, pillShape())
+                        }
+                    }
+                    .clickable(enabled = !active) {
+                        holder.selectThread(slot.id)
+                        holder.refreshThreadPreviews()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    label,
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = if (active) Palette.TerracottaLight else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .heightIn(min = Rhythm.TouchTarget.dp)
+                .clip(pillShape())
+                .background(chrome.canvasSurface, pillShape())
+                .border(1.dp, chrome.hairline, pillShape())
+                .clickable { onOpenThreads() }
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                threads.items.size.toString() + " threads",
+                fontSize = 11.5.sp,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
+
 
 /** Host palette, settings order: blue purple pink red orange yellow green | graphite. */
 fun threadColor(name: String): Color = when (name.lowercase()) {
@@ -1399,6 +1500,7 @@ private fun EntryList(
     listState: LazyListState,
     openEntryMenu: (EntryMenuTarget) -> Unit,
     openAttachmentPreview: (AttachmentPreviewTarget) -> Unit,
+    onOpenThreads: () -> Unit,
 ) {
     val entries = snapshot.entries
     val paging by holder.paging.collectAsState()
@@ -1416,20 +1518,6 @@ private fun EntryList(
         if (showBoundary) {
             item(key = "boundary") { BoundaryCard() }
         } else if (showLoadEarlier) {
-            item(key = "load-earlier") {
-                if (paging) {
-                    LoadingPill(S.loadEarlierMessages, {})
-                } else {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        TextButton(
-                            onClick = { holder.loadEarlier() },
-                            modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
-                        ) {
-                            Text(S.loadEarlierMessages, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
         }
         val freshIds = holder.freshEntryIds
         itemsIndexed(entries.asReversed(), key = { _, e -> e.id }) { revIdx, entry ->
@@ -1460,6 +1548,33 @@ private fun EntryList(
                         fontSize = 13.sp,
                     )
                 }
+            }
+        }
+        // design-v2 05: chain tail = visual top (reverseLayout column) — bottom-anchored
+        // transcript sits under the thread chips; "load earlier" heads the older pages.
+        if (entries.isNotEmpty()) {
+            item(key = "load-earlier") {
+                if (paging) {
+                    LoadingPill(S.loadEarlierMessages, {})
+                } else {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        TextButton(
+                            onClick = { holder.loadEarlier() },
+                            modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                        ) {
+                            Text(S.loadEarlierMessages, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+        if (snapshot.threads != null) {
+            item(key = "tchips") {
+                ThreadChipsRow(
+                    holder = holder,
+                    threads = snapshot.threads,
+                    onOpenThreads = onOpenThreads,
+                )
             }
         }
     }
@@ -1553,28 +1668,51 @@ private fun EntryBubble(
                     animationSpec = tween(Motion.Fast, easing = Motion.Ease),
                     label = "bubble-press",
                 )
+                // design-v2 05 .bub: 82% max, 11×14, radius 20 + 7 tail, 13/1.5;
+                // me = 135° gradient #d97b54→#c96442 + white 8% inner ring + glow (.22, 8/20);
+                // ag = warm card + ring. Incoming rise matches the artifact (8px).
+                val maxBubbleWidth = LocalConfiguration.current.screenWidthDp.dp * 0.82f
+                val bubbleShape = RoundedCornerShape(
+                    topStart = 20.dp,
+                    topEnd = 20.dp,
+                    bottomStart = if (isUser) 20.dp else 7.dp,
+                    bottomEnd = if (isUser) 7.dp else 20.dp,
+                )
+                val bubbleFill = if (isUser) {
+                    Brush.linearGradient(
+                        0f to Palette.TerracottaLight,
+                        1f to Palette.Terracotta,
+                        start = Offset(0f, 0f),
+                        end = Offset(1f, 1f),
+                    )
+                } else {
+                    Brush.linearGradient(0f to LocalMaestriColors.current.bubbleAgent, 1f to LocalMaestriColors.current.bubbleAgent)
+                }
+                val glow = if (isUser) Palette.Terracotta.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.18f)
                 Surface(
-                    color = if (isUser) LocalMaestriColors.current.bubbleMine else LocalMaestriColors.current.bubbleAgent,
-                    shape = RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isUser) 16.dp else 6.dp,
-                        bottomEnd = if (isUser) 6.dp else 16.dp,
-                    ),
+                    color = Color.Transparent,
+                    shape = bubbleShape,
                     modifier = Modifier
-                        .widthIn(max = 340.dp)
+                        .widthIn(max = maxBubbleWidth)
+                        .shadow(elevation = 10.dp, shape = bubbleShape, ambientColor = glow, spotColor = glow)
                         .graphicsLayer {
                             scaleX = press; scaleY = press
                             alpha = inAnim.value
-                            translationY = (1f - inAnim.value) * 12.dp.toPx()
+                            translationY = (1f - inAnim.value) * 8.dp.toPx()
                         }
+                        .background(bubbleFill, bubbleShape)
+                        .border(
+                            1.dp,
+                            if (isUser) Color.White.copy(alpha = 0.08f) else LocalMaestriColors.current.hairline,
+                            bubbleShape,
+                        )
                         .combinedClickable(
                             interactionSource = bubbleSource,
                             onClick = {},
                             onLongClick = onLongPress,
                         ),
                 ) {
-                    Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
+                    Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
                         when {
                             entry.segments.isNotEmpty() -> entry.segments.forEach { seg ->
                                 when (seg) {
@@ -1632,13 +1770,11 @@ private fun AttachmentPill(
     if (seg.isImage) {
         val b = bmp
         if (b != null) {
-            Image(
-                bitmap = b.asImageBitmap(),
-                contentDescription = seg.filename,
-                modifier = Modifier
-                    .widthIn(max = 260.dp)
-                    .heightIn(max = 260.dp)
-                    .combinedClickable(onClick = onTap, onLongClick = onRemoveAttachment ?: {}),
+            ChatImageThumb(
+                bmp = b,
+                filename = seg.filename,
+                onTap = onTap,
+                onLongPress = onRemoveAttachment,
             )
         } else {
             LoadingPill("…", onTap)
@@ -1647,6 +1783,7 @@ private fun AttachmentPill(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
+                .heightIn(min = Rhythm.TouchTarget.dp)
                 .background(LocalMaestriColors.current.canvasSurface, controlShape())
                 .clickable { onTap() }
                 .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -1711,9 +1848,17 @@ fun MarkdownLite(text: String) {
 
 @Composable
 private fun MarkdownText(text: String) {
+    val imageRe = Regex("!\\[([^\\]]*)\\]\\(([^)\\s]+)\\)")
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         text.split("\n").forEach { line ->
             when {
+                imageRe.matches(line) -> { // Mac ChatMarkdownImage parity (design-v2 05)
+                    val m = imageRe.matchEntire(line)!!
+                    ChatMarkdownImage(
+                        url = m.groupValues[2],
+                        alt = m.groupValues[1],
+                    )
+                }
                 line.startsWith("### ") -> Text(
                     inlineSpan(line.drop(4)),
                     fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
@@ -1740,7 +1885,11 @@ private fun MarkdownText(text: String) {
                         .fillMaxWidth(),
                 )
                 line.isBlank() -> Spacer(Modifier.height(2.dp))
-                else -> Text(inlineSpan(line), fontSize = 13.sp)
+                else -> Text(
+                    inlineSpan(line),
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp, // artifact: 13/1.5
+                )
             }
         }
     }
@@ -1785,11 +1934,14 @@ private fun CodeBlockCard(
     clipboard: androidx.compose.ui.platform.ClipboardManager,
 ) {
     Surface(
-        color = LocalMaestriColors.current.canvasSurface,
-        shape = controlShape(),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        color = Color(0xFF151518), // artifact .code bg (#151518 on Tokyo Night #tn-bg)
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .border(1.dp, Color(0xFF23233A), RoundedCornerShape(12.dp)),
     ) {
-        Column(Modifier.padding(8.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     lang.ifBlank { "code" },
@@ -1806,7 +1958,12 @@ private fun CodeBlockCard(
                 }
             }
             androidx.compose.foundation.text.selection.SelectionContainer {
-                Text(code, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                Text(
+                    code,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    lineHeight = 18.sp, // artifact: 11/1.6
+                )
             }
         }
     }
@@ -1868,12 +2025,22 @@ private fun ComposerPill(
         onDismissMenu()
     }
 
+    val chrome = LocalMaestriColors.current
     Column(Modifier.fillMaxWidth()) {
         mentionPanel?.let { panel -> MentionDropdown(holder = holder, panel = panel) }
         flight?.let { f -> FlightBanner(flight = f, onKeepDraft = { holder.dismissFlight() }) }
 
-        Surface(color = LocalMaestriColors.current.canvasChromeElevated, shape = cardShape(), modifier = Modifier.padding(8.dp)) {
-            Column(Modifier.padding(8.dp)) {
+        // design-v2 05 .composer: radius 26, margins 2/16/14, padding 8, gap 8,
+        // NearBlack @ .66 glass + warm ring + softHalo (no backdrop blur — Compose 1.7)
+        Surface(
+            color = Palette.NearBlack.copy(alpha = 0.66f),
+            shape = RoundedCornerShape(26.dp),
+            modifier = Modifier
+                .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 14.dp)
+                .warmRing(chrome.hairline, radius = 26.dp)
+                .softHalo(radius = 26.dp),
+        ) {
+            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (staged.isNotEmpty()) {
                     StagedSlots(staged = staged, onRemove = onRemoveStaged)
                     Spacer(Modifier.height(6.dp))
@@ -1899,24 +2066,62 @@ private fun ComposerPill(
                     Spacer(Modifier.height(6.dp))
                 }
                 Row(verticalAlignment = Alignment.Bottom) {
+                    val addSrc = remember { MutableInteractionSource() }
+                    val addPressed by addSrc.collectIsPressedAsState()
+                    val addPress by animateFloatAsState(
+                        targetValue = if (addPressed) Motion.PressScale else 1f,
+                        animationSpec = tween(Motion.Fast, easing = Motion.Ease),
+                        label = "add-press",
+                    )
                     TextButton(
                         onClick = onOpenAttachMenu,
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp),
-                    ) { IconOnly(Icons.Filled.Add, size = 16.dp) }
+                        modifier = Modifier
+                            .heightIn(min = Rhythm.TouchTarget.dp)
+                            .graphicsLayer { scaleX = addPress; scaleY = addPress },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(6.dp),
+                    ) { IconOnly(Icons.Filled.Add, size = 18.dp) }
+                    // ＠ pill: a literal "@" typed into the input opens the mention selector
+                    val atSrc = remember { MutableInteractionSource() }
+                    val atPressed by atSrc.collectIsPressedAsState()
+                    val atPress by animateFloatAsState(
+                        targetValue = if (atPressed) Motion.PressScale else 1f,
+                        animationSpec = tween(Motion.Fast, easing = Motion.Ease),
+                        label = "at-press",
+                    )
+                    TextButton(
+                        onClick = { onTextChange(text + "@") },
+                        modifier = Modifier
+                            .heightIn(min = Rhythm.TouchTarget.dp)
+                            .graphicsLayer { scaleX = atPress; scaleY = atPress },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(6.dp),
+                    ) {
+                        Text("@", fontSize = 15.sp, fontFamily = FontFamily.Monospace)
+                    }
                     OutlinedTextField(
                         value = text,
                         onValueChange = onTextChange,
                         placeholder = {
                             Text(
                                 S.messageToMentionFmt.format(terminalName),
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         },
-                        modifier = Modifier.weight(1f),
+                        shape = pillShape(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent,
+                            disabledBorderColor = Color.Transparent,
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 40.dp), // artifact .in min-height 40
                         maxLines = 4,
                         textStyle = androidx.compose.ui.text.TextStyle(
-                            fontSize = 13.sp,
+                            fontSize = 13.5.sp,
                             color = MaterialTheme.colorScheme.onSurface,
                         ),
                     )
@@ -1927,22 +2132,38 @@ private fun ComposerPill(
                         animationSpec = tween(Motion.Fast, easing = Motion.Ease),
                         label = "send-press",
                     )
-                    Button(
-                        onClick = onSend,
-                        enabled = flight == null && (text.isNotBlank() || staged.isNotEmpty()),
-                        interactionSource = sendSource,
+                    val sendEnabled = flight == null && (text.isNotBlank() || staged.isNotEmpty())
+                    Box(
                         modifier = Modifier
                             .padding(start = 6.dp)
-                            .heightIn(min = Rhythm.TouchTarget.dp)
-                            .widthIn(min = 64.dp)
-                            .graphicsLayer { scaleX = sendPress; scaleY = sendPress },
+                            .size(44.dp)
+                            .graphicsLayer { scaleX = sendPress; scaleY = sendPress }
+                            .shadow(
+                                elevation = 8.dp,
+                                shape = CircleShape,
+                                ambientColor = Palette.Terracotta.copy(alpha = 0.30f),
+                                spotColor = Palette.Terracotta.copy(alpha = 0.30f),
+                            )
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    0f to Palette.TerracottaLight,
+                                    1f to Palette.Terracotta,
+                                    start = Offset(0f, 0f),
+                                    end = Offset(1f, 1f),
+                                ),
+                            )
+                            .combinedClickable(enabled = sendEnabled, onClick = onSend)
+                            .alpha(if (sendEnabled) 1f else 0.4f),
+                        contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             when (flight?.stage) {
                                 SendFlight.Stage.UPLOADING, SendFlight.Stage.SENDING, SendFlight.Stage.CORRELATING -> "↑"
-                                else -> S.send
+                                else -> "↑"
                             },
-                            fontSize = 13.sp,
+                            fontSize = 17.sp,
+                            color = Color(0xFFFAF9F5),
                         )
                     }
                 }
