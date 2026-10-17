@@ -1504,8 +1504,13 @@ private fun EntryBubble(
             else -> {
                 // message + final: canonical entry; user rides their composer segments
                 Surface(
-                    color = if (isUser) Color(0xFF2A4633) else LocalMaestriColors.current.canvasChromeElevated,
-                    shape = cardShape(),
+                    color = if (isUser) LocalMaestriColors.current.bubbleMine else LocalMaestriColors.current.bubbleAgent,
+                    shape = RoundedCornerShape(
+                        topStart = 16.dp,
+                        topEnd = 16.dp,
+                        bottomStart = if (isUser) 16.dp else 6.dp,
+                        bottomEnd = if (isUser) 6.dp else 16.dp,
+                    ),
                     modifier = Modifier
                         .widthIn(max = 340.dp)
                         .combinedClickable(onClick = {}, onLongClick = onLongPress),

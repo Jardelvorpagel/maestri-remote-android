@@ -75,6 +75,9 @@ object CanvasStrings {
     const val couldntChangeLock = "Couldn't Change Lock"
     const val changeNoteColor = "Change note color"
     const val clearColor = "Clear Color"
+
+    /** NX-05: the host accepts no clear shape for note colours (all 400), so the chip ships disabled. */
+    const val noteColorClearUnsupported = "This host can't clear note colors"
     const val maestriCouldnTRenameThatGroup = "Maestri couldn't rename that group."
     const val maestriCouldnTTieThoseRopes = "Maestri couldn't tie those ropes."
     const val maestriCouldnTCutThatTie = "Maestri couldn't cut that tie."

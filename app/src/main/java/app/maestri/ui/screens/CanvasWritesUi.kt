@@ -1374,6 +1374,7 @@ fun ColorPalettePicker(
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
     onClear: (() -> Unit)? = null,
+    clearDisabledReason: String? = null,
 ) {
     Box(Modifier.fillMaxSize().clickable { onDismiss() }, contentAlignment = Alignment.Center) {
         Card(
@@ -1399,8 +1400,26 @@ fun ColorPalettePicker(
                         }
                     }
                 }
+                if (clearDisabledReason != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        clearDisabledReason,
+                        fontSize = 10.5.sp,
+                        color = LocalMaestriColors.current.secondaryLabel,
+                    )
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    onClear?.let { TextButton(onClick = it) { Text(CanvasStrings.clearColor) } }
+                    when {
+                        // Honest affordance: the chip stays visible (parity) but disabled where
+                        // the host has no clear (note colours: every shape 400s — see NX-05).
+                        clearDisabledReason != null -> TextButton(
+                            onClick = {},
+                            enabled = false,
+                        ) {
+                            Text(CanvasStrings.clearColor, color = LocalMaestriColors.current.secondaryLabel.copy(alpha = 0.4f))
+                        }
+                        onClear != null -> TextButton(onClick = onClear) { Text(CanvasStrings.clearColor) }
+                    }
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                 }
             }

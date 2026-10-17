@@ -595,6 +595,9 @@ fun CanvasScreen(
                 },
                 onDismiss = { ctl.colorFor = null },
                 onClear = (target as? ColorTarget.Group)?.let { g -> { ctl.clearGroupColor(g.groupId) } },
+                // NX-05 (grand gate): the host 400s EVERY note-colour clear shape —
+                // "Invalid color" / "Invalid body". Note target => chip visible but disabled.
+                clearDisabledReason = if (target is ColorTarget.Group) null else CanvasStrings.noteColorClearUnsupported,
             )
         }
         ctl.textFor?.let {
