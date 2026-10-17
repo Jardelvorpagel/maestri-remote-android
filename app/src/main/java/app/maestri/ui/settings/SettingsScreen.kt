@@ -273,23 +273,27 @@ private fun SettingsToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit)
         animationSpec = tween(Motion.Fast, easing = Motion.Ease),
         label = "lock-toggle-knob",
     )
+    // Round-3 gate fix: background() ships a brush-form and a color-form overload;
+    // the inline if-else here mixed Brush and Color branches so neither overload
+    // matched, and the :293 shadow errors were inference cascades. Branch hoisted:
+    // both sides now produce a Brush (solid = same-color linear gradient, visuals
+    // identical to the flat fill — chat-bubble precedent). Offset import verified:
+    // androidx.compose.ui.geometry.
+    val toggleFill = if (checked) {
+        Brush.linearGradient(
+            0f to Palette.TerracottaLight,
+            1f to Palette.Terracotta,
+            start = Offset(0f, 0f),
+            end = Offset(1f, 1f),
+        )
+    } else {
+        Brush.linearGradient(0f to colors.canvasSurface, 1f to colors.canvasSurface)
+    }
     Box(
         modifier = Modifier
             .size(width = 51.dp, height = 31.dp)
             .clip(CircleShape)
-            .background(
-                if (checked) {
-                    Brush.linearGradient(
-                        0f to Palette.TerracottaLight,
-                        1f to Palette.Terracotta,
-                        start = Offset(0f, 0f),
-                        end = Offset(1f, 1f),
-                    )
-                } else {
-                    colors.canvasSurface
-                },
-                CircleShape,
-            )
+            .background(toggleFill, CircleShape)
             .let {
                 if (checked) {
                     it.shadow(
