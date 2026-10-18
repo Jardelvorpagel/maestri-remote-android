@@ -8,15 +8,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
@@ -29,11 +27,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -51,29 +47,35 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.res.ResourcesCompat
+import android.graphics.Typeface
 import app.maestri.remote.R
+import org.connectbot.terminal.Terminal
+import org.connectbot.terminal.TerminalEmulator
 import app.maestri.wire.Geometry
 import app.maestri.wire.SocketState
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriRadii
 import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.Palette
-import app.maestri.ui.Style.Rhythm
 import app.maestri.ui.Style.TerminalThemes
 import app.maestri.ui.Style.controlShape
-import app.maestri.ui.Style.monoHud
 import app.maestri.ui.Style.pillShape
-import kotlin.math.roundToInt
 
 /**
- * Live terminal renderer on the REAL xterm engine (Termux `terminal-emulator`, todo #61).
+ * Live terminal renderer on the REAL libvterm engine (ConnectBot termlib, todo #62).
  *
- * Host PTY bytes flow verbatim into the emulator — ANSI colors, block cursor, alt-screen
- * and genuine in-session scrollback all render. Input goes out as JSON frames; resize is
- * clamped client-side to 20..250 × 5..120. The parallel MiniTerm `text` path is kept
- * flowing (tablet + HUD) but no longer drawn here.
+ * Host PTY bytes flow verbatim into `writeInput` — ANSI colors, block cursor,
+ * alt-screen and genuine in-session scrollback all render. Input goes out as JSON
+ * frames; resize is clamped client-side to 20..250 × 5..120. The MiniTerm path still
+ * feeds the HUD readouts (geometry, cursor) but is no longer drawn here.
+ *
+ * Follow behavior is native to the library: new output pins to the tail while the
+ * user is at the bottom and holds position while scrolled up (defect-3 core). The
+ * #40 pill has no public API behind it in 0.3.13 (ScrollController is internal-only
+ * and plain Terminal hardcodes its callback to null), so the pill is gone — the
+ * report carries the ruling request.
  *
  * Design v2 (§4-03): Tokyo Night container (bg `#1A1B26`, border `#23233A`), JBM NF at
  * the persisted Aa size (13 default, clamp 10–20, 1.55 leading), a 44 dp Tokyo-blue
@@ -84,7 +86,6 @@ import kotlin.math.roundToInt
 fun LiveTerminalView(
     state: SocketState,
     error: String?,
-    text: String,
     cursor: Pair<Int, Int>?,
     geometry: Geometry?,
     canResize: Boolean,
@@ -96,26 +97,21 @@ fun LiveTerminalView(
     onResizeRequest: () -> Unit,
     /**
      * L3 phone-compact leg (<480dp, passed by the screen): enables the viewport-fit
-     * report (defect 2) and the scroll governor (defect 3). The defect-1 row-grid snap
-     * is structural now (row-integral transcript). False (tablet) keeps the previous
-     * always-follow behavior exactly.
+     * report (defect 2) and the native hold-while-away follow (defect 3 core). The
+     * defect-1 row-grid snap is structural now (integral transcript rows). False (tablet)
+     * keeps the previous always-follow behavior exactly.
      */
     compact: Boolean = false,
     /** Compact only: measured phone-fit (cols, rows) for the screen's refit wiring. */
     onViewportFit: ((cols: Int, rows: Int) -> Unit)? = null,
     /**
-     * todo #61: the live Termux grid. Null before the first host geometry frame — the
-     * viewport shows the waiting placeholder until then. Defaulted so older call sites
-     * compile unchanged.
+     * todo #62: the live termlib emulator (one per terminal, owned by the screen).
+     * Null before creation — the viewport shows the waiting placeholder until then.
      */
-    termux: TermuxHandle? = null,
-    /** Fires with the measured mono cell pixels (drives the engine's cell metrics). */
-    onTermuxCells: ((cellW: Int, cellH: Int) -> Unit)? = null,
+    termlib: TerminalEmulator? = null,
     modifier: Modifier = Modifier,
 ) {
     var input by remember { mutableStateOf("") }
-    var termView by remember { mutableStateOf<RemoteTerminalView?>(null) }
-    var lastAppliedSize by remember { mutableIntStateOf(fontSizeSp) }
 
     // ---- viewport fit (defect 2): the mono advance is MEASURED once per Aa size, so the
     // phone refit is computed from real JetBrains Mono NF glyphs, not a 0.6em guess.
@@ -134,50 +130,28 @@ fun LiveTerminalView(
             onViewportFit?.invoke(fitCols.coerceIn(20, 250), fitRows.coerceIn(5, 120))
         }
     }
-    // todo #61: the engine sizes its cells from these same measured numbers, so local
-    // grid metrics and the phone-fit math above can never disagree.
-    val cellW = charPx.roundToInt()
-    val cellH = linePx.roundToInt()
-    LaunchedEffect(cellW, cellH) { onTermuxCells?.invoke(cellW, cellH) }
-
-    // ---- scroll governor (defect 3) on the REAL transcript: mTopRow is row-integral
-    // (0 = pinned to the tail), so the L3 snap-to-grid is structural now — a half-cut top
-    // row cannot exist. While the user is away the engine holds position and raises the
-    // strict pill (chat #40 parity: never on a plain scroll, never while pinned); at the
-    // tail it follows. Tablet keeps always-follow. Tapping either resumes the tail.
-    var topRow by remember { mutableIntStateOf(0) }
-    var newWhileAway by remember { mutableStateOf(false) }
-    var newCount by remember { mutableStateOf(0) }
-    val atBottom = topRow >= 0
-
-    fun resumeTail() {
-        newWhileAway = false
-        newCount = 0
-        termView?.setTopRow(0)
+    // JBM NF for the renderer (the same face the fit math measures, so advances agree).
+    val ctx = LocalContext.current
+    val jbmTypeface = remember {
+        runCatching { ResourcesCompat.getFont(ctx, R.font.jetbrainsmono_nf_regular) }.getOrNull()
+            ?: Typeface.MONOSPACE
     }
 
-    val termRevision = termux?.revision
-    var cursorOn by remember { mutableStateOf(true) }
-    LaunchedEffect(termRevision) {
-        val v = termView ?: return@LaunchedEffect
-        val em = termux?.emulator ?: return@LaunchedEffect
-        if (v.bound !== em) return@LaunchedEffect
-        topRow = v.getTopRow()
-        // Stock-activity behavior: (re)start the cursor blinker when the remote app
-        // shows or hides the cursor (bind covers the initial state).
-        val cur = em.isCursorEnabled()
-        if (cur != cursorOn) {
-            cursorOn = cur
-            v.setTerminalCursorBlinkerState(true, true)
-        }
-        if (!compact || topRow >= 0) {
-            newWhileAway = false
-            newCount = 0
-            v.onScreenUpdated(false)
+    // ---- auto-size (todo #62): forcedSize is the grid contract. Phone-compact takes
+    // the measured viewport fit (Aa metrics, same numbers as the dialog-prefill report);
+    // tablet takes the host geometry verbatim (dialog-owned, byte-identical path).
+    // Fallbacks always resolve to the host grid — never below it — so the library can
+    // never show a window the host isn't drawing. The emulator reports its actual grid
+    // through onResize, which refits the host; that converges instead of looping because
+    // the host echo matches lastSentGrid. Grow freely, never shrink below the host, so
+    // keyboard transients (smaller box, same host) keep the grid stable with no resend.
+    val liveForced: Pair<Int, Int>? = geometry?.let { host ->
+        if (!compact) {
+            host.rows to host.cols
+        } else if (viewportPx != IntSize.Zero && fitCols >= 20 && fitRows >= 5) {
+            maxOf(fitRows.coerceIn(5, 120), host.rows) to maxOf(fitCols.coerceIn(20, 250), host.cols)
         } else {
-            newWhileAway = true
-            newCount++
-            v.onScreenUpdated(true)
+            host.rows to host.cols
         }
     }
 
@@ -218,38 +192,24 @@ fun LiveTerminalView(
                 .border(1.dp, TerminalThemes.TokyoNight.border, RoundedCornerShape(MaestriRadii.Card))
                 .onSizeChanged { viewportPx = it }
         ) {
-            val liveEmulator = termux?.emulator
-            if (termux != null && liveEmulator != null) {
-                // The real grid: an opaque classic view, corner-clipped to the container.
-                // Focus stays on our own input field — the view never takes the IME.
-                AndroidView(
-                    factory = { c ->
-                        RemoteTerminalView(c).apply {
-                            setTerminalViewClient(TermuxViewClient())
-                            // setTypeface reads the live renderer: size first, face after.
-                            setTextSize(fontSizeSp)
-                            runCatching {
-                                ResourcesCompat.getFont(c, R.font.jetbrainsmono_nf_regular)?.let { setTerminalTypeface(it) }
-                            }
-                            isFocusable = false
-                            isFocusableInTouchMode = false
-                            onTopRow = { topRow = it }
-                            onAltScroll = { up -> onInput(if (up) "\u001B[A" else "\u001B[B") }
-                            setTerminalCursorBlinkerState(true, true)
-                        }
-                    },
-                    update = { v ->
-                        termView = v
-                        v.bindRemote(liveEmulator)
-                        v.rowPx = linePx
-                        if (lastAppliedSize != fontSizeSp) {
-                            v.setTextSize(fontSizeSp)
-                            lastAppliedSize = fontSizeSp
-                        }
-                        v.refreshMetrics(cellW, cellH)
-                    },
-                    onRelease = { termView = null },
+            if (termlib != null && liveForced != null) {
+                // The real grid (libvterm Canvas). Pinch zoom is frozen at the Aa size
+                // (min == max == initial) so the stepper stays the single type control
+                // — the component still applies it live on every step. keyboardEnabled
+                // is false: our composer + rail own all input, so the library never
+                // takes the IME. Focus stays on our own input field.
+                Terminal(
+                    terminalEmulator = termlib,
                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(MaestriRadii.Card)),
+                    typeface = jbmTypeface,
+                    initialFontSize = fontSizeSp.sp,
+                    minFontSize = fontSizeSp.sp,
+                    maxFontSize = fontSizeSp.sp,
+                    backgroundColor = TerminalThemes.TokyoNight.background,
+                    foregroundColor = TerminalThemes.TokyoNight.foreground,
+                    keyboardEnabled = false,
+                    forcedSize = liveForced,
+                    onHyperlinkClick = {},
                 )
             } else {
                 Text(
@@ -260,26 +220,6 @@ fun LiveTerminalView(
                     color = TerminalThemes.TokyoNight.dim,
                     modifier = Modifier.padding(8.dp),
                 )
-            }
-            // Scroll governor affordance (defect 3, compact only): back-to-bottom while merely
-            // away, strict new-content pill once output arrived while paused. Same visual
-            // pattern as the chat scroll pill (elevated glass + hairline + mono 11).
-            if (compact && !atBottom) {
-                TextButton(
-                    onClick = { resumeTail() },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp)
-                        .heightIn(min = Rhythm.TouchTarget.dp)
-                        .background(LocalMaestriColors.current.canvasChromeElevated, pillShape())
-                        .border(1.dp, LocalMaestriColors.current.hairline, pillShape()),
-                    contentPadding = PaddingValues(horizontal = 14.dp),
-                ) {
-                    Text(
-                        if (newWhileAway) "↓ $newCount new" else "↓ Bottom",
-                        style = monoHud(11, color = MaterialTheme.colorScheme.onSurface),
-                    )
-                }
             }
         }
         Spacer(Modifier.height(6.dp))

@@ -21,5 +21,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "MaestriRemoteAndroid"
 include(":app")
-include(":terminal-emulator")
-include(":terminal-view")

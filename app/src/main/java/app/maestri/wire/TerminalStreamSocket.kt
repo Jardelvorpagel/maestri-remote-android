@@ -14,6 +14,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
+import org.connectbot.terminal.TerminalEmulator
 import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
@@ -58,8 +59,10 @@ class TerminalStreamSocket(
     private var url: String? = null
     private var pingJob: Job? = null
     private var term: MiniTerm? = null
-    /** Termux engine (todo #61): parallel REAL grid on the same byte stream. */
-    val termux = TermuxEngine()
+    /** Termlib renderer (todo #62): the screen owns one emulator per terminal and
+     *  attaches it here; host bytes flow verbatim into `writeInput` (mutex-guarded
+     *  inside the lib, so the socket thread can write directly). Nulled on close. */
+    var termlib: TerminalEmulator? = null
 
     /** Tolerant UTF-8 decode: PTY output is usually UTF-8; malformed bytes → U+FFFD. */
     private val utf8Decode = Charsets.UTF_8.newDecoder()
@@ -87,7 +90,7 @@ class TerminalStreamSocket(
         _geometry.value = null
         _cursor.value = null
         term = null
-        termux.clear()
+        termlib = null
     }
 
     private fun connect() {
@@ -123,7 +126,6 @@ class TerminalStreamSocket(
                                 android.util.Log.d("QATerm", "geometry cols=${msg.optInt("cols")} rows=${msg.optInt("rows")} -> clamped ${g.cols}x${g.rows}")
                                 _geometry.value = g
                                 term = MiniTerm(g.cols, g.rows)
-                                termux.reset(g.cols, g.rows)
                                 _cursor.value = 0 to 0
                             }
 
@@ -137,7 +139,7 @@ class TerminalStreamSocket(
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     android.util.Log.d("QATerm", "binary frame ${bytes.size} bytes")
-                    termux.feed(bytes.toByteArray())
+                    termlib?.writeInput(bytes.toByteArray())
                     val decoded = utf8Decode.decode(ByteBuffer.wrap(bytes.toByteArray())).toString()
                     val t = term ?: return
                     t.feed(decoded)
