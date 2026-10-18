@@ -28,7 +28,7 @@ import org.json.JSONObject
  * agent-usage REST route probed 404) — the UI must keep any refresh affordance inert.
  */
 class AgentUsageSocket(
-    clientProvider: () -> OkHttpClient,
+    private val clientProvider: () -> OkHttpClient,
     private val scope: CoroutineScope,
 ) {
     private val socketClient: OkHttpClient get() = clientProvider()
