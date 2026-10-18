@@ -79,7 +79,7 @@ object RoutinesNav {
 /** Registers the Routines root; reachable via the Settings APP group. */
 fun NavGraphBuilder.routinesDestination(session: WireSession, pop: () -> Unit) {
     composable(RoutinesNav.pattern) {
-        RoutinesScreen(api = RoutinesApi(session), onBack = pop)
+        RoutinesScreen(api = RoutinesApi(session), session = session, onBack = pop)
     }
 }
 
@@ -94,6 +94,7 @@ fun NavGraphBuilder.routinesDestination(session: WireSession, pop: () -> Unit) {
 @Composable
 fun RoutinesScreen(
     api: RoutinesApi,
+    session: WireSession,
     onBack: () -> Unit,
 ) {
     var data by remember { mutableStateOf<RoutinesList?>(null) }
