@@ -69,6 +69,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -130,9 +131,15 @@ import app.maestri.ui.Style.cardShape
 import app.maestri.ui.Style.controlShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
 import app.maestri.ui.Style.BackLabel
 import app.maestri.ui.Style.IconOnly
 
@@ -314,6 +321,8 @@ fun ChatThreadScreen(
                     openEntryMenu = { t -> entryMenuTarget = t },
                     openAttachmentPreview = { t -> attachmentPreviewTarget = t },
                     onOpenThreads = { showThreadSheet = true },
+                    onClearHistory = { showClearHistoryDialog = true },
+                    terminalName = terminalName,
                 )
                 if (!atBottom && newWhileAway) {
                     TextButton(
@@ -1333,6 +1342,9 @@ private fun ChatTopBar(
     onClearHistory: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    // v2.1 phone-compact (frame 05, todo #47): below 480dp the nav tightens toward the
+    // artifact's 52px bar — status line joins the identity chip row; above, byte-identical.
+    val compact = LocalConfiguration.current.screenWidthDp < 480
     val statusLine = when (snapshot?.status) {
         "working" -> verb.ifBlank { S.waitingForAReply }
         "needsAttention" -> S.waitingForAReply
@@ -1341,7 +1353,12 @@ private fun ChatTopBar(
         "unloaded" -> S.thisTerminalIsUnloaded
         else -> socketState.name.lowercase()
     }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+    Column(
+        Modifier.fillMaxWidth().padding(
+            horizontal = 12.dp,
+            vertical = if (compact) 2.dp else 6.dp,
+        )
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(
                 onClick = onBack,
@@ -1387,14 +1404,28 @@ private fun ChatTopBar(
                             Box(Modifier.size(8.dp).background(vc, CircleShape))
                         }
                     }
+                    if (compact) {
+                        // frame 05 52px bar: the status rides beside the identity chip
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            statusLine,
+                            fontSize = 10.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
-                Text(
-                    statusLine,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (!compact) {
+                    Text(
+                        statusLine,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             // threads switcher trigger — the artifacts ⧉ glyph
             if (snapshot?.threads != null) {
@@ -1537,7 +1568,12 @@ private fun EntryList(
     openEntryMenu: (EntryMenuTarget) -> Unit,
     openAttachmentPreview: (AttachmentPreviewTarget) -> Unit,
     onOpenThreads: () -> Unit,
+    onClearHistory: () -> Unit,
+    terminalName: String,
 ) {
+    // v2.1 phone-compact (frame 05): below 480dp the settings card + tool tiles render
+    // under the thread chips; the tablet arrangement is byte-identical (compact == false).
+    val compact = LocalConfiguration.current.screenWidthDp < 480
     val entries = snapshot.entries
     val paging by holder.paging.collectAsState()
     val showBoundary = snapshot.hasOlderOnRecord == false ||
@@ -1560,6 +1596,7 @@ private fun EntryList(
             EntryBubble(
                 freshIds = freshIds,
                 entry = entry,
+                compact = compact,
                 showNoReply = isLast && entry.isUser && snapshot.status == "idle",
                 talkingTo = snapshot.talkingToAgentName,
                 answering = snapshot.answeringAgentName,
@@ -1608,6 +1645,17 @@ private fun EntryList(
                 }
             }
         }
+        if (compact) {
+            item(key = "chat-settings") {
+                ChatSettingsCard(
+                    holder = holder,
+                    terminalName = terminalName,
+                    snapshot = snapshot,
+                    onOpenThreads = onOpenThreads,
+                    onClearHistory = onClearHistory,
+                )
+            }
+        }
         if (snapshot.threads != null) {
             item(key = "tchips") {
                 ThreadChipsRow(
@@ -1637,6 +1685,182 @@ private fun BoundaryCard() {
     }
 }
 
+/**
+ * design-v2.1 frame 05 chat-settings card (phone-compact): r-18 card on the banked
+ * card token — identity row (36 ic tile, names, status dot) + Switch pill + 76px tool
+ * tiles. REAL data only: names/status/threads-count live on the wire; the canned-run
+ * tiles render honest-disabled ("(awaiting schema)" — no host route for canned
+ * prompts); the alerts well has no chat-level alert contract and Aa ± needs
+ * MarkdownLite font plumbing — both deferred (flagged in the L5 report), never faked.
+ */
+@Composable
+private fun ChatSettingsCard(
+    holder: ChatFaceState,
+    terminalName: String,
+    snapshot: ChatSnapshot,
+    onOpenThreads: () -> Unit,
+    onClearHistory: () -> Unit,
+) {
+    val chrome = LocalMaestriColors.current
+    val verb by holder.workingVerb.collectAsState()
+    val statusLine = when (snapshot.status) {
+        "working" -> verb.ifBlank { S.waitingForAReply }
+        "needsAttention" -> S.waitingForAReply
+        else -> snapshot.status
+    }
+    val talking = snapshot.talkingToAgentName ?: snapshot.answeringAgentName
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .background(chrome.card, RoundedCornerShape(MaestriRadii.Card))
+            .border(1.dp, chrome.hairline, RoundedCornerShape(MaestriRadii.Card))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(MaestriRadii.Control))
+                    .background(Palette.Terracotta.copy(alpha = 0.16f))
+                    .border(1.dp, Palette.Terracotta.copy(alpha = 0.22f), RoundedCornerShape(MaestriRadii.Control)),
+                contentAlignment = Alignment.Center,
+            ) {
+                IconOnly(Icons.Filled.Star, size = 18.dp, tint = Palette.TerracottaLight)
+            }
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Text(
+                    listOfNotNull(terminalName, talking).joinToString(" · "),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // status dot — the top bar's wire mapping, verbatim
+                    Box(
+                        Modifier.size(6.dp).background(
+                            when (snapshot.status) {
+                                "working" -> chrome.warning
+                                "needsAttention" -> MaterialTheme.colorScheme.error
+                                else -> Color(0xFF3A3D45)
+                            },
+                            CircleShape,
+                        )
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        statusLine,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .heightIn(min = 36.dp)
+                    .clip(pillShape())
+                    .clickable(onClick = onOpenThreads)
+                    .border(1.dp, Palette.Terracotta.copy(alpha = 0.55f), pillShape())
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Switch", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = Palette.TerracottaLight)
+                Spacer(Modifier.width(4.dp))
+                IconOnly(Icons.Filled.KeyboardArrowDown, size = 12.dp)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Canned-run tiles: the contract has no route for canned prompts — honest
+            // disabled with the awaiting-schema marker, never a fake count.
+            ToolTile(
+                modifier = Modifier.weight(1f),
+                label = "Fix lint",
+                icon = Icons.Filled.Edit,
+                tint = Palette.TerracottaLight,
+                tileTop = Palette.Terracotta.copy(alpha = 0.14f).compositeOver(Palette.ScreenLift),
+                ring = Palette.TerracottaLight.copy(alpha = 0.45f),
+                sub = "(awaiting schema)",
+                enabled = false,
+            )
+            ToolTile(
+                modifier = Modifier.weight(1f),
+                label = "Run tests",
+                icon = Icons.Filled.PlayArrow,
+                tint = Palette.Success,
+                tileTop = Palette.Success.copy(alpha = 0.14f).compositeOver(Palette.ScreenLift),
+                ring = Palette.Success.copy(alpha = 0.40f),
+                sub = "(awaiting schema)",
+                enabled = false,
+            )
+            ToolTile(
+                modifier = Modifier.weight(1f),
+                label = "Clear",
+                icon = Icons.Filled.Delete,
+                tint = MaterialTheme.colorScheme.onSurface,
+                tileTop = Palette.ScreenLift,
+                ring = chrome.hairline,
+                sub = snapshot.threads?.items?.size?.let { "$it threads kept" }
+                    ?: "clears transcript + attachments",
+                enabled = snapshot.canClear,
+                onClick = onClearHistory,
+            )
+        }
+    }
+}
+
+/**
+ * Frame 05 tool tile: 76px, r-14, gradient top over the sunken surface, 28 ic r-9,
+ * 12/600 label + mono 10 sub. Disabled tiles sit at 40% alpha — visible, not fake.
+ */
+@Composable
+private fun ToolTile(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    tileTop: Color,
+    ring: Color,
+    sub: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+) {
+    Column(
+        modifier
+            .heightIn(min = 76.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.verticalGradient(listOf(tileTop, Palette.ScreenLift)))
+            .border(1.dp, ring, RoundedCornerShape(14.dp))
+            .alpha(if (enabled) 1f else 0.4f)
+            .clickable(enabled = enabled, onClick = { onClick?.invoke() })
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            Modifier
+                .size(28.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(Palette.ScreenLift),
+            contentAlignment = Alignment.Center,
+        ) {
+            IconOnly(icon, size = 15.dp, tint = tint)
+        }
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, lineHeight = 14.4.sp)
+        Text(
+            sub,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EntryBubble(
@@ -1649,6 +1873,7 @@ private fun EntryBubble(
     onRemoveAttachment: (String) -> Unit,
     onLongPress: () -> Unit,
     onAttachmentTap: (ChatSegment.Attachment) -> Unit,
+    compact: Boolean = false,
 ) {
     val isUser = entry.isUser
     if (entry.kind == "divider") {
@@ -1666,21 +1891,52 @@ private fun EntryBubble(
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
     ) {
         if (!isUser && entry.kind == "message") {
-            listOfNotNull(entry.authorName, entry.agentType).firstOrNull()?.let {
-                Text(
-                    it,
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 1.dp),
-                )
-            }
-            (talkingTo ?: answering)?.let {
-                Text(
-                    "↳ " + it,
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 1.dp),
-                )
+            if (compact) {
+                // frame 05 agent meta: 16px vendor dot + mono 10.5/600 "name · HH:mm".
+                // Times are wire truth (ChatEntry.ts, epoch millis from the host) — null
+                // renders name-only, nothing invented. The talking-to context lives in
+                // the settings card above; the tablet keeps both text rows byte-identical.
+                val who = entry.authorName ?: entry.agentType ?: ""
+                if (who.isNotBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+                    ) {
+                        val dot = vendorColor(entry.agentType ?: entry.authorName)
+                            ?: Palette.StoneGray
+                        Box(Modifier.size(16.dp).background(dot, CircleShape))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            who + (entry.ts?.let { ts ->
+                                " · " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                                    .format(java.util.Date(ts))
+                            } ?: ""),
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            } else {
+                listOfNotNull(entry.authorName, entry.agentType).firstOrNull()?.let {
+                    Text(
+                        it,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 1.dp),
+                    )
+                }
+                (talkingTo ?: answering)?.let {
+                    Text(
+                        "↳ " + it,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 1.dp),
+                    )
+                }
             }
         }
         when (entry.kind) {
@@ -1768,6 +2024,30 @@ private fun EntryBubble(
                                 }
                             }
                             entry.text.isNotBlank() -> MarkdownLite(entry.text)
+                        }
+                        if (compact && isUser) {
+                            // frame 05 .bub.me footer: right-aligned mono 10 time + the ONE
+                            // tick the wire truth supports — a user entry renders from the
+                            // host snapshot, so its presence IS "recorded by host". The
+                            // mock's dim second tick is a read receipt; the wire carries no
+                            // per-entry read state — omitted, never invented.
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                entry.ts?.let { ts ->
+                                    Text(
+                                        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                                            .format(java.util.Date(ts)),
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.width(3.dp))
+                                }
+                                IconOnly(Icons.Filled.Check, size = 14.dp)
+                            }
                         }
                         if (showNoReply && isUser) {
                             Text(
