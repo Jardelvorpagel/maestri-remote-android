@@ -189,8 +189,9 @@ fun CanvasScreen(
     LaunchedEffect(lastMutation) { lastMutation?.let { optimism.onMutation(it) } }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val stageW = maxWidth.value
-        val stageH = maxHeight.value
+        val compact = maxWidth < 480.dp   // v2.1 phone arrangement (frame 04) below the tablet width
+        val stageW = (maxWidth - if (compact) 32.dp else 0.dp).value   // board-card h-insets (16 ×2)
+        val stageH = (maxHeight - if (compact) 92.dp else 0.dp).value  // board-card v-insets (4 top + 88 band)
         val snap = snapshot
         val canvas = snap?.takeIf { it.workspaceId == wsId }?.canvas
 
@@ -315,7 +316,18 @@ fun CanvasScreen(
         // (Board state only — Stack renders the card list below.)
         if (viewMode == CanvasViewMode.Board) Box(
             Modifier
+                .then(
+                    if (compact) Modifier.padding(top = 4.dp, start = 16.dp, end = 16.dp, bottom = 88.dp)
+                    else Modifier
+                )
                 .fillMaxSize()
+                .then(
+                    if (compact) Modifier
+                        .clip(RoundedCornerShape(MaestriRadii.Card))
+                        .background(Palette.SunkenSurface)              // v2.1 --card-2 #232220 (frame 04)
+                        .warmRing(hairline = Palette.WarmSilver.copy(alpha = 0.14f), radius = MaestriRadii.Card)
+                    else Modifier
+                )
                 .pointerInput(following, ctl.mode, penActive, canvas) {
                     // Pan/pinch are hidden while following the Mac; the chip turns it off.
                     if (following) return@pointerInput
@@ -368,6 +380,23 @@ fun CanvasScreen(
                     )
                 }
         ) {
+            if (compact) {
+                // v2.1 (frame 04): the minimap's 24px grid is painted on the SCREEN axis —
+                // it does not track the camera, matching the artifact's static grid.
+                Canvas(Modifier.matchParentSize()) {
+                    val gridColor = Palette.WarmSilver.copy(alpha = 0.05f)
+                    var gx = 0f
+                    while (gx <= size.width) {
+                        drawLine(gridColor, Offset(gx, 0f), Offset(gx, size.height), 1f)
+                        gx += 24.dp.toPx()
+                    }
+                    var gy = 0f
+                    while (gy <= size.height) {
+                        drawLine(gridColor, Offset(0f, gy), Offset(size.width, gy), 1f)
+                        gy += 24.dp.toPx()
+                    }
+                }
+            }
             // The stage: one transform layer; children positioned in canvas points (≙ dp).
             Box(
                 Modifier
@@ -391,7 +420,7 @@ fun CanvasScreen(
                     val shown = if (ov != null) node.copy(frame = app.maestri.wire.CanvasRect(
                         ov.x.toDouble(), ov.y.toDouble(), ov.width.toDouble(), ov.height.toDouble(),
                     )) else node
-                    CanvasNodeCard(shown, snap, ctl.selection[node.id] == true)
+                    CanvasNodeCard(shown, snap, ctl.selection[node.id] == true, compact = compact)
                 }
                 MarqueeRect(marquee)
                 CursorsLayer(self = selfPresence, peers = peers, nodeIndex = nodeIndex)
@@ -400,6 +429,23 @@ fun CanvasScreen(
             if (snap == null) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("no snapshot yet…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            // v2.1 (frame 04): mono counts line bottom-start on the phone — REAL derived
+            // counts (the mock's "12 pts · 2 floors" is decorative), rope/note legend tinted.
+            if (compact && canvas != null) {
+                Row(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 16.dp, bottom = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    fun meta(t: String) = Text(t, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp)
+                    meta("${canvas.nodes.size} pts · ${snap.floors.size} floors · rope ")
+                    Text("#F0A65E", fontFamily = FontFamily.Monospace, fontSize = 9.5.sp, color = RopeInk)
+                    meta(" · note ")
+                    Text("#F5D142", fontFamily = FontFamily.Monospace, fontSize = 9.5.sp, color = NoteYellow)
                 }
             }
         }
@@ -500,18 +546,24 @@ fun CanvasScreen(
         Row(
             Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp)
+                .padding(bottom = if (compact) 16.dp else 24.dp)
                 .zIndex(10f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 GlassPill("＋", "Add node", false, true, false) { addMenu = true; viewMode = CanvasViewMode.Board }
-                GlassPill("✎", "Draw with one finger", penActive, true, false) {
+                GlassPill("✎", "Draw with one finger", penActive, true, false, liftOnActive = compact) {
                     penActive = !penActive
                     ctl.enterMode(CanvasMode.Idle)
                     if (penActive) viewMode = CanvasViewMode.Board
                 }
-                GlassPill("⌘", "Tie two ropes", false, (canvas?.connections?.size ?: 0) >= 1, false) {
+                GlassPill(
+                    "⌘", "Tie two ropes",
+                    if (compact) ctl.mode is CanvasMode.TieLinking else false,
+                    (canvas?.connections?.size ?: 0) >= 1,
+                    false,
+                    liftOnActive = compact,
+                ) {
                     penActive = false
                     ctl.enterMode(CanvasMode.TieLinking(""))
                     viewMode = CanvasViewMode.Board
@@ -987,14 +1039,15 @@ private fun CanvasNodeCard(
     node: CanvasNode,
     snap: FeedSnapshot?,
     selected: Boolean,
+    compact: Boolean = false,   // v2.1 phone blip tints (frame 04); tablet keeps the classic card
 ) {
     val t = node.terminal
     if (node.kind == "terminal" && t != null) {
         val pending = snap?.pendingPromptIds?.contains(t.id) == true
-        CanvasTerminalNode(node, t, pending, selected)
+        CanvasTerminalNode(node, t, pending, selected, compact = compact)
     } else {
         // Per docs: an unknown/non-terminal kind still has frame + title — simple box.
-        UnknownNodeBox(node, selected)
+        UnknownNodeBox(node, selected, compact = compact)
     }
 }
 
@@ -1004,12 +1057,13 @@ private fun CanvasTerminalNode(
     t: TerminalCard,
     pending: Boolean,
     selected: Boolean,
+    compact: Boolean = false,
 ) {
     val accent = parseColor(node.color, parseColor(t.color, MaterialTheme.colorScheme.primary))
     val dotColor = when {
         pending || t.needsAttention -> MaterialTheme.colorScheme.error
         t.isActive == true -> MaterialTheme.colorScheme.primary
-        t.isLive -> LocalMaestriColors.current.warning
+        t.isLive -> if (compact) LiveGreen else LocalMaestriColors.current.warning
         else -> Color.Gray
     }
     Box(
@@ -1041,6 +1095,7 @@ private fun CanvasTerminalNode(
                                 t.name + (t.accountName?.let { " · $it" } ?: ""),
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 19.sp,
+                                color = if (compact && t.isLive) LiveGreen else Color.Unspecified,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -1106,7 +1161,8 @@ private fun CanvasTerminalNode(
 }
 
 @Composable
-private fun UnknownNodeBox(node: CanvasNode, selected: Boolean) {
+private fun UnknownNodeBox(node: CanvasNode, selected: Boolean, compact: Boolean = false) {
+    val isNote = compact && node.kind == "note"
     Box(
         Modifier
             .zIndex(node.zIndex.toFloat())
@@ -1117,12 +1173,23 @@ private fun UnknownNodeBox(node: CanvasNode, selected: Boolean) {
         Card(
             modifier = Modifier.fillMaxSize(),
             shape = cardShape(),
-            colors = CardDefaults.cardColors(containerColor = LocalMaestriColors.current.canvasSurface.copy(alpha = 0.92f)),
-            border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else LocalMaestriColors.current.canvasChromeElevated),
+            colors = CardDefaults.cardColors(
+                containerColor = if (isNote) lerp(LocalMaestriColors.current.card, NoteYellow, 0.14f)
+                else LocalMaestriColors.current.canvasSurface.copy(alpha = 0.92f)
+            ),
+            border = BorderStroke(
+                if (selected) 2.dp else 1.dp,
+                when {
+                    selected -> MaterialTheme.colorScheme.primary
+                    isNote -> NoteYellow.copy(alpha = 0.40f)   // v2.1 blip.note ring (note 40%)
+                    else -> LocalMaestriColors.current.canvasChromeElevated
+                },
+            ),
         ) {
             Column(Modifier.fillMaxSize().padding(12.dp)) {
                 Text(
                     node.title.ifBlank { node.kind },
+                    color = if (isNote) NoteYellow else Color.Unspecified,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp,
                     maxLines = 1,
@@ -1160,6 +1227,7 @@ private enum class CanvasViewMode { Stack, Board }
 
 /** Canvas host palette literals — surviving contracts, verbatim hue (spec §2/§4). */
 private val RopeInk = Color(0xFFF0A65E)      // rope #F0A65E
+private val LiveGreen = Color(0xFF9ECE6A)    // v2.1 --tn-green: live blips (frame 04)
 private val NoteYellow = Color(0xFFF5D142)   // host note-yellow #F5D142 (.12 fill / .35 ring rendered)
 
 /** Track for the Stack⇄Board segmented: card-2 lift, hairline ring, 3px inner padding, 44pt tall. */
@@ -1222,6 +1290,7 @@ private fun GlassPill(
     enabled: Boolean,
     destructive: Boolean,
     onClick: () -> Unit,
+    liftOnActive: Boolean = false,   // v2.1 `.press`: the ACTIVE pill lifts 1.06 (frame 01/04)
 ) {
     val c = LocalMaestriColors.current
     val tint = when {
@@ -1232,6 +1301,7 @@ private fun GlassPill(
     }
     Box(
         Modifier
+            .graphicsLayer { val lift = if (liftOnActive && active) 1.06f else 1f; scaleX = lift; scaleY = lift }
             .size(44.dp)
             .background(Palette.NearBlack.copy(alpha = 0.72f), CircleShape)
             .softHalo(radius = 22.dp, color = if (active) Palette.Terracotta else Palette.NearBlack)
