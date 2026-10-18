@@ -21,6 +21,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ import app.maestri.ui.FloorsNav
 import app.maestri.ui.screens.CanvasScreen
 import app.maestri.ui.screens.FeedScreen
 import app.maestri.ui.screens.PairingScreen
+import app.maestri.ui.screens.PairingMode
 import app.maestri.ui.screens.TerminalScreen
 import app.maestri.ui.chatDestinations
 import android.content.Intent
@@ -111,20 +113,31 @@ class MainActivity : FragmentActivity() {
 fun Root(session: WireSession, appLock: AppLockStore) {
     val paired by session.pairing.collectAsState()
     var authNotice by remember { mutableStateOf<String?>(null) }
-    var reauth by remember { mutableStateOf(false) }
+    var pairMode by rememberSaveable(stateSaver = PairingMode.saver) { mutableStateOf<PairingMode?>(null) }
 
     LaunchedEffect(session) {
         session.authLost.collect {
             authNotice = it
-            reauth = true
+            pairMode = PairingMode.AuthLost
         }
     }
     LaunchedEffect(paired) {
-        if (paired != null) reauth = false
+        if (paired != null) pairMode = null
     }
 
     when {
-        paired == null || reauth -> PairingScreen(session, authNotice = authNotice, onNoticeShown = { authNotice = null })
+        paired == null || pairMode != null -> {
+            val mode = pairMode ?: PairingMode.AuthLost
+            PairingScreen(
+                session = session,
+                mode = mode,
+                prefillHost = if (mode == PairingMode.AddMachine) paired?.host else null,
+                prefillPort = if (mode == PairingMode.AddMachine) paired?.port?.toString() else null,
+                onCancel = if (mode == PairingMode.AddMachine) ({ pairMode = null }) else null,
+                authNotice = authNotice,
+                onNoticeShown = { authNotice = null },
+            )
+        }
         else -> {
             AppLockGate(appLock) {
             val nav = rememberNavController()
@@ -202,7 +215,7 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                             onOpenSettings = { nav.navigate("settings") },
                             // ＋ pill = pair another machine (the pairing flow — recoverable path
                             // from the lane brief); 🔔 pill = the P4-A notifications surface.
-                            onAddMachine = { reauth = true },
+                            onAddMachine = { authNotice = null; pairMode = PairingMode.AddMachine },
                             onOpenNotifications = { nav.navigate(NotificationsNav.ROUTE) },
                             notificationsArmed = router.systemPostNotificationsEnabled(),
                         )

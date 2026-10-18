@@ -1,5 +1,6 @@
 package app.maestri.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,19 +53,56 @@ import app.maestri.ui.Style.LocalMaestriColors
  * Advanced path reuses an existing token (no pairing code burned) — verified via
  * GET /api/info with the token before anything is stored.
  */
+sealed interface PairingMode {
+    object AddMachine : PairingMode
+    object AuthLost : PairingMode
+
+    companion object {
+        fun idOf(mode: PairingMode?): String? = when (mode) {
+            AddMachine -> "add-machine"
+            AuthLost -> "auth-lost"
+            null -> null
+        }
+
+        fun fromId(id: String?): PairingMode? = when (id) {
+            "add-machine" -> AddMachine
+            "auth-lost" -> AuthLost
+            else -> null
+        }
+
+        val saver = androidx.compose.runtime.saveable.Saver<PairingMode?, String>(
+            save = { idOf(it) },
+            restore = { fromId(it) },
+        )
+    }
+}
+
 @Composable
 fun PairingScreen(
     session: app.maestri.wire.session.WireSession,
     authNotice: String?,
     onNoticeShown: () -> Unit,
+    mode: PairingMode = PairingMode.AuthLost,
+    prefillHost: String? = null,
+    prefillPort: String? = null,
+    onCancel: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
+    val cancelNow = onCancel
+    if (cancelNow != null) {
+        BackHandler {
+            when (step) {
+                "confirm" -> step = "form"
+                else -> if (!busy) cancelNow()
+            }
+        }
+    }
 
     var storedNotice by remember { mutableStateOf(authNotice) }
     if (authNotice != null && storedNotice != authNotice) storedNotice = authNotice
 
-    var host by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf("7434") }
+    var host by remember { mutableStateOf(prefillHost ?: "") }
+    var port by remember { mutableStateOf(prefillPort ?: "7434") }
     var code by remember { mutableStateOf("") }
     var deviceName by remember { mutableStateOf("Android remote") }
     var expectedKey by remember { mutableStateOf("") }   // optional: from Manual tab / QR
@@ -88,6 +126,12 @@ fun PairingScreen(
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            if (cancelNow != null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { cancelNow() }) { Text("Close") }
+                }
+                Spacer(Modifier.height(18.dp))
+            }
             Spacer(Modifier.height(28.dp))
             Text("Maestri Wire", fontSize = 26.sp, color = MaterialTheme.colorScheme.primary)
             Text(
@@ -105,14 +149,15 @@ fun PairingScreen(
                         storedNotice = null
                         onNoticeShown()
                     }) { Text("Dismiss") }
-                    TextButton(onClick = {
-                        scope.launch {
-                            session.forgetEverything()
-                            onNoticeShown()
-                            storedNotice = null
-                        }
-                    }) { Text("Forget this server", color = MaterialTheme.colorScheme.error) }
                 }
+                Spacer(Modifier.height(2.dp))
+                TextButton(onClick = {
+                    scope.launch {
+                        session.forgetEverything()
+                        onNoticeShown()
+                        storedNotice = null
+                    }
+                }) { Text("Forget this server", color = MaterialTheme.colorScheme.error) }
                 Spacer(Modifier.height(6.dp))
             }
 
