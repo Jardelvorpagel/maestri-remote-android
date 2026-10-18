@@ -157,6 +157,18 @@ fun LiveTerminalView(
 
     val cols = geometry?.cols ?: 80
 
+    // Forced-fit floor: stays at the Aa size while the forced grid fits (min == max
+    // ⇒ the library's search short-circuits to exactly the Aa size) and drops to the
+    // 6sp library floor only when the grid can no longer fit the box at the Aa size,
+    // so the bottom rows — prompt and cursor — stay inside the viewport.
+    val fitMin = if (liveForced != null && liveForced.first > 0 && liveForced.second > 0 && viewportPx != IntSize.Zero) {
+        val needsRows = (linePx * liveForced.first + 2 * padPx) > viewportPx.height
+        val needsCols = (charPx * liveForced.second + 2 * padPx) > viewportPx.width
+        if (needsRows || needsCols) 6.sp else fontSizeSp.sp
+    } else {
+        fontSizeSp.sp
+    }
+
     Column(modifier) {
         val imeOpen = WindowInsets.isImeVisible
         if (!fullscreen && !imeOpen) {
@@ -193,17 +205,20 @@ fun LiveTerminalView(
                 .onSizeChanged { viewportPx = it }
         ) {
             if (termlib != null && liveForced != null) {
-                // The real grid (libvterm Canvas). Pinch zoom is frozen at the Aa size
-                // (min == max == initial) so the stepper stays the single type control
-                // — the component still applies it live on every step. keyboardEnabled
-                // is false: our composer + rail own all input, so the library never
-                // takes the IME. Focus stays on our own input field.
+                // The real grid (libvterm Canvas). Pinch is a draw-time visual transform
+                // in the library (zoomScale/graphicsLayer; it writes no font size), so
+                // the stepper stays the single type control. The font range feeds only
+                // the forced-fit search: while the forced grid fits, min == max keeps the
+                // rendered font exactly at the Aa value; under overflow the floor opens
+                // to 6sp so all rows fit. keyboardEnabled is false: our composer + rail
+                // own all input, so the library never takes the IME. Focus stays on our
+                // own input field.
                 Terminal(
                     terminalEmulator = termlib,
                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(MaestriRadii.Card)),
                     typeface = jbmTypeface,
                     initialFontSize = fontSizeSp.sp,
-                    minFontSize = fontSizeSp.sp,
+                    minFontSize = fitMin,
                     maxFontSize = fontSizeSp.sp,
                     backgroundColor = TerminalThemes.TokyoNight.background,
                     foregroundColor = TerminalThemes.TokyoNight.foreground,
