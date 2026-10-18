@@ -40,6 +40,8 @@ import app.maestri.ui.screens.PairingMode
 import app.maestri.ui.screens.TerminalScreen
 import app.maestri.ui.screens.UsageNav
 import app.maestri.ui.screens.RoutinesNav
+import app.maestri.ui.screens.partiturasDestination
+import app.maestri.ui.screens.PartiturasNav
 import app.maestri.ui.screens.routinesDestination
 import app.maestri.ui.screens.usageDestination
 import app.maestri.ui.chatDestinations
@@ -317,6 +319,8 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                         openUsage = { if (nav.graph.findNode(UsageNav.pattern) != null) nav.navigate(UsageNav.pattern) },
                         // P5 routines lane: same pattern.
                         openRoutines = { if (nav.graph.findNode(RoutinesNav.pattern) != null) nav.navigate(RoutinesNav.pattern) },
+                        // P5 partituras lane: same pattern.
+                        openPartituras = { if (nav.graph.findNode(PartiturasNav.pattern) != null) nav.navigate(PartiturasNav.pattern) },
                     )
                 }
                 chatDestinations(session, nav)
@@ -325,6 +329,8 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                 usageDestination(session, pop = { nav.popBackStack() })
                 // ── P5 routines lane ───────────────────────────────────────────────
                 routinesDestination(session, pop = { nav.popBackStack() })
+                // ── P5 partituras lane ─────────────────────────────────────────────
+                partiturasDestination(session, pop = { nav.popBackStack() })
                 // ── P3 floors lane ────────────────────────────────────────────────────
                 // Entry affordances live on WorkspacesScreen rows and the FeedScreen
                 // chips row (both navigate via FloorsNav.link); the floor-chips lane
@@ -370,7 +376,8 @@ fun restoreResolveRoute(pattern: String, args: Bundle?): String? {
 suspend fun validatedRestoreRoute(session: WireSession, route: String): String? {
     val head = route.substringBefore('/')
     if (head == "workspaces") return null // already the start destination
-    if (head == "settings" || head == "notifications-settings" || head == UsageNav.pattern || head == RoutinesNav.pattern) return route
+    if (head == "settings" || head == "notifications-settings" || head == UsageNav.pattern
+        || head == RoutinesNav.pattern || head == PartiturasNav.pattern) return route
     val segs = route.split('/')
     // Workspace-scoped heads: segment 1 is the id (floors double-encodes it).
     val wsId = when (head) {

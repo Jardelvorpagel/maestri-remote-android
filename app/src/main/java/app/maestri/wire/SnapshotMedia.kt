@@ -34,11 +34,14 @@ object SnapshotMedia {
         data class Failure(val message: String) : Result()
     }
 
-    /** Bytes now: a young cached copy is served as-is, else an If-None-Match revalidation. */
+    /** Bytes now: a young cached copy is served as-is, else an If-None-Match revalidation.
+     *  [query] rides via addQueryParameter — addPathSegments would percent-encode a '?',
+     *  so structured params go through this instead of the path string. */
     suspend fun fetch(
         session: app.maestri.wire.session.WireSession,
         path: String,
         cacheKey: String,
+        query: Map<String, String>? = null,
         revalidateAfterMillis: Long = 30_000L,
     ): Result = withContext(Dispatchers.IO) {
         val cached: Cached? = synchronized(lock) { cache[cacheKey] }
@@ -50,6 +53,7 @@ object SnapshotMedia {
         try {
             val url = HttpUrl.Builder().scheme("https").host(p.host).port(p.port)
                 .addPathSegments(path.trimStart('/'))
+                .apply { query?.forEach { (k, v) -> addQueryParameter(k, v) } }
                 .build()
             val builder = Request.Builder().url(url)
                 .header("Authorization", "Bearer ${p.token}")
