@@ -174,7 +174,7 @@ private fun AppLockCoverPhone(store: AppLockStore, activity: FragmentActivity?, 
                 SettingsStrings.lockHeadline,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Palette.Ivory,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
                 SettingsStrings.explainer,

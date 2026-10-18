@@ -805,7 +805,7 @@ private fun EditorBanner(title: String, body: String) {
         Column {
             Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = LocalMaestriColors.current.warning)
             Spacer(Modifier.height(2.dp))
-            Text(body, fontSize = 12.sp, color = Palette.Ivory)
+            Text(body, fontSize = 12.sp, color = ParchmentInk2)
         }
     }
 }

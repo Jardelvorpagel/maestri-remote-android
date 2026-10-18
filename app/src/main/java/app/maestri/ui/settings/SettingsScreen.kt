@@ -145,7 +145,7 @@ fun SettingsScreen(
         SettingsGroup {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.weight(1f)) {
-                    Text(SettingsStrings.requireBiometrics, fontSize = 13.5.sp, color = Palette.Ivory)
+                    Text(SettingsStrings.requireBiometrics, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
                     Text(
                         SettingsStrings.explainer,
                         fontSize = 12.sp,
@@ -164,7 +164,7 @@ fun SettingsScreen(
                         .heightIn(min = 56.dp)
                         .clickable { pickerOpen = true },
                 ) {
-                    Text("Lock after…", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f)) // CANDIDATE label
+                    Text("Lock after…", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f)) // CANDIDATE label
                     Text(
                         when (grace) {
                             0 -> SettingsStrings.graceImmediately
@@ -191,7 +191,7 @@ fun SettingsScreen(
                     .heightIn(min = 56.dp)
                     .clickable { openNotificationsRoute?.invoke("notifications-settings") },
             ) {
-                Text(SettingsStrings.notifications, fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text(SettingsStrings.notifications, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
             }
             DividerHair()
@@ -202,7 +202,7 @@ fun SettingsScreen(
                     .heightIn(min = 56.dp)
                     .clickable(enabled = openUsage != null) { openUsage?.invoke() },
             ) {
-                Text("Usage", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("Usage", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "provider limits · live wss",
                     fontSize = 11.5.sp,
@@ -220,7 +220,7 @@ fun SettingsScreen(
                     .heightIn(min = 56.dp)
                     .clickable(enabled = openRoutines != null) { openRoutines?.invoke() },
             ) {
-                Text("Routines", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("Routines", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "scheduled prompts · host scheduler",
                     fontSize = 11.5.sp,
@@ -238,7 +238,7 @@ fun SettingsScreen(
                     .heightIn(min = 56.dp)
                     .clickable(enabled = openPartituras != null) { openPartituras?.invoke() },
             ) {
-                Text("Partituras", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("Partituras", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "canvas library · preview + stamp",
                     fontSize = 11.5.sp,
@@ -250,7 +250,7 @@ fun SettingsScreen(
             }
             DividerHair()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-                Text("Terminal font", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("Terminal font", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "JetBrains Mono NF · " + fontSp,
                     fontSize = 11.5.sp,
@@ -260,7 +260,7 @@ fun SettingsScreen(
             }
             DividerHair()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-                Text("Push", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f)) // CANDIDATE label
+                Text("Push", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f)) // CANDIDATE label
                 Text(
                     "unavailable · Foreground WSS", // honest: our push lane is foreground WSS (Option A)
                     fontSize = 11.5.sp,
@@ -497,7 +497,7 @@ private fun SettingsPhoneBody(
         SettingsGroup {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.weight(1f)) {
-                    Text(SettingsStrings.requireBiometrics, fontSize = 13.5.sp, color = Palette.Ivory)
+                    Text(SettingsStrings.requireBiometrics, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
                     Text(SettingsStrings.explainer, fontSize = 12.sp, color = Palette.WarmSilver)
                 }
                 Spacer(Modifier.width(12.dp))
@@ -520,7 +520,7 @@ private fun SettingsPhoneBody(
                         .heightIn(min = 52.dp)
                         .clickable { onOpenGrace() },
                 ) {
-                    Text("Lock after…", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                    Text("Lock after…", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                     Text(
                         when (grace) {
                             0 -> SettingsStrings.graceImmediately
@@ -547,7 +547,7 @@ private fun SettingsPhoneBody(
                     .heightIn(min = 52.dp)
                     .clickable { onNotifications() },
             ) {
-                Text(SettingsStrings.notifications, fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text(SettingsStrings.notifications, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
             }
             DividerHair()
@@ -558,7 +558,7 @@ private fun SettingsPhoneBody(
                     .heightIn(min = 52.dp)
                     .clickable(enabled = onUsage != null) { onUsage?.invoke() },
             ) {
-                Text("Usage", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("Usage", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "provider limits · live wss",
                     fontSize = 11.5.sp,
@@ -576,7 +576,7 @@ private fun SettingsPhoneBody(
                     .heightIn(min = 52.dp)
                     .clickable(enabled = onRoutines != null) { onRoutines?.invoke() },
             ) {
-                Text("Routines", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("Routines", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "scheduled prompts · host scheduler",
                     fontSize = 11.5.sp,
@@ -594,7 +594,7 @@ private fun SettingsPhoneBody(
                     .heightIn(min = 52.dp)
                     .clickable(enabled = onPartituras != null) { onPartituras?.invoke() },
             ) {
-                Text("Partituras", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("Partituras", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "canvas library · preview + stamp",
                     fontSize = 11.5.sp,
@@ -606,7 +606,7 @@ private fun SettingsPhoneBody(
             }
             DividerHair()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
-                Text("Terminal font", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("Terminal font", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "JetBrains Mono NF · " + fontSp,
                     fontSize = 11.5.sp,
@@ -616,7 +616,7 @@ private fun SettingsPhoneBody(
             }
             DividerHair()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
-                Text("Push", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("Push", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "unavailable · Foreground WSS",
                     fontSize = 11.5.sp,
@@ -667,7 +667,7 @@ private fun AgentLinkRow(label: String, value: String, onOpen: () -> Unit) {
             .heightIn(min = 56.dp)
             .clickable { onOpen() },
     ) {
-        Text(label, fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+        Text(label, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
         Text(
             value,
             fontSize = 11.5.sp,
