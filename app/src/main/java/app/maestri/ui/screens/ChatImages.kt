@@ -78,8 +78,10 @@ private fun decodeSampled(bytes: ByteArray, requestW: Int, requestH: Int): andro
     bounds.inJustDecodeBounds = true
     android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    val minW = requestW.coerceAtLeast(1)
+    val minH = requestH.coerceAtLeast(1)
     var sample = 1
-    while (bounds.outWidth / (sample * 2) >= requestW && bounds.outHeight / (sample * 2) >= requestH) sample *= 2
+    while (bounds.outWidth / (sample * 2) >= minW || bounds.outHeight / (sample * 2) >= minH) sample *= 2
     val opts = android.graphics.BitmapFactory.Options()
     opts.inSampleSize = sample
     return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
