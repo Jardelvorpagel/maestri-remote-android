@@ -2380,6 +2380,43 @@ private fun ComposerPill(
         mentionPanel?.let { panel -> MentionDropdown(holder = holder, panel = panel) }
         flight?.let { f -> FlightBanner(flight = f, onKeepDraft = { holder.dismissFlight() }) }
 
+        // attach menu lives ABOVE the composer pill — below it the menu lays
+        // out off-screen (the pill is bottom-anchored; with the keyboard open
+        // there is no room below), which read as a dead + button (todo #54).
+        // Both widths share this path, so both are fixed by the move.
+        if (showAttachMenu) {
+            Surface(
+                color = LocalMaestriColors.current.canvasChromeElevated,
+                shape = cardShape(),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            ) {
+                Column(Modifier.padding(4.dp)) {
+                    Row(Modifier.fillMaxWidth()) {
+                        TextButton(
+                            onClick = { filePicker.launch(arrayOf("*/*")) },
+                            modifier = Modifier.weight(1f),
+                        ) { Text(S.attach, fontSize = 12.sp, maxLines = 1) }
+                        TextButton(onClick = { launchCamera() }, modifier = Modifier.weight(1f)) {
+                            Text(S.camera, fontSize = 12.sp, maxLines = 1)
+                        }
+                        TextButton(
+                            onClick = { holder.stagePaste(); onDismissMenu() },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                if (holder.canPasteImage()) S.pasteImage else "Paste",
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                            )
+                        }
+                        TextButton(onClick = onDismissMenu, modifier = Modifier.weight(1f)) {
+                            Text("Close", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
         // design-v2 05 .composer: radius 26, margins 2/16/14, padding 8, gap 8,
         // NearBlack @ .66 glass + warm ring + softHalo (no backdrop blur — Compose 1.7)
         Surface(
@@ -2558,38 +2595,6 @@ private fun ComposerPill(
             }
         }
 
-        if (showAttachMenu) {
-            Surface(
-                color = LocalMaestriColors.current.canvasChromeElevated,
-                shape = cardShape(),
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-            ) {
-                Column(Modifier.padding(4.dp)) {
-                    Row(Modifier.fillMaxWidth()) {
-                        TextButton(
-                            onClick = { filePicker.launch(arrayOf("*/*")) },
-                            modifier = Modifier.weight(1f),
-                        ) { Text(S.attach, fontSize = 12.sp, maxLines = 1) }
-                        TextButton(onClick = { launchCamera() }, modifier = Modifier.weight(1f)) {
-                            Text(S.camera, fontSize = 12.sp, maxLines = 1)
-                        }
-                        TextButton(
-                            onClick = { holder.stagePaste(); onDismissMenu() },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(
-                                if (holder.canPasteImage()) S.pasteImage else "Paste",
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                            )
-                        }
-                        TextButton(onClick = onDismissMenu, modifier = Modifier.weight(1f)) {
-                            Text("Close", fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
