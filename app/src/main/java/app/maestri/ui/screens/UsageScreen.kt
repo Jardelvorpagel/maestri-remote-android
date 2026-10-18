@@ -3,10 +3,13 @@ package app.maestri.ui.screens
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +24,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -32,6 +39,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -42,81 +50,102 @@ import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.Overline
 import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.RootTitle
+import app.maestri.wire.AgentUsageMeter
+import app.maestri.wire.AgentUsageProvider
+import app.maestri.wire.AgentUsageReading
+import app.maestri.wire.AgentUsageSocket
+import app.maestri.wire.AgentUsageWindow
+import app.maestri.wire.session.WireSession
+import androidx.navigation.NavGraphBuilder
+import androidx.navigation.compose.composable
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
- * Design-v2 frame 08 — Usage ring HUD sheet (px-perfect, render-only).
+ * Design-v2 frame 08 — Usage ring HUD sheet, now LIVE.
  *
- * Evidence: knowledge/sources/2026-10-16-maestri-design-v2-spec.md §4 frame 08 +
- * §6 rings; mock /tmp/design-v2-mobile.html (08 · USAGE): .rings gap 26 centred
- * (padding 8/0/4), .ringbox 86×86, .lab centred JBM 600 17, .rcap mono 10.5/1.5
- * centred UNDER the ring inside the ring box (the structural fix of v2's
- * `.ringbox .cap` selector bug — captions were left-aligned sans), .json mono
- * 11/1.8, .card r12 + hairline box-shadow + 14/12 padding, meter row: dot 8 +
- * sans 12.5 flex text + chip (inline 10px sans).
+ * The arcs read the real agentUsage stream (corpus §5ter): the screen owns one
+ * [AgentUsageSocket] subscription — opened while composed, closed on leave — whose
+ * ServerMessage {"type":"agentUsage","usage":{…}} replaces its state whole per frame.
+ * Any absent/out-of-range/NaN usedFraction renders honest-empty (track + "—").
+ * The ⟳ affordance stays inert by contract: the host's canRefresh flag has no
+ * client-reachable trigger (every agent-usage REST route probed 404) — its
+ * contentDescription states that instead of pretending.
  *
- * Data: the arcs read the REAL captured agentUsage reading (wire contract, probe
- * bank: knowledge/sources/2026-10-16-maestri-wire-write-schemas.md §5ter — Meter
- * carries `windows[].ring: 0|1|2` + `windows[].usedFraction 0…1`; frame capture
- * 130/226=0.58 · 68/226=0.30 · 160/226=0.71 — r36 circumference ≈ 226). The wss
- * stream client is NOT wired in this wave (render-only); any NaN/out-of-range or
- * absent fraction renders honest-empty (track only + "—"), never an invented value.
- *
- * Pixel note: the mock's SVG arc starts at 3 o'clock (circle dasharray, no
- * rotation) → drawArc(startAngle = 0f); the track paints butt-capped, the vendor
- * arc round-capped.
+ * Pixel geometry is the existing sheet's: ring boxes 86×86 (compact 92×92),
+ * radius 36 (compact 38), stroke 7 dp, JBM mono 17 sp labels, mono 10.5 captions,
+ * `.rings` gap 26 (compact 22) centred, overline, `.json` mono card, meter row.
  */
 object UsageNav {
     const val pattern = "usage"
     fun route(): String = pattern
-    /* Additive registration is a later wiring pass (render-only wave): Root composes
-       this screen directly; no NavGraphBuilder extension here by design. */
 }
 
-/** One captured meter reading (schema §5ter). [usedFraction] null = honest empty. */
-private data class ProviderMeterReading(
-    val id: String,
-    val chipRing: Int?,
-    val usedFraction: Float?,
-    val capTop: String,
-    val capBottom: String,
-)
-
-/** REAL captured readings — spec §4 frame 08 (never invented; see header data note). */
-private val capturedMeters = listOf(
-    ProviderMeterReading(
-        id = "claude", chipRing = 2, usedFraction = 0.58f,
-        capTop = "claude · 5h window", capBottom = "resets 19:00",
-    ),
-    ProviderMeterReading(
-        id = "codex", chipRing = 1, usedFraction = 0.30f,
-        capTop = "codex · weekly", capBottom = "resets Mon",
-    ),
-    ProviderMeterReading(
-        id = "gemini", chipRing = 2, usedFraction = 0.71f,
-        capTop = "gemini · daily", capBottom = "limits apply",
-    ),
-)
-
-/** Normalises a usedFraction per the meter rules: finite 0…1 only. */
-private fun validFraction(raw: Float?): Float? =
-    if (raw != null && raw.isFinite() && raw >= 0f && raw <= 1f) raw else null
-
-/** Vendor stroke for the data arc (data role only — spec §2 vendor palette). */
-private fun vendorStroke(id: String): Color = when (id) {
-    "claude" -> Palette.Claude
-    "codex" -> Palette.Codex
-    else -> Palette.Gemini
+/** Registers the Usage root in the app's NavHost; reachable via the Settings APP group. */
+fun NavGraphBuilder.usageDestination(session: WireSession, pop: () -> Unit) {
+    composable(UsageNav.pattern) {
+        UsageScreen(session = session, onBack = pop)
+    }
 }
+
+/** One (provider, meter, window) triple — every live window renders as a ring. */
+private data class LiveRing(
+    val provider: AgentUsageProvider,
+    val meter: AgentUsageMeter,
+    val window: AgentUsageWindow,
+)
+
+private fun liveRings(usage: AgentUsageReading?): List<LiveRing> =
+    usage?.providers?.flatMap { p ->
+        p.meters.flatMap { m -> m.windows.map { w -> LiveRing(p, m, w) } }
+    } ?: emptyList()
+
+private fun validFraction(raw: Double?): Double? =
+    if (raw != null && raw.isFinite() && raw >= 0.0 && raw <= 1.0) raw else null
+
+/** Data-role stroke from the packet's colorHex (plain 6-hex); unmapped → neutral warm silver. */
+private fun providerColor(p: AgentUsageProvider): Color =
+    p.colorHex?.let {
+        runCatching { Color((it.toLong(16) and 0xFFFFFF).toInt() or 0xFF000000.toInt()) }.getOrNull()
+    } ?: Palette.WarmSilver
+
+private fun meterLabel(m: AgentUsageMeter): String = m.labelText ?: m.labelKey ?: m.id
+
+private val resetsTime = DateTimeFormatter.ofPattern("HH:mm")
+private val resetsDate = DateTimeFormatter.ofPattern("MMM d HH:mm")
+
+private fun formatResets(raw: String): String =
+    runCatching {
+        val t = Instant.parse(raw).atZone(ZoneId.systemDefault())
+        val now = java.time.LocalDateTime.now(ZoneId.systemDefault())
+        if (t.toLocalDate() == now.toLocalDate()) t.format(resetsTime) else t.format(resetsDate)
+    }.getOrDefault(raw.take(24))
+
+private fun capBottom(w: AgentUsageWindow, p: AgentUsageProvider): String =
+    w.resetsAt?.let { "resets ${formatResets(it)}" }
+        ?: if (p.limitsApply == true) "limits apply" else ""
+
+private fun ringLab(w: AgentUsageWindow): String {
+    val f = validFraction(w.usedFraction)
+    return if (f == null) "—" else "${(f * 100).toInt()}%"
+}
+
+/** The single meter-summary row's data: the fullest live window, or null when none. */
+private fun fullestRing(usage: AgentUsageReading?): LiveRing? =
+    liveRings(usage).maxByOrNull { r -> validFraction(r.window.usedFraction) ?: -1.0 }
 
 /**
- * The ring: 7dp butt-cap track + vendor round-cap arc + centred numeric.
- * Defaults = the a90fa76 tablet/HUD values (86×86, r36, JBM 600 17, .rcap
- * 10.5/1.5 w110, cap gap 8); [compact] = true switches to the v2.1 frame-08
- * phone values (92×92, r38, JBM 700 17, .rcap 10.5/1.55 w112, cap gap 10).
+ * The ring: 7dp butt-cap track + vendor round-cap arc + centred numeric. Defaults =
+ * the tablet values (86×86, r36, JBM 600 17, .rcap 10.5/1.5 w110, cap gap 8);
+ * [compact] = the v2.1 frame-08 phone values (92×92, r38, JBM 700 17, .rcap
+ * 10.5/1.55 w112, cap gap 10).
  */
 @Composable
 private fun MeterRing(
-    fraction: Float?,
+    fraction: Double?,
     arcColor: Color,
     lab: String,
     capTop: String,
@@ -124,20 +153,19 @@ private fun MeterRing(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
-    val track = Palette.DarkWarm // spec §6: track #3d3d3a (delta: ring tracks stay)
+    val track = Palette.DarkWarm
     val stroke = 7.dp
-    val boxSize: Dp = if (compact) 92.dp else 86.dp // .ringbox (frame 08: 92)
-    val radius: Dp = if (compact) 38.dp else 36.dp // circle r (frame 08: 38)
-    val capGap = if (compact) 10.dp else 8.dp // .ring column gap
-    val capWidth: Dp = if (compact) 112.dp else 110.dp // .rcap width
-    val capLineHeight: TextUnit = if (compact) 16.275.sp else 15.75.sp // 1.55 vs 1.5
-    val capColor: Color =
-        Palette.StoneGray // --meta #87867F both (StoneGray == --meta bytewise)
+    val boxSize: Dp = if (compact) 92.dp else 86.dp
+    val radius: Dp = if (compact) 38.dp else 36.dp
+    val capGap = if (compact) 10.dp else 8.dp
+    val capWidth: Dp = if (compact) 112.dp else 110.dp
+    val capLineHeight: TextUnit = if (compact) 16.275.sp else 15.75.sp
+    val capColor: Color = Palette.StoneGray
     Column(
         modifier,
-        horizontalAlignment = Alignment.CenterHorizontally, // .ring
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.size(boxSize)) { // .ringbox
+        Box(Modifier.size(boxSize)) {
             Canvas(Modifier.fillMaxSize()) {
                 val r = radius.toPx()
                 val topLeft = Offset(
@@ -154,12 +182,12 @@ private fun MeterRing(
                     size = arcSize,
                     style = Stroke(width = stroke.toPx(), cap = StrokeCap.Butt),
                 )
-                val f = validFraction(fraction)
-                if (f != null && f > 0f) {
+                val f = fraction
+                if (f != null && f > 0.0) {
                     drawArc(
                         color = arcColor,
                         startAngle = 0f,
-                        sweepAngle = f * 360f,
+                        sweepAngle = (f * 360.0).toFloat(),
                         useCenter = false,
                         topLeft = topLeft,
                         size = arcSize,
@@ -167,7 +195,6 @@ private fun MeterRing(
                     )
                 }
             }
-            // .lab: absolutely-centred numeric (tablet JBM 600 17; phone 700 17)
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     lab,
@@ -179,7 +206,6 @@ private fun MeterRing(
             }
         }
         Spacer(Modifier.height(capGap))
-        // .rcap: mono 10.5, centred, fixed width (tablet 110 · phone 112), meta colour.
         Column(Modifier.width(capWidth), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 capTop,
@@ -188,6 +214,8 @@ private fun MeterRing(
                 lineHeight = capLineHeight,
                 color = capColor,
                 textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 capBottom,
@@ -196,255 +224,271 @@ private fun MeterRing(
                 lineHeight = capLineHeight,
                 color = capColor,
                 textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
 }
 
-/** The frame-08 sheet. Render-only: consumes the captured readings; no wire edits. */
 @Composable
-fun UsageScreen() {
+fun UsageScreen(
+    session: WireSession,
+    onBack: () -> Unit,
+) {
+    val usage by session.agentUsage.usage.collectAsState()
+    val streamState by session.agentUsage.state.collectAsState()
+    val streamError by session.agentUsage.error.collectAsState()
+    val lastFrame by session.agentUsage.lastFrame.collectAsState()
+
+    DisposableEffect(Unit) {
+        onDispose { session.agentUsage.close() }
+    }
+    LaunchedEffect(Unit) {
+        session.pairing.filterNotNull().first()
+        val url = session.agentUsageStreamUrl()
+        if (url.isNotBlank()) session.agentUsage.open(url)
+    }
+
     BoxWithConstraints {
         if (maxWidth < 480.dp) {
-            // todo #50 L8 — v2.1 frame 08 phone arrangement below 480dp.
-            UsageCompact()
-            return@BoxWithConstraints
+            UsageCompact(usage, lastFrame, streamState, streamError, onBack)
+        } else {
+            UsageTablet(usage, lastFrame, streamState, streamError, onBack)
         }
-        // >=480dp: the a90fa76 tablet/HUD arrangement — the body below is untouched
-        // bytewise (no re-indent on purpose: tablet-branch byte-identity by construction).
+    }
+}
+
+/** The .rings row: every live window gets a ring; empty reading = honest placeholder. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RingsRow(
+    usage: AgentUsageReading?,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    FlowRow(
+        modifier.fillMaxWidth().padding(top = if (compact) 10.dp else 8.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 22.dp else 26.dp, Alignment.CenterHorizontally),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        liveRings(usage).forEach { r ->
+            MeterRing(
+                compact = compact,
+                fraction = validFraction(r.window.usedFraction),
+                arcColor = providerColor(r.provider),
+                lab = ringLab(r.window),
+                capTop = "${r.provider.name} · ${meterLabel(r.meter)}",
+                capBottom = capBottom(r.window, r.provider),
+            )
+        }
+    }
+    if (liveRings(usage).isEmpty()) {
+        Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+            Text(
+                if (usage == null) "no agentUsage frame yet — the stream pushes one on connect"
+                else "no provider meters in the current reading",
+                fontSize = 12.5.sp,
+                color = Palette.StoneGray,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** Header row: back affordance (Settings idiom) + serif root title + the honest-inert ⟳. */
+@Composable
+private fun UsageHeaderRow(
+    usage: AgentUsageReading?,
+    onBack: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().height(54.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "‹",
+            fontSize = 20.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.clickable { onBack() }.padding(end = 12.dp),
+        )
+        RootTitle("Usage", modifier = Modifier.weight(1f))
+        Box(
+            Modifier
+                .size(44.dp)
+                .semantics {
+                    contentDescription =
+                        "Refresh — inert: the host's canRefresh flag (${usage?.canRefresh ?: "unknown"}) has no client-reachable trigger in the probed wire; every agent-usage REST route answers 404, so refresh stays awaiting confirmation"
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("⟳", fontSize = 20.sp, color = Palette.StoneGray)
+        }
+    }
+}
+
+/** The payload + meter rows: the real latest raw frame, then the live summary line. */
+@Composable
+private fun UsageDataCards(
+    usage: AgentUsageReading?,
+    lastFrame: String?,
+    streamState: app.maestri.wire.SocketState,
+    streamError: String?,
+    jsonSize: TextUnit,
+    jsonLineHeight: TextUnit,
+) {
+    val c = LocalMaestriColors.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(c.canvasSurface, RoundedCornerShape(MaestriRadii.Card))
+            .border(1.dp, c.hairline, RoundedCornerShape(MaestriRadii.Card))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        if (streamError != null && streamState != app.maestri.wire.SocketState.OPEN) {
+            PayloadJsonLine(
+                "stream error: $streamError",
+                fontSize = jsonSize,
+                lineHeight = jsonLineHeight,
+                color = LocalMaestriColors.current.errorText,
+            )
+        }
+        PayloadJsonLine(
+            lastFrame ?: "waiting for the first agentUsage frame…",
+            fontSize = jsonSize,
+            lineHeight = jsonLineHeight,
+            maxLines = 5,
+        )
+    }
+    // Meter row: warn dot + sans 12.5 flex text + ring chip — all values live.
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(c.canvasSurface, RoundedCornerShape(MaestriRadii.Card))
+            .border(1.dp, c.hairline, RoundedCornerShape(MaestriRadii.Card))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(8.dp).background(c.warning, CircleShape))
+        val top = fullestRing(usage)
+        val u = usage
+        val f = top?.let { validFraction(it.window.usedFraction) }
+        val label = when {
+            u == null -> "awaiting the first agentUsage frame"
+            u.isEnabled == false -> "usage reporting is disabled on the host"
+            top == null -> "no provider meters in the current reading"
+            else -> "${top.provider.name} ${meterLabel(top.meter)} — " +
+                (f?.let { "${(it * 100).toInt()}% used" } ?: "fraction unavailable")
+        }
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            fontSize = 12.5.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        top?.window?.ring?.let { ring ->
+            Box(
+                Modifier
+                    .border(1.dp, c.hairline, RoundedCornerShape(99.dp))
+                    .padding(horizontal = 10.dp, vertical = 3.dp),
+            ) {
+                Text("ring $ring", fontSize = 10.sp, color = c.secondaryLabel)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageTablet(
+    usage: AgentUsageReading?,
+    lastFrame: String?,
+    streamState: app.maestri.wire.SocketState,
+    streamError: String?,
+    onBack: () -> Unit,
+) {
     val c = LocalMaestriColors.current
     Column(
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp) // .col
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp)
             .semantics {
                 contentDescription = "Usage — provider limits, live wss agent usage"
             },
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // .lnav (54): serif root title + 44 ⟳ affordance (stream un-wired = honest,
-        // rendered inert in meta colour with an explanatory contentDescription).
-        Row(
-            Modifier.fillMaxWidth().height(54.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RootTitle("Usage", modifier = Modifier.weight(1f))
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .semantics {
-                        contentDescription =
-                            "Refresh — unavailable while the wss agentUsage stream is not wired"
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("⟳", fontSize = 20.sp, color = Palette.StoneGray)
-            }
-        }
-
-        // .h2sec (margin-top 4): the overline.
+        UsageHeaderRow(usage, onBack)
         Column {
             Spacer(Modifier.height(4.dp))
             Overline("Provider limits · live (wss agentUsage)")
         }
-
-        // .rings: gap 26, centred, padding 8/0/4.
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp, bottom = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(26.dp, Alignment.CenterHorizontally),
-        ) {
-            capturedMeters.forEach { m ->
-                val f = validFraction(m.usedFraction)
-                MeterRing(
-                    fraction = f,
-                    arcColor = vendorStroke(m.id),
-                    lab = if (f == null) "—" else "${(f * 100).toInt()}%",
-                    capTop = m.capTop,
-                    capBottom = m.capBottom,
-                )
-            }
-        }
-
-        // .card .json: agentUsage payload card, JBM 11/1.8 (the captured frame excerpt).
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(c.canvasSurface, RoundedCornerShape(MaestriRadii.Card))
-                .border(1.dp, c.hairline, RoundedCornerShape(MaestriRadii.Card))
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-        ) {
-            PayloadJsonLine("{\"type\":\"agentUsage\",\"usage\":{\"canRefresh\":true,")
-            PayloadJsonLine("  \"providers\":[{\"id\":\"claude\",\"colorHex\":\"D97757\",")
-            PayloadJsonLine("    \"reading\":{\"meters\":[{\"ring\":2,\"usedFraction\":0.58}]}}]}")
-        }
-
-        // Meter row: warn dot + sans 12.5 flex text + meter chip (inline 10px sans).
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(c.canvasSurface, RoundedCornerShape(MaestriRadii.Card))
-                .border(1.dp, c.hairline, RoundedCornerShape(MaestriRadii.Card))
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box(Modifier.size(8.dp).background(c.warning, CircleShape))
-            Text(
-                "gemini daily limit nears 71% — meter pinned live",
-                modifier = Modifier.weight(1f),
-                fontSize = 12.5.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Box(
-                Modifier
-                    .border(1.dp, c.hairline, RoundedCornerShape(99.dp))
-                    .padding(horizontal = 10.dp, vertical = 3.dp),
-            ) {
-                Text("meter 2", fontSize = 10.sp, color = c.secondaryLabel)
-            }
-        }
+        RingsRow(usage, compact = false)
+        UsageDataCards(
+            usage = usage,
+            lastFrame = lastFrame,
+            streamState = streamState,
+            streamError = streamError,
+            jsonSize = 11.sp,
+            jsonLineHeight = 19.8.sp,
+        )
     }
-        } // BoxWithConstraints
 }
 
-/**
- * One .json card line in the dim warm tone (.json color:var(--dim)):
- * defaults = the tablet 11/1.8 (a90fa76); the frame-08 phone call passes 10.5/1.75.
- */
+/** todo #50 L8 — the v2.1 frame 08 phone arrangement (below 480dp): .rings gap 22,
+ * .ringbox 92×92 (r38, stroke 7), .lab JBM 700 17px, .rcap 10.5/1.55 w112, .json 10.5/1.75. */
+@Composable
+private fun UsageCompact(
+    usage: AgentUsageReading?,
+    lastFrame: String?,
+    streamState: app.maestri.wire.SocketState,
+    streamError: String?,
+    onBack: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp)
+            .semantics {
+                contentDescription = "Usage — provider limits, live wss agent usage"
+            },
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        UsageHeaderRow(usage, onBack)
+        Column {
+            Spacer(Modifier.height(4.dp))
+            Overline("Provider limits · live (wss agentUsage)")
+        }
+        RingsRow(usage, compact = true)
+        UsageDataCards(
+            usage = usage,
+            lastFrame = lastFrame,
+            streamState = streamState,
+            streamError = streamError,
+            jsonSize = 10.5.sp,
+            jsonLineHeight = 18.375.sp,
+        )
+    }
+}
+
 @Composable
 private fun PayloadJsonLine(
     text: String,
-    fontSize: TextUnit = 11.sp,
-    lineHeight: TextUnit = 19.8.sp,
+    fontSize: TextUnit,
+    lineHeight: TextUnit,
+    maxLines: Int = -1,
+    color: Color = LocalMaestriColors.current.secondaryLabel,
 ) {
-    val c = LocalMaestriColors.current
     Text(
         text,
         fontFamily = MaestriType.Mono,
         fontSize = fontSize,
         lineHeight = lineHeight,
-        color = c.secondaryLabel,
+        color = color,
+        maxLines = if (maxLines < 0) Int.MAX_VALUE else maxLines,
+        overflow = TextOverflow.Ellipsis,
     )
-}
-
-
-/**
- * todo #50 L8 — the v2.1 frame 08 phone arrangement (below 480dp), artifact
- * `maestri-remote-android-v2-84f9` 08 · USAGE: .rings gap 22 (padding 10/0/4),
- * .ringbox 92×92 (circle r38, stroke 7), .lab 700 17px JBM, .ring column gap 10,
- * .rcap 10.5/1.55 w112, .json 10.5/1.75. Track stays DarkWarm and meter data is
- * the shared captured bank (v2.1 delta verdict: numerics/HUD tokens same, ring
- * tracks stay); scaffold text mirrors the tablet branch deliberately — the
- * tablet body keeps byte-identity, the compact branch tunes independently.
- */
-@Composable
-private fun UsageCompact() {
-    val c = LocalMaestriColors.current
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp) // .col
-            .semantics {
-                contentDescription = "Usage — provider limits, live wss agent usage"
-            },
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        // .lnav (54): serif root title + inert ⟳ (stream un-wired, honest).
-        Row(
-            Modifier.fillMaxWidth().height(54.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RootTitle("Usage", modifier = Modifier.weight(1f))
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .semantics {
-                        contentDescription =
-                            "Refresh — unavailable while the wss agentUsage stream is not wired"
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("⟳", fontSize = 20.sp, color = Palette.StoneGray)
-            }
-        }
-        // .h2sec overline.
-        Column {
-            Spacer(Modifier.height(4.dp))
-            Overline("Provider limits · live (wss agentUsage)")
-        }
-        // .rings: gap 22, centred, padding 10/0/4 (frame 08).
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp, bottom = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterHorizontally),
-        ) {
-            capturedMeters.forEach { m ->
-                val f = validFraction(m.usedFraction)
-                MeterRing(
-                    compact = true,
-                    fraction = f,
-                    arcColor = vendorStroke(m.id),
-                    lab = if (f == null) "—" else "${(f * 100).toInt()}%",
-                    capTop = m.capTop,
-                    capBottom = m.capBottom,
-                )
-            }
-        }
-        // .card .well .json: 10.5/1.75 at phone width (frame 08).
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(c.canvasSurface, RoundedCornerShape(MaestriRadii.Card))
-                .border(1.dp, c.hairline, RoundedCornerShape(MaestriRadii.Card))
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-        ) {
-            PayloadJsonLine(
-                "{\"type\":\"agentUsage\",\"usage\":{\"canRefresh\":true,",
-                fontSize = 10.5.sp,
-                lineHeight = 18.375.sp,
-            )
-            PayloadJsonLine(
-                "  \"providers\":[{\"id\":\"claude\",\"colorHex\":\"D97757\",",
-                fontSize = 10.5.sp,
-                lineHeight = 18.375.sp,
-            )
-            PayloadJsonLine(
-                "    \"reading\":{\"meters\":[{\"ring\":2,\"usedFraction\":0.58}]}}]}",
-                fontSize = 10.5.sp,
-                lineHeight = 18.375.sp,
-            )
-        }
-        // Meter row: same arrangement both widths (v2.1 shows it unchanged).
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(c.canvasSurface, RoundedCornerShape(MaestriRadii.Card))
-                .border(1.dp, c.hairline, RoundedCornerShape(MaestriRadii.Card))
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box(Modifier.size(8.dp).background(c.warning, CircleShape))
-            Text(
-                "gemini daily limit nears 71% — meter pinned live",
-                modifier = Modifier.weight(1f),
-                fontSize = 12.5.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Box(
-                Modifier
-                    .border(1.dp, c.hairline, RoundedCornerShape(99.dp))
-                    .padding(horizontal = 10.dp, vertical = 3.dp),
-            ) {
-                Text("meter 2", fontSize = 10.sp, color = c.secondaryLabel)
-            }
-        }
-    }
 }

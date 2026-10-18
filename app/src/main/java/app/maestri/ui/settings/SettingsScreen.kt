@@ -73,6 +73,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     /** P4-A owns the real row; navigate via a existence-checked callback (W-4). */
     openNotificationsRoute: ((String) -> Unit)? = null,
+    /** P5 usage lane: the Usage screen lives at its own route ("usage"). */
+    openUsage: (() -> Unit)? = null,
 ) {
     val colors = app.maestri.ui.Style.LocalMaestriColors.current
     val scope = rememberCoroutineScope()
@@ -112,6 +114,7 @@ fun SettingsScreen(
                 onToggle = { v -> scope.launch { appLock.setEnabled(v) } },
                 onOpenGrace = { pickerOpen = true },
                 onNotifications = { openNotificationsRoute?.invoke("notifications-settings") },
+                onUsage = { openUsage?.invoke() },
                 onOpenAgentPicker = { agentPicker = it },
             )
         } else     Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -182,6 +185,24 @@ fun SettingsScreen(
                     .clickable { openNotificationsRoute?.invoke("notifications-settings") },
             ) {
                 Text(SettingsStrings.notifications, fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+            }
+            DividerHair()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clickable(enabled = openUsage != null) { openUsage?.invoke() },
+            ) {
+                Text("Usage", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text(
+                    "provider limits · live wss",
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Palette.WarmSilver,
+                )
+                Spacer(Modifier.width(8.dp))
                 Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
             }
             DividerHair()
@@ -416,6 +437,7 @@ private fun SettingsPhoneBody(
     onToggle: (Boolean) -> Unit,
     onOpenGrace: () -> Unit,
     onNotifications: () -> Unit,
+    onUsage: (() -> Unit)?,
     onOpenAgentPicker: (String) -> Unit,
 ) {
     val colors = LocalMaestriColors.current
@@ -481,6 +503,24 @@ private fun SettingsPhoneBody(
                     .clickable { onNotifications() },
             ) {
                 Text(SettingsStrings.notifications, fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+            }
+            DividerHair()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .clickable(enabled = onUsage != null) { onUsage?.invoke() },
+            ) {
+                Text("Usage", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text(
+                    "provider limits · live wss",
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Palette.WarmSilver,
+                )
+                Spacer(Modifier.width(8.dp))
                 Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
             }
             DividerHair()

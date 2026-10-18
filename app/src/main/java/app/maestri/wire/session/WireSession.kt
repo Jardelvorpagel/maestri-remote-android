@@ -3,6 +3,7 @@ package app.maestri.wire.session
 import android.content.Context
 import app.maestri.store.Pairing
 import app.maestri.store.PairingStore
+import app.maestri.wire.AgentUsageSocket
 import app.maestri.wire.ApiException
 import app.maestri.wire.FeedSocket
 import app.maestri.wire.FeedSnapshot
@@ -60,6 +61,12 @@ class WireSession(context: Context) {
         },
         scope = scope,
     )
+    val agentUsage = AgentUsageSocket(
+        clientProvider = {
+            _pairing.value?.let { p -> client.pinnedForSocket(p.serverKeyHashB64) } ?: okhttp3.OkHttpClient()
+        },
+        scope = scope,
+    )
 
     @Volatile
     var serverInfo: ServerInfo? = null
@@ -112,6 +119,7 @@ class WireSession(context: Context) {
         android.util.Log.d("QAAuth", "persistent 401 -> closing sockets, re-pair UX")
         feed.close()
         terminalStream.close()
+        agentUsage.close()
         _authLost.tryEmit("Device token revoked or forgotten on the host — pair again.")
     }
 
@@ -119,6 +127,7 @@ class WireSession(context: Context) {
     suspend fun forgetToken() {
         feed.close()
         terminalStream.close()
+        agentUsage.close()
         store.forgetToken()
         serverInfo = null
     }
@@ -127,6 +136,7 @@ class WireSession(context: Context) {
     suspend fun forgetEverything() {
         feed.close()
         terminalStream.close()
+        agentUsage.close()
         store.clearAll()
         serverInfo = null
     }
@@ -262,6 +272,12 @@ class WireSession(context: Context) {
 
     fun openTerminalStream(terminalId: String) {
         terminalStream.open(terminalStreamUrlFor(terminalId))
+    }
+
+    /** `wss /api/agent-usage/stream?token=…` — corpus §5ter, pushes on connect (no request frame). */
+    fun agentUsageStreamUrl(): String {
+        val p = _pairing.value ?: return ""
+        return "wss://${p.host}:${p.port}/api/agent-usage/stream?token=${p.token}"
     }
 
     /** Optimistic overlay for canvas writes (frames/removals awaiting the host's snapshot). */
