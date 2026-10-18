@@ -62,6 +62,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.withStyle
@@ -207,7 +208,11 @@ fun ChatThreadScreen(
     var showAttachMenu by remember { mutableStateOf(false) }
     var attachmentPreviewTarget by remember { mutableStateOf<AttachmentPreviewTarget?>(null) }
     var entryMenuTarget by remember { mutableStateOf<EntryMenuTarget?>(null) }
-    var cameraDest by remember { mutableStateOf<File?>(null) }
+    // Camera dest survives process death (the external camera backgrounds us and
+    // the OS may kill the process): File itself is not saveable — its path is.
+    // Restored at the ComposerPill callsite; the launcher callback clears it on
+    // every return, so cancel drops stale dest (todo #60).
+    var cameraDestPath by rememberSaveable { mutableStateOf<String?>(null) }
 
     val listState = rememberLazyListState()
 
@@ -365,8 +370,10 @@ fun ChatThreadScreen(
                 onSend = { scope.launch { holder.send() } },
                 onRemoveStaged = { holder.removeStagedItem(it) },
                 onRemoveQuote = { holder.quote.value = null },
-                cameraDest = cameraDest,
-                setCameraDest = { cameraDest = it },
+                // File is not saveable — its absolute path is. Rebuilt here after
+                // process death; null clears (cancel-safe via the callback below).
+                cameraDest = cameraDestPath?.let(::File),
+                setCameraDest = { cameraDestPath = it?.absolutePath },
             )
         }
     }
@@ -493,6 +500,8 @@ class ChatFaceState(
 
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice
+    /** Non-holder events (composer-side prep failures) raise the notice line. Never silent. */
+    fun note(text: String) { _notice.value = text }
 
     val flight = MutableStateFlow<SendFlight?>(null)
 
@@ -900,7 +909,9 @@ class ChatFaceState(
             val accepted = mutableListOf<StagedItem>()
             try {
                 for (uri in uris) {
-                    val meta = resolveUriMeta(uri, labels[uri])
+                    // Edge URIs (revoked grant, offline cloud file) reject singly —
+                    // never abort the rest of the batch (todo #60 audit).
+                    val meta = runCatching { resolveUriMeta(uri, labels[uri]) }.getOrNull()
                     if (meta == null || meta.bytes.size > 8L * 1024 * 1024) {
                         rejected++
                         continue
@@ -2360,18 +2371,34 @@ private fun ComposerPill(
     }
 
     fun launchCamera() {
-        val dir = File(context.cacheDir, "camera").apply { mkdirs() }
-        val f = File(dir, "chat-camera-" + System.currentTimeMillis() + ".jpg")
-        val uri = androidx.core.content.FileProvider.getUriForFile(
-            context, context.packageName + ".fileprovider", f,
-        )
-        val intent = Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE).apply {
-            putExtra(android.provider.MediaStore.EXTRA_OUTPUT, uri)
-            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        // Prep (dir + FileProvider URI + intent) throws outside the launcher call
+        // (misconfigured provider, no camera handler) — guard it too, and say so on
+        // the notice line instead of vanishing. Draft text is untouched throughout.
+        val dest = runCatching {
+            val dir = File(context.cacheDir, "camera").apply { mkdirs() }
+            val f = File(dir, "chat-camera-" + System.currentTimeMillis() + ".jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context, context.packageName + ".fileprovider", f,
+            )
+            val intent = Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                putExtra(android.provider.MediaStore.EXTRA_OUTPUT, uri)
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+            f to intent
+        }.getOrNull()
+        if (dest == null) {
+            setCameraDest(null)
+            holder.note(S.attachmentCantBePreparedDraftPreserved)
+            onDismissMenu()
+            return
         }
+        val (f, intent) = dest
         setCameraDest(f)
         val launched = runCatching { cameraLauncher.launch(intent) }.isSuccess
-        if (!launched) setCameraDest(null)
+        if (!launched) {
+            setCameraDest(null)
+            holder.note(S.attachmentCantBePreparedDraftPreserved)
+        }
         onDismissMenu()
     }
 
@@ -2466,7 +2493,7 @@ private fun ComposerPill(
                             .heightIn(min = Rhythm.TouchTarget.dp)
                             .graphicsLayer { scaleX = addPress; scaleY = addPress },
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(6.dp),
-                    ) { IconOnly(Icons.Filled.Add, size = 18.dp) }
+                    ) { IconOnly(Icons.Filled.Add, contentDescription = S.attach, size = 18.dp) }
                     // ＠ pill: a literal "@" typed into the input opens the mention selector
                     val atSrc = remember { MutableInteractionSource() }
                     val atPressed by atSrc.collectIsPressedAsState()
