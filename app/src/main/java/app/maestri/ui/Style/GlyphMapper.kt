@@ -65,6 +65,7 @@ object GlyphMapper {
 
     val byName: Map<String, ImageVector> = mapOf(
         "terminal" to Icons.Filled.Terminal,
+        "globe" to Icons.Filled.Public,   // corpus §5ter: portal node payload icon
         "sparkle" to Icons.Filled.AutoAwesome,
         "brain" to Icons.Filled.Psychology,
         "seal" to Icons.Filled.Verified,

@@ -311,6 +311,7 @@ data class CanvasNode(
     val groupId: String?,
     val terminal: TerminalCard?,    // present when kind == "terminal" and payload parses
     val text: CanvasTextBlock?,     // present when kind == "text": the styled text payload
+    val portal: CanvasPortal?,      // present when kind == "portal": the host-managed card payload
 ) {
     companion object {
         fun parse(o: JSONObject): CanvasNode {
@@ -333,6 +334,53 @@ data class CanvasNode(
                 text = if (kind == "text") o.optJSONObject("text")?.let {
                     runCatching { CanvasTextBlock.parse(it) }.getOrNull()
                 } else null,
+                portal = if (kind == "portal") o.optJSONObject("portal")?.let {
+                    runCatching { CanvasPortal.parse(it) }.getOrNull()
+                } else null,
+            )
+        }
+    }
+}
+
+/**
+ * A kind == "portal" node's payload (corpus §5ter capture + docs §140): a host-managed
+ * browser/device card. Read-only from a client: creation answers 400 "Unknown node kind"
+ * and the navigate/back/forward/reload/unload writes never probed (CANDIDATE). The
+ * `device` payload marks a device portal (no address, snapshot = the device screen);
+ * per docs §140 only runtime "ready"/"live" carry a snapshot worth fetching.
+ */
+data class CanvasPortal(
+    val portalId: String,
+    val name: String,
+    val url: String?,
+    val currentURL: String?,
+    val canGoBack: Boolean,
+    val canGoForward: Boolean,
+    val chromeHidden: Boolean,
+    val status: String?,
+    val isUnloaded: Boolean,
+    val runtime: String?,
+    val runtimeDetail: String?,
+    val devicePlatform: String?,
+    val deviceName: String?,
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasPortal {
+            val device = o.optJSONObject("device")
+            return CanvasPortal(
+                portalId = o.getString("portalId"),
+                name = o.optString("name", ""),
+                url = if (o.has("url") && !o.isNull("url")) o.getString("url") else null,
+                currentURL = if (o.has("currentURL") && !o.isNull("currentURL")) o.getString("currentURL") else null,
+                canGoBack = o.optBoolean("canGoBack", false),
+                canGoForward = o.optBoolean("canGoForward", false),
+                chromeHidden = o.optBoolean("chromeHidden", false),
+                status = o.optString("status").takeIf { it.isNotBlank() },
+                isUnloaded = o.optBoolean("isUnloaded", false),
+                runtime = o.optString("runtime").takeIf { it.isNotBlank() },
+                runtimeDetail = o.optString("runtimeDetail").takeIf { it.isNotBlank() },
+                devicePlatform = device?.optString("platform")?.takeIf { it.isNotBlank() },
+                deviceName = device?.optString("deviceName")?.takeIf { it.isNotBlank() },
             )
         }
     }

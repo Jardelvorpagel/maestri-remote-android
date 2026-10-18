@@ -25,6 +25,12 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import android.graphics.BitmapFactory
+import app.maestri.ui.Style.monoHud
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -64,8 +70,10 @@ import app.maestri.ui.iconGlyph
 import app.maestri.wire.CanvasCableTie
 import app.maestri.wire.CanvasConnection
 import app.maestri.wire.CanvasNode
+import app.maestri.wire.CanvasPortal
 import app.maestri.wire.CanvasPoint
 import app.maestri.wire.CanvasWrites
+import app.maestri.wire.SnapshotMedia
 import androidx.compose.runtime.mutableStateMapOf
 import app.maestri.store.PairingStore
 import app.maestri.wire.FeedSnapshot
@@ -141,6 +149,7 @@ fun CanvasScreen(
     var addMenu by remember { mutableStateOf(false) }
     var penActive by remember { mutableStateOf(false) }
     var tieMenu by remember { mutableStateOf<CanvasCableTie?>(null) }
+    var portalFor by remember { mutableStateOf<CanvasNode?>(null) }
     val tiePositions = remember { mutableStateMapOf<String, Offset>() }
 
     // Persisted per-workspace view state, as iOS keeps it in UserDefaults
@@ -212,12 +221,14 @@ fun CanvasScreen(
         fun stageToCanvas(stage: Offset): Offset =
             Offset((stage.x - camera.offsetX) / camera.scale, (stage.y - camera.offsetY) / camera.scale)
 
-        // A terminal node still opens its terminal; a text node opens the inline editor.
+        // A terminal node still opens its terminal; a text node opens the inline editor;
+        // a portal node opens the read-only portal viewer (host-managed card).
         fun openOrSelect(node: CanvasNode) {
             val t = node.terminal
             when {
                 node.kind == "terminal" && t != null -> onOpenTerminal(t.id, t.name)
                 node.kind == "text" -> ctl.openTextEditor(node)
+                node.kind == "portal" && node.portal != null -> portalFor = node
                 else -> ctl.selectNode(node, canvas)
             }
         }
@@ -791,6 +802,16 @@ fun CanvasScreen(
                 onDismiss = { ctl.textFor = null },
             )
         }
+        portalFor?.let { node ->
+            node.portal?.let { portal ->
+                PortalViewer(
+                    node = node,
+                    portal = portal,
+                    session = session,
+                    onDismiss = { portalFor = null },
+                )
+            }
+        }
     }
 }
 
@@ -1075,6 +1096,8 @@ private fun CanvasNodeCard(
     if (node.kind == "terminal" && t != null) {
         val pending = snap?.pendingPromptIds?.contains(t.id) == true
         CanvasTerminalNode(node, t, pending, selected, compact = compact)
+    } else if (node.kind == "portal" && node.portal != null) {
+        CanvasPortalNode(node, node.portal, selected, compact = compact)
     } else {
         // Per docs: an unknown/non-terminal kind still has frame + title — simple box.
         UnknownNodeBox(node, selected, compact = compact)
@@ -1183,6 +1206,214 @@ private fun CanvasTerminalNode(
                                 color = Color(0xFF9FB3A1),
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A portal node's read-only canvas card: the host owns the page — nothing on the card is
+ * a control. The dot mirrors the node's runtime (ready/live green, loading warn,
+ * failed/error, unloaded gray); canGoBack/canGoForward read as text on the card, since
+ * those write verbs are CANDIDATE residues and must not render as buttons.
+ */
+@Composable
+private fun CanvasPortalNode(
+    node: CanvasNode,
+    portal: CanvasPortal,
+    selected: Boolean,
+    compact: Boolean = false,
+) {
+    val c = LocalMaestriColors.current
+    Box(
+        Modifier
+            .zIndex(node.zIndex.toFloat())
+            .offset(x = node.frame.x.dp, y = node.frame.y.dp)
+            .size(node.frame.width.dp, node.frame.height.dp)
+    ) {
+        SelectionRing(selected, Modifier.fillMaxSize())
+        Card(
+            modifier = Modifier.fillMaxSize(),
+            shape = cardShape(),
+            colors = CardDefaults.cardColors(containerColor = c.canvasSurface),
+            border = BorderStroke(
+                if (selected) 2.dp else 1.dp,
+                if (selected) MaterialTheme.colorScheme.primary else c.canvasChromeElevated,
+            ),
+        ) {
+            Column(Modifier.fillMaxSize().padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    GlyphOrIcon("globe", fontSize = 22.sp, modifier = Modifier.width(36.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            portal.name.ifBlank { node.title },
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 19.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            buildString {
+                                portal.runtime?.let { append("runtime $it") } ?: append("runtime —")
+                                portal.status?.let { append(" · status $it") }
+                                if (portal.isUnloaded) append(" · unloaded")
+                            },
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Box(Modifier.size(12.dp).background(portalDotColor(portal), CircleShape))
+                }
+                (portal.currentURL ?: portal.url)?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        it,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(c.canvasChromeElevated, controlShape())
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        if (portal.isUnloaded) "unloaded — no live page underneath"
+                        else when (portal.runtime) {
+                            "ready", "live" -> "snapshot available"
+                            "loading" -> "page is loading — snapshot may not be live yet"
+                            null -> "runtime unknown"
+                            else -> "runtime ${portal.runtime} — snapshot may not be live yet"
+                        },
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = Color(0xFF9FB3A1),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun portalDotColor(portal: CanvasPortal): Color = when (portal.runtime) {
+    "ready", "live" -> LiveGreen
+    "loading" -> LocalMaestriColors.current.warning
+    "failed" -> Palette.Crimson
+    else -> if (portal.isUnloaded) Color.Gray else Palette.StoneGray
+}
+
+/**
+ * The portal viewer: name/URL/runtime/status + the ETag-revalidated snapshot when the
+ * runtime carries a live image (docs §140: only ready/live are worth fetching; 404 =
+ * honest "no live image" state). No navigation/back/forward/reload/unload controls —
+ * those verbs are CANDIDATE and this card reads.
+ */
+@Composable
+private fun PortalViewer(
+    node: CanvasNode,
+    portal: CanvasPortal,
+    session: WireSession,
+    onDismiss: () -> Unit,
+) {
+    val c = LocalMaestriColors.current
+    var media by remember(portal.portalId) { mutableStateOf<SnapshotMedia.Result?>(null) }
+    var loadingImage by remember(portal.portalId) { mutableStateOf(true) }
+
+    // Data-driven revalidation only: the id (a new portal), the page's currentURL and the
+    // runtime are the things that change when the host acts on the portal — the ETag then
+    // decides whether bytes move. Never a blind refetch.
+    LaunchedEffect(portal.portalId, portal.currentURL, portal.runtime) {
+        loadingImage = true
+        media = SnapshotMedia.fetch(
+            session = session,
+            path = "api/portals/${portal.portalId}/snapshot",
+            cacheKey = "portal:${portal.portalId}",
+        )
+        loadingImage = false
+    }
+
+    Box(Modifier.fillMaxSize().background(Color(0x66000000)).clickable { onDismiss() }, contentAlignment = Alignment.Center) {
+        Card(
+            modifier = Modifier.width(640.dp),
+            shape = cardShape(),
+            colors = CardDefaults.cardColors(containerColor = c.canvasSurface),
+            border = BorderStroke(1.dp, c.canvasChromeElevated),
+        ) {
+            Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(portal.name.ifBlank { node.title }, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            (portal.currentURL ?: portal.url)?.takeIf { it.isNotBlank() } ?: "no url",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    buildString {
+                        append(portal.runtime?.let { "runtime $it" } ?: "runtime —")
+                        portal.status?.let { append(" · status $it") }
+                        if (portal.isUnloaded) append(" · unloaded")
+                        if (portal.chromeHidden) append(" · chrome hidden")
+                        portal.runtimeDetail?.let { append(" · $it") }
+                        portal.deviceName?.let { dn -> append(" · device $dn " + (portal.devicePlatform ?: "")) }
+                        append(" · history back ${if (portal.canGoBack) "yes" else "no"} / fwd ${if (portal.canGoForward) "yes" else "no"}; the write verbs are awaiting confirmation, not buttons")
+                    },
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.5.sp,
+                    color = Palette.StoneGray,
+                )
+                Spacer(Modifier.height(10.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 220.dp)
+                        .background(c.canvasChromeElevated, controlShape())
+                        .padding(8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when (val m = media) {
+                        null, is SnapshotMedia.Result.Fresh -> {
+                            val bytes = (m as? SnapshotMedia.Result.Fresh)?.bytes
+                            val bmp = bytes?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
+                            if (loadingImage && bmp == null) {
+                                Text("fetching snapshot…", style = monoHud(11, color = Palette.StoneGray))
+                            } else if (bmp != null) {
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = "portal snapshot — ${portal.name}",
+                                    contentScale = ContentScale.FillWidth,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            } else {
+                                Text("snapshot unavailable — no live image decoded", style = monoHud(11, color = Palette.StoneGray))
+                            }
+                        }
+                        SnapshotMedia.Result.Unavailable -> Text(
+                            "no live image — the portal is unloaded or hasn't rendered yet",
+                            style = monoHud(11, color = Palette.StoneGray),
+                        )
+                        is SnapshotMedia.Result.Failure -> Text(
+                            "snapshot failed: ${m.message}",
+                            style = monoHud(11, color = Palette.StoneGray),
+                            color = MaterialTheme.colorScheme.error,
+                        )
                     }
                 }
             }
@@ -1481,6 +1712,41 @@ private fun StackNodeCard(
                     color = Palette.Ivory,
                     maxLines = 3, overflow = TextOverflow.Ellipsis,
                 )
+            }
+            node.kind == "portal" && node.portal != null -> {
+                val portal = node.portal!!
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            portal.name.ifBlank { node.title },
+                            fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Box(Modifier.size(10.dp).background(portalDotColor(portal), CircleShape))
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        (portal.runtime?.let { "portal · runtime $it" } ?: "portal") +
+                            (portal.status?.let { " · $it" } ?: "") +
+                            (if (portal.isUnloaded) " · unloaded" else ""),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.5.sp,
+                        color = Palette.StoneGray,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    (portal.currentURL ?: portal.url)?.takeIf { it.isNotBlank() }?.let {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            it,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.5.sp,
+                            color = Palette.WarmSilver,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
             else -> {
                 Column {
