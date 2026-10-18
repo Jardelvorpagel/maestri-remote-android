@@ -19,18 +19,19 @@ import app.maestri.remote.R
  * HUD numerics (ring %, times, ids, shas, JSON) and code spans. Chrome stays on the system
  * sans — never put [Mono] on a nav title, tab label or button.
  *
- * [Serif] carries the large root titles at weight 500 ONLY (spec §4/§5.6) — Workspaces, Feed,
- * Usage, Floors, Settings at 30 sp, Chat at 26 sp — and never terminal/HUD/data.
+ * [Serif] carries the large root titles at weight 500 ONLY (spec §4/§5.6; v2.1-modern
+ * artifact .lnav .lt = 28px/1.1, Chat root inline 24px) — Workspaces, Feed, Usage, Floors,
+ * Settings at 28 sp, Chat at 24 sp — and never terminal/HUD/data.
  */
 object MaestriType {
     val Mono: FontFamily = FontFamily(Font(R.font.maestri_mono))
     val MonoName: String = "JetBrains Mono NF"
 
     val Serif: FontFamily = FontFamily.Serif
-    val RootTitleSize = 30.sp
-    val ChatTitleSize = 26.sp
+    val RootTitleSize = 28.sp
+    val ChatTitleSize = 24.sp
     val RootTitleWeight = FontWeight.Medium
-    val RootTitleLineHeight = 33.sp
+    val RootTitleLineHeight = 30.8.sp
 }
 
 /** Root title style: serif, weight 500, 1.1 leading. */
@@ -57,7 +58,7 @@ fun RootTitle(
         modifier = modifier,
         fontFamily = MaestriType.Serif,
         fontSize = if (chat) MaestriType.ChatTitleSize else MaestriType.RootTitleSize,
-        lineHeight = if (chat) 28.6.sp else MaestriType.RootTitleLineHeight,
+        lineHeight = if (chat) 26.4.sp else MaestriType.RootTitleLineHeight,
         fontWeight = MaestriType.RootTitleWeight,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,

@@ -4,7 +4,12 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.ui.graphics.Color
 
 /**
- * Design v2.1 "claude system" literals (warm-only neutrals, terracotta chrome accent).
+ * Design v2.1-modern claude literals (warm-only neutrals, terracotta chrome accent).
+ *
+ * Token values follow the v2.1-modern artifact (:root, 2026-10-17 — byte-identical to the
+ * Oct-16 v2.0 artifact): ambient #161614, cards #2B2A26, raised #1C1B18, sunken #232220,
+ * ink #141413 / ink-2 #3D3D3A on the paper branch, radii 12/18/24, rhythm 4/8/12/16/20.
+ * The spec doc's #141413/#30302E base predates the artifact family and is superseded.
  *
  * Two families live here on purpose:
  *  - [Palette] — the v2 warm set, used by the live schemes;
@@ -14,14 +19,20 @@ import androidx.compose.ui.graphics.Color
  * Evidence: knowledge/sources/2026-10-16-maestri-design-v2-spec.md §2/§8.
  */
 object Palette {
-    // claude dark branch (Anthropic Near Black family).
-    val NearBlack = Color(0xFF141413)      // page / app background
-    val DarkSurface = Color(0xFF30302E)    // cards, spine, list groups, rings
-    val ScreenLift = Color(0xFF2B2A26)      // pushed-screen lift
+    // claude dark branch (v2.1-modern ambient family).
+    val Ambient = Color(0xFF161614)         // --bg: warm near-black app background
+    val NearBlack = Color(0xFF141413)       // --ink: text on parchment; legacy dark bg literal
+    val AmbientRaised = Color(0xFF1C1B18)   // --bg-2: raised ambient (chips, wells, 2nd buttons)
+    val DarkSurface = Color(0xFF2B2A26)     // --card: cards, spine, list groups
+    val ScreenLift = Color(0xFF1C1B18)      // pushed-screen lift — now equals --bg-2
+    val SunkenSurface = Color(0xFF232220)   // --card-2: wells, segmented tracks
+    val GlassBase = Color(0xFF181715)       // --glass tint rgb(24,23,21)
+    val Ink = Color(0xFF141413)             // --ink (paper branch)
+    val InkSecondary = Color(0xFF3D3D3A)    // --ink-2 (paper branch secondary)
     val Ivory = Color(0xFFFAF9F5)          // primary text on dark
-    val WarmSilver = Color(0xFFB0AEA5)     // secondary text
+    val WarmSilver = Color(0xFFB0AEA5)     // secondary text + ring-depth alpha base
     val StoneGray = Color(0xFF87867F)      // metadata, overlines, mono times
-    val DarkWarm = Color(0xFF3D3D3A)       // ring tracks, links on dark
+    val DarkWarm = Color(0xFF3D3D3A)       // legacy ring-track gray (value = --ink-2)
 
     // claude light branch (parchment).
     val Parchment = Color(0xFFF5F4ED)
@@ -113,10 +124,12 @@ object Motion {
     const val PressScale = 0.97f
 }
 
-/** The 4/8/12/16/20 rhythm (claude 8px scale, phone gutter overridden to 16). */
+/** The 4/8/12/16/20 rhythm (claude scale, phone gutter overridden to 16). */
 object Rhythm {
-    val Gutter = 16
+    val Fine = 4
     val Gap = 8
+    val Mid = 12
+    val Gutter = 16
     val Section = 20
     val CardPadding = 20
     /** Spine: 49 nav + 34 gesture zone. */

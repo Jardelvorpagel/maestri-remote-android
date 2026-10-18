@@ -5,18 +5,19 @@ import androidx.compose.material3.Shapes
 import androidx.compose.ui.unit.dp
 
 /**
- * One radius scale for the whole app — v2.1 re-derivation to the claude ramp
- * 8 / 12 / 16 / pill (spec §8.3 dev 2; supersedes the 10/12 iOS pair).
+ * One radius scale for the whole app — the v2.1-modern artifact ramp
+ * 12 / 18 / 24 / pill (--r-sm/--r-md/--r-lg, 2026-10-17; supersedes the spec-doc
+ * 8/12/16 claude ramp and the 10/12 iOS pair).
  */
 object MaestriRadii {
     /** Controls, chips, list rows, icons. */
-    val Control = 8.dp
+    val Control = 12.dp
 
     /** Cards, menus, popovers, bubbles. */
-    val Card = 12.dp
+    val Card = 18.dp
 
     /** Sheets, containers, the phone frame. */
-    val Container = 16.dp
+    val Container = 24.dp
 }
 
 val MaestriShapes: Shapes = Shapes(
