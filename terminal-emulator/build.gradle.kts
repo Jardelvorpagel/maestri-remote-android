@@ -1,5 +1,5 @@
 plugins {
-    id("com.android.library") version "9.1.1"
+    id("com.android.library")
 }
 
 // Vendored from https://github.com/termux/termux-app @ 8629e632fcb95da272221be327db653fb24befe9
