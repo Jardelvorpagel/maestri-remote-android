@@ -88,15 +88,6 @@ fun PairingScreen(
     onCancel: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
-    val cancelNow = onCancel
-    if (cancelNow != null) {
-        BackHandler {
-            when (step) {
-                "confirm" -> step = "form"
-                else -> if (!busy) cancelNow()
-            }
-        }
-    }
 
     var storedNotice by remember { mutableStateOf(authNotice) }
     if (authNotice != null && storedNotice != authNotice) storedNotice = authNotice
@@ -118,6 +109,16 @@ fun PairingScreen(
     var probedName by remember { mutableStateOf("") }
     var probedCaps by remember { mutableStateOf(0) }
     var err by remember { mutableStateOf<String?>(null) }
+
+    val cancelNow = onCancel
+    if (cancelNow != null) {
+        BackHandler {
+            when (step) {
+                "confirm" -> step = "form"
+                else -> if (!busy) cancelNow()
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize().statusBarsPadding().padding(20.dp)) {
         Column(
