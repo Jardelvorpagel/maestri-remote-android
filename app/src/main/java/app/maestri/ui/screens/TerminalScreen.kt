@@ -149,9 +149,9 @@ fun TerminalScreen(
             // hardware keys; route them down the UTF-8 input path like the composer.
             onKeyboardInput = { bytes -> streamNow.sendInput(String(bytes, Charsets.UTF_8)) },
             onResize = { dims ->
-                if (!canResizeNow) return@onResize
+                if (!canResizeNow) return@create
                 val grid = dims.columns to dims.rows
-                if (lastSentGrid == grid) return@onResize
+                if (lastSentGrid == grid) return@create
                 lastSentGrid = grid
                 streamNow.sendResize(dims.columns, dims.rows)
             },
