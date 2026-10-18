@@ -139,6 +139,7 @@ fun SettingsScreen(
             )
         }
         Spacer(Modifier.height(16.dp))
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
         // design-v2 09: grouped ring cards — h2sec group labels, sgroup cards,
         // 56pt rows, mono values (WarmSilver), 51x31 terracotta toggle.
         GroupLabel("SECURITY")
@@ -279,6 +280,7 @@ fun SettingsScreen(
         )
         Spacer(Modifier.height(12.dp))
         HostManagedGroup()
+        }
     }
     }
 
