@@ -42,6 +42,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -1443,26 +1444,54 @@ private fun ChatTopBar(
             ) { IconOnly(Icons.Filled.MoreVert, size = 18.dp) }
         }
         // overflow keeps every former inline action reachable (never lose an action)
+        // v2.1 revisita (reno): below 480dp the three-action Row crushes into
+        // one-word-per-line columns — restack as a right-aligned vertical list.
+        // Tablet keeps the Row, content-identical (re-indented only).
         if (menuOpen) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(
-                    onClick = { menuOpen = false; onToggleShellStrip() },
-                    modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
-                ) {
-                    Text(if (shellStripOn) S.hideTerminalPreview else S.showTerminalPreview, fontSize = 12.sp)
-                }
-                TextButton(
-                    onClick = { menuOpen = false; onExitChat() },
-                    modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
-                ) {
-                    Text(if (snapshot?.enabled == true) S.exitChatMode else S.enterChatMode, fontSize = 12.sp)
-                }
-                if (snapshot?.canClear == true) {
+            if (compact) {
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                     TextButton(
-                        onClick = { menuOpen = false; onClearHistory() },
+                        onClick = { menuOpen = false; onToggleShellStrip() },
                         modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
                     ) {
-                        Text(S.clearChatHistory, fontSize = 12.sp)
+                        Text(if (shellStripOn) S.hideTerminalPreview else S.showTerminalPreview, fontSize = 12.sp)
+                    }
+                    TextButton(
+                        onClick = { menuOpen = false; onExitChat() },
+                        modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                    ) {
+                        Text(if (snapshot?.enabled == true) S.exitChatMode else S.enterChatMode, fontSize = 12.sp)
+                    }
+                    if (snapshot?.canClear == true) {
+                        TextButton(
+                            onClick = { menuOpen = false; onClearHistory() },
+                            modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                        ) {
+                            Text(S.clearChatHistory, fontSize = 12.sp)
+                        }
+                    }
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        onClick = { menuOpen = false; onToggleShellStrip() },
+                        modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                    ) {
+                        Text(if (shellStripOn) S.hideTerminalPreview else S.showTerminalPreview, fontSize = 12.sp)
+                    }
+                    TextButton(
+                        onClick = { menuOpen = false; onExitChat() },
+                        modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                    ) {
+                        Text(if (snapshot?.enabled == true) S.exitChatMode else S.enterChatMode, fontSize = 12.sp)
+                    }
+                    if (snapshot?.canClear == true) {
+                        TextButton(
+                            onClick = { menuOpen = false; onClearHistory() },
+                            modifier = Modifier.heightIn(min = Rhythm.TouchTarget.dp),
+                        ) {
+                            Text(S.clearChatHistory, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -2013,7 +2042,7 @@ private fun EntryBubble(
                         when {
                             entry.segments.isNotEmpty() -> entry.segments.forEach { seg ->
                                 when (seg) {
-                                    is ChatSegment.Text -> MarkdownLite(seg.text)
+                                    is ChatSegment.Text -> MarkdownLite(seg.text, compact)
                                     is ChatSegment.Attachment -> AttachmentPill(
                                         seg = seg,
                                         bytesLoader = attachmentLoader,
@@ -2024,7 +2053,7 @@ private fun EntryBubble(
                                     )
                                 }
                             }
-                            entry.text.isNotBlank() -> MarkdownLite(entry.text)
+                            entry.text.isNotBlank() -> MarkdownLite(entry.text, compact)
                         }
                         if (compact && isUser) {
                             // frame 05 .bub.me footer: right-aligned mono 10 time + the ONE
@@ -2141,18 +2170,18 @@ private fun LoadingPill(label: String, onTap: () -> Unit) {
  * bullets, quotes, bold/italic/code spans, and fenced code blocks with "Copy Code".
  */
 @Composable
-fun MarkdownLite(text: String) {
+fun MarkdownLite(text: String, compact: Boolean = false) {
     val clipboard = LocalClipboardManager.current
     val fences = Regex("""```(\w*)(?:\n|\r\n)((?:.|\n)*?)(?:```|$)""")
     if (!text.contains("```")) {
-        MarkdownText(text)
+        MarkdownText(text, compact)
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         var cursor = 0
         for (m in fences.findAll(text)) {
             val head = text.substring(cursor, m.range.first)
-            if (head.isNotBlank()) MarkdownText(head)
+            if (head.isNotBlank()) MarkdownText(head, compact)
             CodeBlockCard(
                 code = m.groupValues[2].removeSuffix("\n"),
                 lang = m.groupValues[1],
@@ -2162,13 +2191,13 @@ fun MarkdownLite(text: String) {
         }
         if (cursor < text.length) {
             val tail = text.substring(cursor)
-            if (tail.isNotBlank()) MarkdownText(tail)
+            if (tail.isNotBlank()) MarkdownText(tail, compact)
         }
     }
 }
 
 @Composable
-private fun MarkdownText(text: String) {
+private fun MarkdownText(text: String, compact: Boolean = false) {
     val imageRe = Regex("!\\[([^\\]]*)\\]\\(([^)\\s]+)\\)")
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         text.split("\n").forEach { line ->
@@ -2209,7 +2238,7 @@ private fun MarkdownText(text: String) {
                 else -> Text(
                     inlineSpan(line),
                     fontSize = 13.sp,
-                    lineHeight = 20.sp, // artifact: 13/1.5
+                    lineHeight = if (compact) 22.sp else 20.sp, // revisita: narrow measure breathes; size keeps artifact 13
                 )
             }
         }
@@ -2418,34 +2447,72 @@ private fun ComposerPill(
                     ) {
                         Text("@", fontSize = 15.sp, fontFamily = FontFamily.Monospace)
                     }
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = onTextChange,
-                        placeholder = {
-                            Text(
-                                S.messageToMentionFmt.format(terminalName),
+                    // v2.1 revisita (reno): below 480dp the outlined field's box reads
+                    // as a second inner surface inside the glass pill — BasicTextField
+                    // draws text/cursor/placeholder ONLY, so the pill glass is the one
+                    // surface. Tablet keeps the outlined field, untouched.
+                    // (All field containers/borders are already Transparent since 78f209c;
+                    // this branch removes the box-drawing path entirely on compact.)
+                    val compact = LocalConfiguration.current.screenWidthDp < 480
+                    if (compact) {
+                        BasicTextField(
+                            value = text,
+                            onValueChange = onTextChange,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 40.dp), // artifact .in min-height 40
+                            textStyle = androidx.compose.ui.text.TextStyle(
                                 fontSize = 13.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        },
-                        shape = pillShape(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent,
-                            disabledBorderColor = Color.Transparent,
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 40.dp), // artifact .in min-height 40
-                        maxLines = 4,
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            fontSize = 13.5.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        ),
-                    )
+                                color = MaterialTheme.colorScheme.onSurface,
+                            ),
+                            maxLines = 4,
+                            decorationBox = { inner ->
+                                // revisita: short single-line hint — the full
+                                // "Message %s. @ to mention" wraps 3 lines at 393dp.
+                                Box(Modifier.padding(vertical = 10.dp)) {
+                                    if (text.isEmpty()) {
+                                        Text(
+                                            "Message $terminalName\u2026",
+                                            fontSize = 13.5.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    inner()
+                                }
+                            },
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = onTextChange,
+                            placeholder = {
+                                Text(
+                                    S.messageToMentionFmt.format(terminalName),
+                                    fontSize = 13.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            shape = pillShape(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                disabledBorderColor = Color.Transparent,
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 40.dp), // artifact .in min-height 40
+                            maxLines = 4,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 13.5.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            ),
+                        )
+                    }
                     val sendSource = remember { MutableInteractionSource() }
                     val sendPressed by sendSource.collectIsPressedAsState()
                     val sendPress by animateFloatAsState(
