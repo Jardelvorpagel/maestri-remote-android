@@ -132,5 +132,10 @@ object CanvasStrings {
     const val searchThisWorkspace2 = "Search this workspace"
     const val showsThisPage = "Shows this page"
     const val showsTheRepositorySChanges = "Shows the repository's changes"
+    // ---------------------------------------------------------- canvas_gating (S4 / N5)
+    // The disabled-write caption states only what the app knows per state: the guest role
+    // (known), the host's own capability answer (known), or nothing at all yet (no claims).
     const val guestReadsOnly = "guest · reads only"
+    const val readsOnlyHost = "reads only (host)"
+    const val readsOnly = "reads only"
 }
