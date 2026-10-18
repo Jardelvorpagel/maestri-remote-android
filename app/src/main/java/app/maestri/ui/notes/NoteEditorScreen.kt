@@ -65,15 +65,17 @@ import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.containerShape
 import app.maestri.ui.Style.controlShape
 import app.maestri.ui.Style.pillShape
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import app.maestri.ui.Style.IconOnly
 
-/** v2 parchment tokens (spec frame 06 §4:74). On-sheet literals; the light scheme's own
- *  secondary (#6B6A62) is the ink-2 — kept local so no shared token file is touched. */
+/** v2 parchment tokens (spec frame 06 §4:74; v2.1-modern 2026-10-17). On-sheet literals;
+ *  ink-2 now resolves to the phase-A banked token (--ink-2 #3D3D3A — the light scheme's
+ *  secondary; the retired #6B6A62 literal was the pre-artifact base). */
 private val ParchmentInk = Palette.NearBlack          // ink on paper
-private val ParchmentInk2 = Color(0xFF6B6A62)         // ink-2: body text on paper
+private val ParchmentInk2 = Palette.InkSecondary      // ink-2: body text on paper (v2.1 token)
 private val ParchmentStone = Palette.StoneGray        // mono metadata (◷ saved)
 private val ParchmentRing = Palette.PaperRing         // warm #D1CFC5 ring
 
@@ -584,6 +586,10 @@ private fun ReadyEditor(
     onBack: () -> Unit,
     toast: (String) -> Unit,
 ) {
+    // Phone-compact measure (v2.1-modern frame 06 leg): breakpoint 480.dp per the #42
+    // pattern. This route is full-screen, so the screen width IS the pane width —
+    // LocalConfiguration instead of BoxWithConstraints keeps the tablet path byte-identical.
+    val compact = LocalConfiguration.current.screenWidthDp < 480
     val scope = rememberCoroutineScope()
     var showConflict by remember(state.conflict) { mutableStateOf(state.conflict != null) }
     Column(Modifier.fillMaxSize()) {
@@ -637,7 +643,7 @@ private fun ReadyEditor(
             // Serif title input — 21sp / weight 500 / ink. Commits as the rename (custom
             // name path); the host re-derives the file name from the first line while the
             // note has no custom name.
-            TitleInput(model, state, scope, toast)
+            TitleInput(model, state, scope, toast, compact)
             Spacer(Modifier.height(12.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(ParchmentRing.copy(alpha = 0.7f)))
             Spacer(Modifier.height(12.dp))
@@ -678,7 +684,8 @@ private fun ReadyEditor(
     }
 }
 
-/** Serif 21/500 title field. Local while focused; focus loss + a changed, non-blank value
+/** Serif 21/500 title field (22/26.4 on the phone-compact breakpoint — v2.1 frame 06
+ *  .papered .pt 22px/1.2). Local while focused; focus loss + a changed, non-blank value
  *  commits through the rename route (hasCustomName = true per the host contract). */
 @Composable
 private fun TitleInput(
@@ -686,6 +693,7 @@ private fun TitleInput(
     state: EditorState.Ready,
     scope: CoroutineScope,
     toast: (String) -> Unit,
+    compact: Boolean = false,
 ) {
     var title by remember(state.content.displayName) { mutableStateOf(state.content.displayName) }
     var focused by remember { mutableStateOf(false) }
@@ -715,10 +723,10 @@ private fun TitleInput(
             },
         textStyle = androidx.compose.ui.text.TextStyle(
             fontFamily = MaestriType.Serif,   // serif ONLY on the title (ruling)
-            fontSize = 21.sp,
+            fontSize = if (compact) 22.sp else 21.sp,
             fontWeight = FontWeight.Medium,   // 500
             color = ParchmentInk,
-            lineHeight = 26.sp,
+            lineHeight = if (compact) 26.4.sp else 26.sp,
         ),
         cursorBrush = androidx.compose.ui.graphics.SolidColor(Palette.Terracotta),
     )
