@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -190,11 +191,17 @@ fun FloorsScreen(
         }
     }
 
+    // v2.1 phone-compact (frame 07 @ 393px, todo #49): below 480dp render the phone
+    // arrangement — 52px lnav, 16px card pad, 10px col gaps, 52px sgroup title rows.
+    // >=480dp keeps the tablet reading (48/12/8). Floors is a full-screen root, so the
+    // screen-width selector is pane-exact here.
+    val compact = LocalConfiguration.current.screenWidthDp < 480
     Box(Modifier.fillMaxSize().statusBarsPadding()) {
     Column(Modifier.fillMaxSize().padding(12.dp)) {
-        // frame-07 pushed lnav (48 px band): serif 24·500 title + ws meta + 44pt ＋ opens
-        // the full create sheet; the bottom quick-create covers the one-tap path.
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(48.dp)) {
+        // frame-07 pushed lnav (48 px band; 52 px on phones <480dp): serif 24·500 title +
+        // ws meta + 44pt ＋ opens the full create sheet; the bottom quick-create covers
+        // the one-tap path.
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(if (compact) 52.dp else 48.dp)) {
             TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { BackLabel("Back") }
             Spacer(Modifier.width(12.dp))
             Text(
@@ -238,7 +245,7 @@ fun FloorsScreen(
             val ground = s.floors.filter { it.isGround }
             Column(
                 Modifier.verticalScroll(rememberScrollState()).padding(bottom = 76.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 8.dp),
             ) {
 
                 pending.forEach { p ->
@@ -282,6 +289,7 @@ fun FloorsScreen(
                                 }
                             }
                         },
+                        compact = compact,
                     )
                 }
 
@@ -290,6 +298,7 @@ fun FloorsScreen(
                         g,
                         onOpen = { onOpenOverview("ground", g.name) },
                         onLand = {}, onDismissAction = {}, onCopyAgain = {},
+                        compact = compact,
                     )
                 }
             }
@@ -470,6 +479,7 @@ private fun FloorListRow(
     onLand: () -> Unit,
     onDismissAction: () -> Unit,
     onCopyAgain: () -> Unit,
+    compact: Boolean = false,
 ) {
     val c = LocalMaestriColors.current
     val attention = f.isCloneMissing || f.statusState == "blocked" || f.attentionCount > 0
@@ -484,11 +494,14 @@ private fun FloorListRow(
             )
             .background(c.card, cardShape())
             .clickable { if (!f.isRemoving) onOpen() }
-            .padding(12.dp),
+            .padding(if (compact) 16.dp else 12.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // ── line 1: name 13.5/600 + status chip
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 8.dp)) {
+            // ── line 1: name 13.5/600 + status chip (phone: sgroup rrow 52px, L7)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.then(if (compact) Modifier.heightIn(min = 52.dp) else Modifier),
+            ) {
                 Text(
                     f.name,
                     fontSize = 13.5.sp,
