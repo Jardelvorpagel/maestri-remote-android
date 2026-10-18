@@ -105,6 +105,7 @@ fun TerminalScreen(
     val streamText by session.terminalStream.screenText.collectAsState()
     val streamGeometry by session.terminalStream.geometry.collectAsState()
     val streamCursor by session.terminalStream.cursor.collectAsState()
+    val termuxRevision by session.terminalStream.termux.revision.collectAsState()
 
     var live by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -133,6 +134,16 @@ fun TerminalScreen(
         }
     }
 
+    // todo #61: long-press selection copy from the Termux viewport lands on the
+    // platform clipboard (the engine has no Context; the screen does).
+    LaunchedEffect(terminalId) {
+        session.terminalStream.termux.onCopyText = { text ->
+            runCatching {
+                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text))
+            }
+        }
+    }
     // If the socket has no snapshot for this workspace (e.g. deep entry), fetch one.
     LaunchedEffect(snapshot, wsId) {
         if (snapshot?.workspaceId != wsId && !seededFallback) {
@@ -437,6 +448,12 @@ fun TerminalScreen(
                 onResizeRequest = { showResize = true },
                 compact = screenCompact,
                 onViewportFit = { c, _ -> fitCols = c },
+                termux = TermuxHandle(
+                    session.terminalStream.termux.session,
+                    session.terminalStream.termux.emulator,
+                    termuxRevision,
+                ),
+                onTermuxCells = { w, h -> session.terminalStream.termux.setCells(w, h) },
                 modifier = if (fullscreen) Modifier.weight(1f) else Modifier,
             )
             if (showResize) {

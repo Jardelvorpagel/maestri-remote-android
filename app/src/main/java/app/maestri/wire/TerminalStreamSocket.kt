@@ -58,6 +58,8 @@ class TerminalStreamSocket(
     private var url: String? = null
     private var pingJob: Job? = null
     private var term: MiniTerm? = null
+    /** Termux engine (todo #61): parallel REAL grid on the same byte stream. */
+    val termux = TermuxEngine()
 
     /** Tolerant UTF-8 decode: PTY output is usually UTF-8; malformed bytes → U+FFFD. */
     private val utf8Decode = Charsets.UTF_8.newDecoder()
@@ -85,6 +87,7 @@ class TerminalStreamSocket(
         _geometry.value = null
         _cursor.value = null
         term = null
+        termux.clear()
     }
 
     private fun connect() {
@@ -120,6 +123,7 @@ class TerminalStreamSocket(
                                 android.util.Log.d("QATerm", "geometry cols=${msg.optInt("cols")} rows=${msg.optInt("rows")} -> clamped ${g.cols}x${g.rows}")
                                 _geometry.value = g
                                 term = MiniTerm(g.cols, g.rows)
+                                termux.reset(g.cols, g.rows)
                                 _cursor.value = 0 to 0
                             }
 
@@ -133,6 +137,7 @@ class TerminalStreamSocket(
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     android.util.Log.d("QATerm", "binary frame ${bytes.size} bytes")
+                    termux.feed(bytes.toByteArray())
                     val decoded = utf8Decode.decode(ByteBuffer.wrap(bytes.toByteArray())).toString()
                     val t = term ?: return
                     t.feed(decoded)

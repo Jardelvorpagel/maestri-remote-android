@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -33,31 +32,28 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.res.ResourcesCompat
+import app.maestri.remote.R
 import app.maestri.wire.Geometry
 import app.maestri.wire.SocketState
 import app.maestri.ui.Style.LocalMaestriColors
@@ -69,19 +65,18 @@ import app.maestri.ui.Style.TerminalThemes
 import app.maestri.ui.Style.controlShape
 import app.maestri.ui.Style.monoHud
 import app.maestri.ui.Style.pillShape
-import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
- * Live terminal renderer on top of the tiny ANSI emulator ([app.maestri.wire.MiniTerm]).
+ * Live terminal renderer on the REAL xterm engine (Termux `terminal-emulator`, todo #61).
  *
- * The emulator renders plain text (colors consumed, not drawn) — the documented degrade
- * path for an MVP without a full xterm engine. Input goes out as JSON frames; resize is
- * clamped client-side to 20..250 × 5..120.
+ * Host PTY bytes flow verbatim into the emulator — ANSI colors, block cursor, alt-screen
+ * and genuine in-session scrollback all render. Input goes out as JSON frames; resize is
+ * clamped client-side to 20..250 × 5..120. The parallel MiniTerm `text` path is kept
+ * flowing (tablet + HUD) but no longer drawn here.
  *
- * Design v2 (§4-03): Tokyo Night container (bg `#1A1B26`, border `#23233A`, ink `#A9B1D6`,
- * prompt blue `#7AA2F7` at weight 700), JBM NF at the persisted Aa size (13 default,
- * clamp 10–20, 1.55 leading), a 7 px block cursor at the reported cell, a 44 dp Tokyo-blue
+ * Design v2 (§4-03): Tokyo Night container (bg `#1A1B26`, border `#23233A`), JBM NF at
+ * the persisted Aa size (13 default, clamp 10–20, 1.55 leading), a 44 dp Tokyo-blue
  * quickkey rail on the warm keyboard tray, and a fullscreen state that hides the HUD row.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -100,18 +95,27 @@ fun LiveTerminalView(
     onInput: (String) -> Unit,
     onResizeRequest: () -> Unit,
     /**
-     * L3 phone-compact leg (<480dp, passed by the screen): enables the row-grid snap
-     * (defect 1), the viewport-fit report (defect 2) and the scroll governor (defect 3).
-     * False (tablet) keeps the previous always-follow behavior exactly.
+     * L3 phone-compact leg (<480dp, passed by the screen): enables the viewport-fit
+     * report (defect 2) and the scroll governor (defect 3). The defect-1 row-grid snap
+     * is structural now (row-integral transcript). False (tablet) keeps the previous
+     * always-follow behavior exactly.
      */
     compact: Boolean = false,
     /** Compact only: measured phone-fit (cols, rows) for the screen's refit wiring. */
     onViewportFit: ((cols: Int, rows: Int) -> Unit)? = null,
+    /**
+     * todo #61: the live Termux grid. Null before the first host geometry frame — the
+     * viewport shows the waiting placeholder until then. Defaulted so older call sites
+     * compile unchanged.
+     */
+    termux: TermuxHandle? = null,
+    /** Fires with the measured mono cell pixels (drives the engine's cell metrics). */
+    onTermuxCells: ((cellW: Int, cellH: Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var input by remember { mutableStateOf("") }
-    val screenScroll = rememberScrollState()
-    val scope = rememberCoroutineScope()
+    var termView by remember { mutableStateOf<RemoteTerminalView?>(null) }
+    var lastAppliedSize by remember { mutableIntStateOf(fontSizeSp) }
 
     // ---- viewport fit (defect 2): the mono advance is MEASURED once per Aa size, so the
     // phone refit is computed from real JetBrains Mono NF glyphs, not a 0.6em guess.
@@ -130,55 +134,54 @@ fun LiveTerminalView(
             onViewportFit?.invoke(fitCols.coerceIn(20, 250), fitRows.coerceIn(5, 120))
         }
     }
+    // todo #61: the engine sizes its cells from these same measured numbers, so local
+    // grid metrics and the phone-fit math above can never disagree.
+    val cellW = charPx.roundToInt()
+    val cellH = linePx.roundToInt()
+    LaunchedEffect(cellW, cellH) { onTermuxCells?.invoke(cellW, cellH) }
 
-    // ---- scroll governor (defect 3, fresh user report): the tail pins ONLY while the user
-    // is at the bottom. A manual scroll-up pauses the tail and raises the back-to-bottom
-    // affordance; new output while paused raises the STRICT pill instead (chat #40 parity:
-    // never on a plain scroll, never while pinned). Tapping either resumes the tail.
-    val atBottom by remember {
-        derivedStateOf { screenScroll.value >= screenScroll.maxValue - 4 }
-    }
-    val atBottomNow by rememberUpdatedState(atBottom)
+    // ---- scroll governor (defect 3) on the REAL transcript: mTopRow is row-integral
+    // (0 = pinned to the tail), so the L3 snap-to-grid is structural now — a half-cut top
+    // row cannot exist. While the user is away the engine holds position and raises the
+    // strict pill (chat #40 parity: never on a plain scroll, never while pinned); at the
+    // tail it follows. Tablet keeps always-follow. Tapping either resumes the tail.
+    var topRow by remember { mutableIntStateOf(0) }
     var newWhileAway by remember { mutableStateOf(false) }
     var newCount by remember { mutableStateOf(0) }
+    val atBottom = topRow >= 0
 
-    /** Defect 1: snap the rest offset to the row grid (8dp phase + whole line boxes) so the
-    top edge never half-decapitates a row. Wrapped rows stay whole too — every laid-out
-    line box is exactly one linePx tall on the same grid. */
-    suspend fun snapToRowGrid() {
-        val snapped = (padPx + ((screenScroll.value - padPx) / linePx).roundToInt() * linePx)
-            .toInt().coerceIn(0, screenScroll.maxValue)
-        if (snapped != screenScroll.value) screenScroll.scrollTo(snapped)
-    }
-
-    suspend fun resumeTail() {
+    fun resumeTail() {
         newWhileAway = false
         newCount = 0
-        screenScroll.animateScrollTo(screenScroll.maxValue)
-        if (compact) snapToRowGrid()
+        termView?.setTopRow(0)
     }
 
-    LaunchedEffect(text) {
-        if (!compact || atBottomNow) {
+    val termRevision = termux?.revision
+    var cursorOn by remember { mutableStateOf(true) }
+    LaunchedEffect(termRevision) {
+        val v = termView ?: return@LaunchedEffect
+        val em = termux?.emulator ?: return@LaunchedEffect
+        if (v.mEmulator !== em) return@LaunchedEffect
+        topRow = v.getTopRow()
+        // Stock-activity behavior: (re)start the cursor blinker when the remote app
+        // shows or hides the cursor (bind covers the initial state).
+        val cur = em.isCursorEnabled()
+        if (cur != cursorOn) {
+            cursorOn = cur
+            v.setTerminalCursorBlinkerState(true, true)
+        }
+        if (!compact || topRow >= 0) {
             newWhileAway = false
             newCount = 0
-            screenScroll.animateScrollTo(screenScroll.maxValue)
-            if (compact) snapToRowGrid()
+            v.onScreenUpdated(false)
         } else {
             newWhileAway = true
             newCount++
-        }
-    }
-    LaunchedEffect(atBottom) {
-        if (atBottom) {
-            newWhileAway = false
-            newCount = 0
+            v.onScreenUpdated(true)
         }
     }
 
     val cols = geometry?.cols ?: 80
-    val cursorCol: Int? = cursor?.first
-    val cursorRow: Int? = cursor?.second
 
     Column(modifier) {
         if (!fullscreen) {
@@ -215,41 +218,52 @@ fun LiveTerminalView(
                 .border(1.dp, TerminalThemes.TokyoNight.border, RoundedCornerShape(MaestriRadii.Card))
                 .onSizeChanged { viewportPx = it }
         ) {
-            Box(Modifier.fillMaxSize().verticalScroll(screenScroll)) {
-            val shown = text.ifBlank {
-                if (state == SocketState.OPEN) "(empty screen)" else "…waiting for PTY bytes"
-            }
-            if (text.isBlank()) {
+            val liveEmulator = termux?.emulator
+            if (termux != null && liveEmulator != null) {
+                // The real grid: an opaque classic view, corner-clipped to the container.
+                // Focus stays on our own input field — the view never takes the IME.
+                AndroidView(
+                    factory = { c ->
+                        RemoteTerminalView(c).apply {
+                            setTerminalViewClient(TermuxViewClient())
+                            runCatching {
+                                ResourcesCompat.getFont(c, R.font.jetbrainsmono_nf_regular)?.let { typeface = it }
+                            }
+                            setTextSize(fontSizeSp)
+                            isFocusable = false
+                            isFocusableInTouchMode = false
+                            onTopRow = { topRow = it }
+                            setTerminalCursorBlinkerState(true, true)
+                        }
+                    },
+                    update = { v ->
+                        termView = v
+                        v.bindRemote(termux.session, liveEmulator)
+                        if (lastAppliedSize != fontSizeSp) {
+                            v.setTextSize(fontSizeSp)
+                            lastAppliedSize = fontSizeSp
+                        }
+                        v.refreshMetrics(cellW, cellH)
+                    },
+                    onRelease = { termView = null },
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(MaestriRadii.Card)),
+                )
+            } else {
                 Text(
-                    shown,
+                    if (state == SocketState.OPEN) "(empty screen)" else "…waiting for PTY bytes",
                     fontFamily = MaestriType.Mono,
                     fontSize = fontSizeSp.sp,
                     lineHeight = (fontSizeSp * 1.55f).sp,
                     color = TerminalThemes.TokyoNight.dim,
                     modifier = Modifier.padding(8.dp),
                 )
-            } else {
-                Column(Modifier.fillMaxWidth().padding(8.dp)) {
-                    shown.split("\n").forEachIndexed { row, line ->
-                        Text(
-                            screenLine(
-                                line = line,
-                                cursorCol = cursorCol.takeIf { row == cursorRow },
-                            ),
-                            fontFamily = MaestriType.Mono,
-                            fontSize = fontSizeSp.sp,
-                            lineHeight = (fontSizeSp * 1.55f).sp,
-                        )
-                    }
-                }
-            }
             }
             // Scroll governor affordance (defect 3, compact only): back-to-bottom while merely
             // away, strict new-content pill once output arrived while paused. Same visual
             // pattern as the chat scroll pill (elevated glass + hairline + mono 11).
             if (compact && !atBottom) {
                 TextButton(
-                    onClick = { scope.launch { resumeTail() } },
+                    onClick = { resumeTail() },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 8.dp)
@@ -358,39 +372,6 @@ fun LiveTerminalView(
             )
         }
     }
-}
-
-/**
- * One rendered screen line: an optional prompt prefix in Tokyo blue at weight 700, the body
- * in Tokyo ink, and — on the cursor row — the 7 px block cursor glyph at the reported column.
- */
-private fun screenLine(line: String, cursorCol: Int?): AnnotatedString = buildAnnotatedString {
-    val promptEnd = promptPrefixEnd(line)
-    if (promptEnd > 0) {
-        withStyle(SpanStyle(color = TerminalThemes.TokyoNight.prompt, fontWeight = FontWeight.Bold)) {
-            append(line.substring(0, promptEnd))
-        }
-    }
-    val body = line.substring(promptEnd.coerceAtMost(line.length))
-    if (cursorCol == null) {
-        withStyle(SpanStyle(color = TerminalThemes.TokyoNight.foreground)) { append(body) }
-    } else {
-        val at = cursorCol.coerceIn(0, body.length)
-        withStyle(SpanStyle(color = TerminalThemes.TokyoNight.foreground)) { append(body.substring(0, at)) }
-        withStyle(SpanStyle(color = TerminalThemes.TokyoNight.cursor)) {
-            append(TerminalThemes.TokyoNight.cursorBlock)
-        }
-        withStyle(SpanStyle(color = TerminalThemes.TokyoNight.foreground)) { append(body.substring(at)) }
-    }
-}
-
-/**
- * Length of the shell prompt prefix (`$ `, `# `, `> `, `❯ ` and `user@host:~$ ` forms), 0 when
- * the line does not open with one. Bounded to 40 chars so a prose line ending in `>` is safe.
- */
-private fun promptPrefixEnd(line: String): Int {
-    val m = Regex("^.{0,40}?[$#%\\u276F\\u00BB>]\\s").find(line) ?: return 0
-    return m.value.length
 }
 
 @Composable
