@@ -108,8 +108,8 @@ fun PartiturasScreen(
     var stampErr by remember { mutableStateOf<String?>(null) }
 
     var previewFor by remember { mutableStateOf<Partitura?>(null) }
-    var previewMedia by remember { mutableStateOf<SnapshotMedia.Result?>(null) }
-    var previewLoading by remember { mutableStateOf(false) }
+    var previewMedia by remember(previewFor?.id) { mutableStateOf<SnapshotMedia.Result?>(null) }
+    var previewLoading by remember(previewFor?.id) { mutableStateOf(true) }
 
     // S4-consistent gate (mirrors CanvasScreen's caps/canWrite pattern): the STAMP is a
     // workspace write → owner role on a host whose partituras family is installed; the
