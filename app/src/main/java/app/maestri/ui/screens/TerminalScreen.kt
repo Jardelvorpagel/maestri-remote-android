@@ -191,8 +191,12 @@ fun TerminalScreen(
     }
 
     LaunchedEffect(live, terminalId, canStream) {
-        if (live && canStream) session.openTerminalStream(terminalId)
-        else if (!live) session.terminalStream.close()
+        if (live && canStream) {
+            // attach before open on EVERY reopen: close() must not detach the
+            // screen-owned renderer, and nothing else may rely on a stale one
+            session.terminalStream.termlib = termlibEmulator
+            session.openTerminalStream(terminalId)
+        } else if (!live) session.terminalStream.close()
     }
 
     // Defect 2 (termlib era): the refit trigger moved into the emulator — the
@@ -205,6 +209,9 @@ fun TerminalScreen(
         onDispose {
             if (session.serverInfo?.has("presence") == true) session.feed.sendPresence(null)
             session.terminalStream.close()
+            // the screen owns the renderer: detach symmetric with the attach above,
+            // so no dangling emulator outlives the composition in the shared socket
+            session.terminalStream.termlib = null
         }
     }
 
