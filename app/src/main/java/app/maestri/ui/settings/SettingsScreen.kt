@@ -149,7 +149,7 @@ fun SettingsScreen(
                     Text(
                         SettingsStrings.explainer,
                         fontSize = 12.sp,
-                        color = Palette.WarmSilver,
+                        color = LocalMaestriColors.current.secondaryLabel,
                     )
                 }
                 Spacer(Modifier.width(12.dp))
@@ -173,10 +173,10 @@ fun SettingsScreen(
                         },
                         fontSize = 11.5.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = Palette.WarmSilver,
+                        color = LocalMaestriColors.current.secondaryLabel,
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                    Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
                 }
             }
         }
@@ -192,7 +192,7 @@ fun SettingsScreen(
                     .clickable { openNotificationsRoute?.invoke("notifications-settings") },
             ) {
                 Text(SettingsStrings.notifications, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
             DividerHair()
             Row(
@@ -207,10 +207,10 @@ fun SettingsScreen(
                     "provider limits · live wss",
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
             DividerHair()
             Row(
@@ -225,10 +225,10 @@ fun SettingsScreen(
                     "scheduled prompts · host scheduler",
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
             DividerHair()
             Row(
@@ -243,10 +243,10 @@ fun SettingsScreen(
                     "canvas library · preview + stamp",
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
             DividerHair()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
@@ -255,7 +255,7 @@ fun SettingsScreen(
                     "JetBrains Mono NF · " + fontSp,
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                 )
             }
             DividerHair()
@@ -265,7 +265,7 @@ fun SettingsScreen(
                     "unavailable · Foreground WSS", // honest: our push lane is foreground WSS (Option A)
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                 )
             }
         }
@@ -359,7 +359,7 @@ private fun GroupLabel(text: String) {
         fontSize = 10.sp,
         fontWeight = FontWeight.Medium,
         letterSpacing = 1.sp,
-        color = Palette.WarmSilver,
+        color = LocalMaestriColors.current.secondaryLabel,
         modifier = Modifier.padding(start = 2.dp, top = 4.dp),
     )
 }
@@ -499,7 +499,7 @@ private fun SettingsPhoneBody(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.weight(1f)) {
                     Text(SettingsStrings.requireBiometrics, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
-                    Text(SettingsStrings.explainer, fontSize = 12.sp, color = Palette.WarmSilver)
+                    Text(SettingsStrings.explainer, fontSize = 12.sp, color = LocalMaestriColors.current.secondaryLabel)
                 }
                 Spacer(Modifier.width(12.dp))
                 SettingsToggle(
@@ -530,10 +530,10 @@ private fun SettingsPhoneBody(
                         },
                         fontSize = 11.5.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = Palette.WarmSilver,
+                        color = LocalMaestriColors.current.secondaryLabel,
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                    Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
                 }
             }
         }
@@ -549,7 +549,7 @@ private fun SettingsPhoneBody(
                     .clickable { onNotifications() },
             ) {
                 Text(SettingsStrings.notifications, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
             DividerHair()
             Row(
@@ -564,10 +564,10 @@ private fun SettingsPhoneBody(
                     "provider limits · live wss",
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
             DividerHair()
             Row(
@@ -582,10 +582,10 @@ private fun SettingsPhoneBody(
                     "scheduled prompts · host scheduler",
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
             DividerHair()
             Row(
@@ -600,10 +600,10 @@ private fun SettingsPhoneBody(
                     "canvas library · preview + stamp",
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
             DividerHair()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
@@ -612,7 +612,7 @@ private fun SettingsPhoneBody(
                     "JetBrains Mono NF · " + fontSp,
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                 )
             }
             DividerHair()
@@ -622,7 +622,7 @@ private fun SettingsPhoneBody(
                     "unavailable · Foreground WSS",
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                 )
             }
         }
@@ -674,10 +674,10 @@ private fun AgentLinkRow(label: String, value: String, onOpen: () -> Unit) {
             value,
             fontSize = 11.5.sp,
             fontFamily = FontFamily.Monospace,
-            color = Palette.WarmSilver,
+            color = LocalMaestriColors.current.secondaryLabel,
         )
         Spacer(Modifier.width(8.dp))
-        Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+        Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
     }
 }
 
@@ -728,12 +728,12 @@ private fun DisabledRow(label: String, reason: String) {
             .fillMaxWidth()
             .heightIn(min = 52.dp),
     ) {
-        Text(label, fontSize = 13.5.sp, color = Palette.WarmSilver, modifier = Modifier.weight(1f))
+        Text(label, fontSize = 13.5.sp, color = LocalMaestriColors.current.secondaryLabel, modifier = Modifier.weight(1f))
         Text(
             reason,
             fontSize = 11.5.sp,
             fontFamily = FontFamily.Monospace,
-            color = Palette.WarmSilver.copy(alpha = 0.7f),
+            color = LocalMaestriColors.current.secondaryLabel.copy(alpha = 0.7f),
         )
     }
 }
@@ -791,7 +791,7 @@ private fun ModelPickerDialog(
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 1.sp,
-                    color = Palette.WarmSilver,
+                    color = LocalMaestriColors.current.secondaryLabel,
                     modifier = Modifier.padding(start = 2.dp, bottom = 4.dp),
                 )
                 models.forEach { model ->

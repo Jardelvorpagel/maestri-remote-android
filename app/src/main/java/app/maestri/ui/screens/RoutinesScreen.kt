@@ -177,7 +177,7 @@ fun RoutinesScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         writeReason?.let {
-            Text(it, style = monoHud(11, color = Palette.WarmSilver))
+            Text(it, style = monoHud(11, color = LocalMaestriColors.current.secondaryLabel))
         }
         err?.let {
             Spacer(Modifier.height(6.dp))

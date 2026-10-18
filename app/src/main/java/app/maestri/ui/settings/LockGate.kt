@@ -179,7 +179,7 @@ private fun AppLockCoverPhone(store: AppLockStore, activity: FragmentActivity?, 
             Text(
                 SettingsStrings.explainer,
                 fontSize = 12.sp,
-                color = Palette.WarmSilver,
+                color = LocalMaestriColors.current.secondaryLabel,
             )
             val grace by store.graceSeconds.collectAsState()
             // .unlock-btn: 54px, r-18, GRADIENT + inset white 8% + glow .32
@@ -234,7 +234,7 @@ private fun AppLockCoverPhone(store: AppLockStore, activity: FragmentActivity?, 
                 } + " · fallback = device PIN",
                 fontSize = 11.sp,
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                color = Palette.WarmSilver,
+                color = LocalMaestriColors.current.secondaryLabel,
             )
         }
     }
