@@ -142,7 +142,7 @@ fun CanvasScreen(
     // route; the optimistic overlay it exposes is what makes a write visible before the host echoes.
     val ctl = remember(session, wsId, scope) { CanvasWriteController(session, scope, wsId) }
     val caps = session.serverInfo
-    val canWrite = caps?.has("canvasWrite") == true || caps?.role == "owner"
+    val canWrite = caps?.has("canvasWrite") == true && caps?.role == "owner"
     val writeReason = if (canWrite) null else CanvasStrings.guestReadsOnly
     val optimism = ctl.optimism
     var marquee by remember { mutableStateOf<Rect?>(null) }
