@@ -10,11 +10,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -194,7 +197,12 @@ fun LiveTerminalView(
         }
 
         // ---- Tokyo Night container -------------------------------------------------
-        val bodyModifier = if (fullscreen) {
+        // ---- keyboard-aware viewport (todo #57): with Gboard open the fixed 300dp box no
+        // longer fits above the composer, so the viewport flexes (weight) while the IME
+        // padding at the screen root lifts the whole bottom bar. Keyboard closed — or
+        // fullscreen, which already flexes — resolves to the exact previous modifiers.
+        val imeOpen = WindowInsets.isImeVisible
+        val bodyModifier = if (fullscreen || imeOpen) {
             Modifier.fillMaxWidth().weight(1f)
         } else {
             Modifier.fillMaxWidth().height(300.dp)

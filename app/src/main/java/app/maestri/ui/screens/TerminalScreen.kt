@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -228,7 +229,11 @@ fun TerminalScreen(
             ?.filterIsInstance<FeedItem.PendingPromptFeedItem>()
             ?.firstOrNull { it.terminal.id == terminalId }?.prompt
 
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp)) {
+    // todo #57: edge-to-edge + adjustResize delivers the IME as an inset — the window does
+    // NOT shrink (reno_kb2 proves it: the viewport extends under Gboard) — so the screen
+    // consumes it here. One shared fix lifting the Live input + rail AND the agent prompt
+    // composer (both faces) above the keyboard. Closed keyboard → zero inset → identical.
+    Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp).imePadding()) {
         // Header: responsive below a 480dp breakpoint (todo #42, Reno 411dp case).
         // The tablet path is the ARRANGEMENT-IDENTICAL row it has always been; the
         // compact path re-flows chips + controls onto a second, right-aligned row and
