@@ -58,6 +58,7 @@ import app.maestri.wire.TerminalCard
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.controlShape
@@ -110,6 +111,10 @@ fun TerminalScreen(
     var sending by remember { mutableStateOf(false) }
     var showResize by remember { mutableStateOf(false) }
     var seededFallback by remember { mutableStateOf(false) }
+    // L3 compact refit (defect 2): phone-fit cols reported by the live viewport; the
+    // auto-refit below fires once per terminal when Live opens on a phone.
+    var fitCols by remember(terminalId) { mutableStateOf<Int?>(null) }
+    var autoFitSent by remember(terminalId) { mutableStateOf(false) }
 
     val caps = session.serverInfo
     val canStream = caps?.has("terminalStreaming") == true
@@ -142,6 +147,21 @@ fun TerminalScreen(
     LaunchedEffect(live, terminalId, canStream) {
         if (live && canStream) session.openTerminalStream(terminalId)
         else if (!live) session.terminalStream.close()
+    }
+
+    // Defect 2: on entering Live on a phone, refit the PTY cols to the measured viewport
+    // width (once per terminal; rows untouched). The resize dialog below prefills the same
+    // fitted value on compact, so tapping OK actually refits instead of no-op'ing 122×35.
+    // screenCompact reads the full window width — the same value the header's bare
+    // BoxWithConstraints sees — so the two compact flags can never disagree.
+    val screenCompact = LocalConfiguration.current.screenWidthDp < 480
+    LaunchedEffect(live, fitCols, streamGeometry) {
+        if (live && screenCompact && canResize && !autoFitSent) {
+            val fit = fitCols ?: return@LaunchedEffect
+            val cur = streamGeometry ?: return@LaunchedEffect
+            if (fit != cur.cols) session.terminalStream.sendResize(fit, cur.rows)
+            autoFitSent = true
+        }
     }
 
     DisposableEffect(Unit) {
@@ -410,11 +430,15 @@ fun TerminalScreen(
                 } else null,
                 onInput = { s -> session.terminalStream.sendInput(s) },
                 onResizeRequest = { showResize = true },
+                compact = screenCompact,
+                onViewportFit = { c, _ -> fitCols = c },
                 modifier = if (fullscreen) Modifier.weight(1f) else Modifier,
             )
             if (showResize) {
                 ResizeDialog(
-                    cols = streamGeometry?.cols ?: 80,
+                    // Compact prefills the measured phone-fit cols (defect 2: OK refits);
+                    // tablet keeps the current-geometry prefill byte-identically.
+                    cols = if (screenCompact) fitCols ?: (streamGeometry?.cols ?: 80) else streamGeometry?.cols ?: 80,
                     rows = streamGeometry?.rows ?: 24,
                     onDismiss = { showResize = false },
                     onApply = { c, r ->
