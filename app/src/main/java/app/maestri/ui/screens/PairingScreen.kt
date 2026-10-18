@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.RootTitle
 
 /**
  * Pairing screen.
@@ -134,7 +135,7 @@ fun PairingScreen(
                 Spacer(Modifier.height(18.dp))
             }
             Spacer(Modifier.height(28.dp))
-            Text("Maestri Wire", fontSize = 26.sp, color = MaterialTheme.colorScheme.primary)
+            RootTitle("Maestri Wire")
             Text(
                 "Pair this device once with your Maestri host",
                 fontSize = 13.sp,
