@@ -161,7 +161,7 @@ fun LiveTerminalView(
     LaunchedEffect(termRevision) {
         val v = termView ?: return@LaunchedEffect
         val em = termux?.emulator ?: return@LaunchedEffect
-        if (v.mEmulator !== em) return@LaunchedEffect
+        if (v.bound !== em) return@LaunchedEffect
         topRow = v.getTopRow()
         // Stock-activity behavior: (re)start the cursor blinker when the remote app
         // shows or hides the cursor (bind covers the initial state).
@@ -226,19 +226,22 @@ fun LiveTerminalView(
                     factory = { c ->
                         RemoteTerminalView(c).apply {
                             setTerminalViewClient(TermuxViewClient())
-                            runCatching {
-                                ResourcesCompat.getFont(c, R.font.jetbrainsmono_nf_regular)?.let { typeface = it }
-                            }
+                            // setTypeface reads the live renderer: size first, face after.
                             setTextSize(fontSizeSp)
+                            runCatching {
+                                ResourcesCompat.getFont(c, R.font.jetbrainsmono_nf_regular)?.let { setTerminalTypeface(it) }
+                            }
                             isFocusable = false
                             isFocusableInTouchMode = false
                             onTopRow = { topRow = it }
+                            onAltScroll = { up -> onInput(if (up) "\u001B[A" else "\u001B[B") }
                             setTerminalCursorBlinkerState(true, true)
                         }
                     },
                     update = { v ->
                         termView = v
-                        v.bindRemote(termux.session, liveEmulator)
+                        v.bindRemote(liveEmulator)
+                        v.rowPx = linePx
                         if (lastAppliedSize != fontSizeSp) {
                             v.setTextSize(fontSizeSp)
                             lastAppliedSize = fontSizeSp

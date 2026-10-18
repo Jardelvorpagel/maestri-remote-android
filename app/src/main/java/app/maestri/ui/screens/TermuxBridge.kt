@@ -1,10 +1,12 @@
 package app.maestri.ui.screens
 
 import android.content.Context
+import android.graphics.Typeface
 import android.util.AttributeSet
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.widget.FrameLayout
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
@@ -13,59 +15,129 @@ import com.termux.view.TerminalViewClient
 /**
  * Termux view binding for the REMOTE stream (todo #61).
  *
- * Upstream `TerminalView` is hard-wired to `TerminalSession.updateSize()`, which spawns
- * a local PTY through JNI. Maestri has no local PTY — the bytes arrive from the host —
- * so this subclass binds the view WITHOUT `attachSession`:
+ * Upstream `TerminalView` is FINAL at this revision, so this is composition, not
+ * inheritance: a `FrameLayout` holding the inner view and delegating to it. The inner
+ * view's `mTermSession` stays NULL by design — `updateSize()` early-returns on a null
+ * session (vendored `TerminalView.java:988`), so view-geometry changes (keyboard toggle,
+ * rotation) can never reach the JNI `session.updateSize()` path. (The engine still owns
+ * a never-spawned dummy session, but purely as the emulator's `TerminalOutput` carrier —
+ * it is never bound to any view, never sized, never spawns.) The live grid is assigned to
+ * the view's PUBLIC `mEmulator` field directly; local emulator geometry always tracks
+ * HOST geometry frames (the engine recreates the emulator per frame), never view dims.
  *
- * - [bindRemote] assigns the view's public `mTermSession` (the engine's never-spawned
- *   dummy, whose `write()` is a no-op while `mShellPid <= 0`, so every key/paste/mouse
- *   path inside the view is NPE-safe) and `mEmulator` directly. Rebinding the SAME
- *   emulator is a no-op; a fresh emulator (host geometry frame) resets the top row and
- *   restarts the cursor blinker against it.
- * - [updateSize] is overridden so view-geometry changes (keyboard toggle, rotation)
- *   NEVER reach `session.updateSize()` → JNI. Local emulator geometry always tracks
- *   HOST geometry frames (the engine recreates the emulator per frame); view dims only
- *   decide which window of rows is visible, exactly like the MiniTerm path.
- * - [setTopRow] funnels every scroll mutation (finger drag, fling, key scroll,
- *   `onScreenUpdated`) into [onTopRow], which drives the Compose scroll-governor pill.
+ * Null-session audit (all `mTermSession` sites at @8629e63): key/IME dispatch is dead
+ * (inner view is `focusable=false`, our field owns the IME); `inputCodePoint` null-guards
+ * itself; `getCurrentSession()` has no internal callers; the `:1090` write sits in the
+ * AutoFill path (unreachable: non-focusable view, no autofill hints); mouse events only
+ * touch emulator state (inert with no PTY writer). The ONE reachable crash — finger
+ * scroll while the remote alt screen is up (`doScroll` → `handleKeyCode` → unguarded
+ * `getEmulator()`) — is converted into the path's original intent: while alt is active
+ * the wrapper eats the gesture and emits host arrow keys, so `less`/vim scroll natively.
+ * Taps and mouse reports in alt/mouse apps are inert remote-side, so eating them loses
+ * nothing. Pinch-zoom stays a no-op (Aa owns sizing).
  *
  * Row-integral `mTopRow` makes the L3 top-clip defect structurally impossible; the
  * governor calls `onScreenUpdated(away)` — follow at bottom, hold position while away.
+ * Plain-drag scrolls run natively inside the view; every finger lift re-syncs the pill
+ * (immediate + 350 ms fling-settle posts) and every engine revision re-syncs too.
  */
 class RemoteTerminalView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-) : TerminalView(context, attrs) {
+) : FrameLayout(context, attrs) {
 
-    /** Fires on the main thread after every top-row mutation. */
+    val termView: TerminalView = TerminalView(context, null)
+
+    /** Fires on the main thread after finger-scroll settle + every revision sync. */
     var onTopRow: ((Int) -> Unit)? = null
 
-    override fun updateSize() {
-        if (width == 0 || height == 0 || mTermSession == null) return
-        val em = mEmulator ?: return
-        val hist = em.screen.activeTranscriptRows
-        if (getTopRow() < -hist) setTopRow(-hist)
-        invalidate()
+    /** Alt-screen finger scrolls become host arrow keys (stock `doScroll` intent). */
+    var onAltScroll: ((up: Boolean) -> Unit)? = null
+
+    /** Mono line height px — the alt-scroll row threshold (set from Compose metrics). */
+    var rowPx = 1f
+
+    init {
+        addView(termView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        termView.isFocusable = false
+        termView.isFocusableInTouchMode = false
+        termView.setOnTouchListener { _, e -> onTouch(e) }
     }
 
-    override fun setTopRow(topRow: Int, updateEmulator: Boolean) {
-        super.setTopRow(topRow, updateEmulator)
-        onTopRow?.invoke(getTopRow())
-    }
+    /** Live emulator bound to the inner view. */
+    val bound: TerminalEmulator? get() = termView.mEmulator
 
-    fun bindRemote(session: TerminalSession, emulator: TerminalEmulator) {
-        mTermSession = session
-        if (mEmulator !== emulator) {
-            mEmulator = emulator
-            setTopRow(0, false)
-            setTerminalCursorBlinkerState(true, true)
+    fun bindRemote(emulator: TerminalEmulator) {
+        if (termView.mEmulator !== emulator) {
+            termView.mEmulator = emulator
+            termView.setTopRow(0, false)
+            termView.setTerminalCursorBlinkerState(true, true)
         }
     }
 
+    fun setTextSize(sp: Int) = termView.setTextSize(sp)
+
+    /** Correct accessor at this revision is `TerminalView.setTypeface` (after text size). */
+    fun setTerminalTypeface(tf: Typeface) = termView.setTypeface(tf)
+
+    fun setTerminalViewClient(c: TerminalViewClient) = termView.setTerminalViewClient(c)
+
+    fun getTopRow(): Int = termView.getTopRow()
+
+    fun setTopRow(top: Int) = termView.setTopRow(top)
+
+    fun onScreenUpdated(skipScrolling: Boolean) = termView.onScreenUpdated(skipScrolling)
+
+    fun setTerminalCursorBlinkerState(start: Boolean, onlyIfCursor: Boolean) =
+        termView.setTerminalCursorBlinkerState(start, onlyIfCursor)
+
     /** Refresh cell pixels (Aa size change); same-grid resize is allocation-free. */
     fun refreshMetrics(cellW: Int, cellH: Int) {
-        val em = mEmulator ?: return
+        val em = termView.mEmulator ?: return
         if (cellW > 0 && cellH > 0) em.resize(em.mColumns, em.mRows, cellW, cellH)
+    }
+
+    fun syncTopRow() {
+        onTopRow?.invoke(termView.getTopRow())
+    }
+
+    private fun altEating(): Boolean {
+        val em = termView.mEmulator
+        return em != null && em.isAlternateBufferActive() && !em.isMouseTrackingActive()
+    }
+
+    private var lastY = 0f
+    private var accY = 0f
+
+    private fun onTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                lastY = e.y
+                accY = 0f
+                return altEating()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!altEating()) return false
+                accY += e.y - lastY
+                lastY = e.y
+                val step = rowPx.coerceAtLeast(1f)
+                while (accY <= -step) {
+                    onAltScroll?.invoke(true)
+                    accY += step
+                }
+                while (accY >= step) {
+                    onAltScroll?.invoke(false)
+                    accY -= step
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                post { syncTopRow() }
+                postDelayed({ syncTopRow() }, 350)
+                return altEating()
+            }
+            else -> return false
+        }
     }
 }
 
@@ -76,8 +148,8 @@ data class TermuxHandle(val session: TerminalSession, val emulator: TerminalEmul
  * `TerminalViewClient` for the remote stream. Deliberate deviations from a stock
  * Termux activity: the view never owns the IME (`isTerminalViewSelected` false — our
  * `OutlinedTextField` does), pinch-zoom is a no-op (Aa owns sizing), and all input
- * callbacks return false (quickkeys + composer own input; the dummy session drops
- * anything the view itself generates).
+ * callbacks return false (quickkeys + composer own input; the view generates none
+ * while unfocused, and alt-screen scrolls arrive via `onAltScroll` instead).
  */
 class TermuxViewClient : TerminalViewClient {
     override fun onScale(scale: Float): Float = scale
@@ -101,6 +173,8 @@ class TermuxViewClient : TerminalViewClient {
     override fun logInfo(tag: String, message: String) { Log.i(TAG, "$tag: $message") }
     override fun logDebug(tag: String, message: String) { Log.d(TAG, "$tag: $message") }
     override fun logVerbose(tag: String, message: String) { Log.v(TAG, "$tag: $message") }
+    override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) { Log.e(TAG, "$tag: $message", e) }
+    override fun logStackTrace(tag: String, e: Exception) { Log.e(TAG, tag, e) }
 
     private companion object {
         const val TAG = "TermuxView"
