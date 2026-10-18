@@ -47,6 +47,7 @@ class AgentUsageSocket(
     val lastFrame: StateFlow<String?> = _lastFrame
 
     private var ws: WebSocket? = null
+    private var reconnectJob: Job? = null
     private var backoffAttempts = 0
     private var closedByUs = false
     @Volatile
@@ -56,11 +57,24 @@ class AgentUsageSocket(
         closedByUs = false
         url = targetUrl
         backoffAttempts = 0
+        // S1: a re-open must retire the previous live socket (it would keep pumping frames
+        // into the flows) and cancel any still-pending scheduled reconnect — its closedByUs
+        // check is stale because this open resets the flag — or both stack into a second
+        // live socket whose failure handlers chain further reconnects.
+        reconnectJob?.cancel()
+        reconnectJob = null
+        try {
+            ws?.close(1000, "superseded")
+        } catch (e: Exception) {
+        }
+        ws = null
         connect()
     }
 
     fun close() {
         closedByUs = true
+        reconnectJob?.cancel()
+        reconnectJob = null
         try {
             ws?.close(1000, "bye")
         } catch (e: Exception) {
@@ -77,12 +91,16 @@ class AgentUsageSocket(
             Request.Builder().url(target).build(),
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    // S1: identity guard — a superseded socket still carries this class's
+                    // listener callbacks; it must not flip state or reset backoff.
+                    if (webSocket !== ws) return
                     backoffAttempts = 0
                     _state.value = SocketState.OPEN
                     _error.value = null
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    if (webSocket !== ws) return // superseded: no frame flow
                     try {
                         val msg = JSONObject(text)
                         if (msg.optString("type") != "agentUsage") return
@@ -94,6 +112,9 @@ class AgentUsageSocket(
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    // S1: a superseded socket never flips state nor schedules reconnects —
+                    // only the currently-open one may resurrect the chain.
+                    if (webSocket !== ws) return
                     _state.value = SocketState.CLOSED
                     _error.value = t.message ?: "agentUsage stream failed"
                     ws = null
@@ -101,6 +122,7 @@ class AgentUsageSocket(
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (webSocket !== ws) return // superseded
                     if (!closedByUs) {
                         _state.value = SocketState.CLOSED
                         ws = null
@@ -117,7 +139,7 @@ class AgentUsageSocket(
         if (closedByUs) return
         val attempt = backoffAttempts++
         val delayMs = (1000L shl attempt.coerceAtMost(4)).coerceAtMost(30_000L)
-        scope.launch {
+        reconnectJob = scope.launch {
             delay(delayMs)
             if (!closedByUs) connect()
         }
