@@ -126,6 +126,11 @@ fun TerminalScreen(
     // L3 compact refit (defect 2): phone-fit cols reported by the live viewport feed
     // the resize-dialog prefill and the forcedSize auto-grid below.
     var fitCols by remember(terminalId) { mutableStateOf<Int?>(null) }
+    // Capabilities up here: the termlib binding below reads canResize at creation.
+    val caps = session.serverInfo
+    val canStream = caps?.has("terminalStreaming") == true
+    val canResize = caps?.has("terminalResize") == true
+    val isOwner = caps?.role == "owner"
     // todo #62: one termlib emulator per terminal (libvterm grid, recreated on switch).
     // Host bytes reach it through the socket (TerminalStreamSocket.termlib, attached
     // below); the component sizes its grid from forcedSize and reports back through
@@ -161,11 +166,6 @@ fun TerminalScreen(
     LaunchedEffect(terminalId, termlibEmulator) {
         session.terminalStream.termlib = termlibEmulator
     }
-
-    val caps = session.serverInfo
-    val canStream = caps?.has("terminalStreaming") == true
-    val canResize = caps?.has("terminalResize") == true
-    val isOwner = caps?.role == "owner"
 
     // seen + presence on open
     LaunchedEffect(terminalId) {
