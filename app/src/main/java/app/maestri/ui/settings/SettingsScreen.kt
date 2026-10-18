@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.animateDpAsState
@@ -33,6 +34,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.heightIn
@@ -83,7 +85,20 @@ fun SettingsScreen(
     val fontSp =
         (fontStore?.sizeSp?.collectAsState())?.value ?: TerminalFontStore.DEFAULT_SP
 
-    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+    BoxWithConstraints {
+        val compact = maxWidth < 480.dp
+        if (compact) {
+            // v2.1 L9 phone arrangement (<480dp): serif root title, rows 52, tog 52x32
+            SettingsPhoneBody(
+                enabled = enabled,
+                grace = grace,
+                fontSp = fontSp,
+                onBack = onBack,
+                onToggle = { v -> scope.launch { appLock.setEnabled(v) } },
+                onOpenGrace = { pickerOpen = true },
+                onNotifications = { openNotificationsRoute?.invoke("notifications-settings") },
+            )
+        } else     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "‹",
@@ -174,6 +189,7 @@ fun SettingsScreen(
                 )
             }
         }
+    }
     }
 
     if (pickerOpen) {
@@ -266,10 +282,19 @@ private fun DividerHair() {
 
 /** .tog: 51x31 pill; ON = terracotta (inset white 10% + glow .30); OFF = surface + ring; 25dp ivory knob. */
 @Composable
-private fun SettingsToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SettingsToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    // tablet defaults (v2.0 task-ruled); compact passes the v2.1 .tog 52x32/28 values
+    width: Dp = 51.dp,
+    height: Dp = 31.dp,
+    knob: Dp = 25.dp,
+    knobOn: Dp = 24.dp,
+    knobOff: Dp = 2.dp,
+) {
     val colors = LocalMaestriColors.current
     val knobStart by animateDpAsState(
-        targetValue = if (checked) 24.dp else 2.dp,
+        targetValue = if (checked) knobOn else knobOff,
         animationSpec = tween(Motion.Fast, easing = Motion.Ease),
         label = "lock-toggle-knob",
     )
@@ -291,7 +316,7 @@ private fun SettingsToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit)
     }
     Box(
         modifier = Modifier
-            .size(width = 51.dp, height = 31.dp)
+            .size(width = width, height = height)
             .clip(CircleShape)
             .background(toggleFill, CircleShape)
             .let {
@@ -313,7 +338,7 @@ private fun SettingsToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit)
         Box(
             modifier = Modifier
                 .padding(start = knobStart)
-                .size(25.dp)
+                .size(knob)
                 .clip(CircleShape)
                 .background(Palette.Ivory, CircleShape)
                 .shadow(
@@ -323,5 +348,107 @@ private fun SettingsToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit)
                     spotColor = Color.Black.copy(alpha = 0.35f),
                 ),
         )
+    }
+}
+
+
+/** v2.1 L9 phone arrangement (<480dp): serif root title (RootTitleStyle 28/30.8/500),
+ *  sgroup rows 52, .tog 52x32/28 gradient toggle. Glass/blur untouched (L10 held). */
+@Composable
+private fun SettingsPhoneBody(
+    enabled: Boolean,
+    grace: Int,
+    fontSp: Int,
+    onBack: () -> Unit,
+    onToggle: (Boolean) -> Unit,
+    onOpenGrace: () -> Unit,
+    onNotifications: () -> Unit,
+) {
+    val colors = LocalMaestriColors.current
+    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("‹", fontSize = 20.sp, modifier = Modifier.clickable { onBack() }.padding(end = 12.dp))
+            Text("Settings", style = app.maestri.ui.Style.RootTitleStyle)
+        }
+        Spacer(Modifier.height(16.dp))
+
+        GroupLabel("SECURITY")
+        SettingsGroup {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f)) {
+                    Text(SettingsStrings.requireBiometrics, fontSize = 13.5.sp, color = Palette.Ivory)
+                    Text(SettingsStrings.explainer, fontSize = 12.sp, color = Palette.WarmSilver)
+                }
+                Spacer(Modifier.width(12.dp))
+                SettingsToggle(
+                    checked = enabled,
+                    onCheckedChange = onToggle,
+                    width = 52.dp,
+                    height = 32.dp,
+                    knob = 28.dp,
+                    knobOn = 22.dp,
+                    knobOff = 2.dp,
+                )
+            }
+            if (enabled) {
+                DividerHair()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp)
+                        .clickable { onOpenGrace() },
+                ) {
+                    Text("Lock after…", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                    Text(
+                        when (grace) {
+                            0 -> SettingsStrings.graceImmediately
+                            300 -> SettingsStrings.graceAfter5Minutes
+                            else -> SettingsStrings.graceAfter1Minute
+                        },
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Palette.WarmSilver,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        GroupLabel("APP")
+        SettingsGroup {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .clickable { onNotifications() },
+            ) {
+                Text(SettingsStrings.notifications, fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+            }
+            DividerHair()
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                Text("Terminal font", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text(
+                    "JetBrains Mono NF · " + fontSp,
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Palette.WarmSilver,
+                )
+            }
+            DividerHair()
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                Text("Push", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text(
+                    "unavailable · Foreground WSS",
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Palette.WarmSilver,
+                )
+            }
+        }
     }
 }

@@ -30,6 +30,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -118,14 +120,126 @@ internal fun applyRecentsBlanking(activity: FragmentActivity, locked: Boolean) {
     }
 }
 
-/** Lock cover: full-bleed canvas chrome, headline + Unlock (verbatim strings only).
+/** Lock cover v2.1 L9: <480dp = the phone lock sheet (glass TINT, blur still held — L10);
+ *  >=480dp = the tablet cover, byte-identical to the pre-L9 body.
  *  [interactive] false during the cold-start loading window — locked-looking, no
  *  prompt is launched for a lock that may still resolve to disabled. */
 @Composable
 private fun AppLockCover(store: AppLockStore, activity: FragmentActivity?, interactive: Boolean) {
+    BoxWithConstraints {
+        val compact = maxWidth < 480.dp
+        if (compact) {
+            AppLockCoverPhone(store, activity, interactive)
+        } else {
+            AppLockCoverTablet(store, activity, interactive)
+        }
+    }
+}
+
+@Composable
+private fun AppLockCoverPhone(store: AppLockStore, activity: FragmentActivity?, interactive: Boolean) {
     val colors = LocalMaestriColors.current
-    // design-v2 09 .lockov px-perfect: scrim NearBlack @ .85 — translucency over live
-    // content, NO backdrop blur (Compose 1.7; artifact blur noted, ruling: skip).
+    // v2.1 .lockov: glass sheet, TINT per phase-A token (GlassBase @ .92 = colors.glass);
+    // NO backdrop blur — the blur engine is L10, held for a separate decision (documented
+    // no-backdrop-blur deviation stands).
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {}, // absorb taps: nothing behind stays interactive
+        color = colors.glass,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp, alignment = Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // .lk: 76px, r-24, ring-depth
+            Box(
+                modifier = Modifier
+                    .size(76.dp)
+                    .warmRing(colors.hairline, radius = MaestriRadii.Container)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(MaestriRadii.Container))
+                    .background(colors.canvasSurface, androidx.compose.foundation.shape.RoundedCornerShape(MaestriRadii.Container)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("🔒", fontSize = 30.sp) // artifact .lk glyph 30px
+            }
+            Text(
+                SettingsStrings.lockHeadline,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Palette.Ivory,
+            )
+            Text(
+                SettingsStrings.explainer,
+                fontSize = 12.sp,
+                color = Palette.WarmSilver,
+            )
+            val grace by store.graceSeconds.collectAsState()
+            // .unlock-btn: 54px, r-18, GRADIENT + inset white 8% + glow .32
+            val unlockFill = Brush.linearGradient(
+                0f to Palette.TerracottaLight,
+                1f to Palette.Terracotta,
+                start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                end = androidx.compose.ui.geometry.Offset(1f, 1f),
+            )
+            androidx.compose.material3.Button(
+                onClick = if (interactive) {
+                    { activity?.let { AppLockGate.launchPrompt(it) { store.unlock() } } }
+                } else {
+                    { }
+                },
+                color = androidx.compose.ui.graphics.Color.Transparent,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(MaestriRadii.Card),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 54.dp)
+                    .shadow(
+                        elevation = 12.dp,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(MaestriRadii.Card),
+                        ambientColor = Palette.Terracotta.copy(alpha = 0.32f),
+                        spotColor = Palette.Terracotta.copy(alpha = 0.32f),
+                    )
+                    .background(
+                        unlockFill,
+                        androidx.compose.foundation.shape.RoundedCornerShape(MaestriRadii.Card),
+                    )
+                    .border(
+                        1.dp,
+                        androidx.compose.ui.graphics.Color.White.copy(alpha = 0.08f),
+                        androidx.compose.foundation.shape.RoundedCornerShape(MaestriRadii.Card),
+                    ),
+            ) {
+                Text(
+                    SettingsStrings.unlock,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Palette.Ivory,
+                )
+            }
+            Text(
+                "grace: " + when (grace) {
+                    0 -> SettingsStrings.graceImmediately
+                    300 -> SettingsStrings.graceAfter5Minutes
+                    else -> SettingsStrings.graceAfter1Minute
+                } + " · fallback = device PIN",
+                fontSize = 11.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                color = Palette.WarmSilver,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppLockCoverTablet(store: AppLockStore, activity: FragmentActivity?, interactive: Boolean) {
+    val colors = LocalMaestriColors.current
+    // tablet branch — byte-identical to the pre-L9 cover (v2.0 task-ruled values)
     Surface(
         modifier = Modifier
             .fillMaxSize()
