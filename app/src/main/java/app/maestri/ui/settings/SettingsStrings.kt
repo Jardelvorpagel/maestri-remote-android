@@ -29,4 +29,30 @@ object SettingsStrings {
     const val unlockPromptTitle = "Unlock Maestri Remote" // Desbloquear o Maestri Remote — prompt reason
     const val unlock = "Unlock" // Desbloquear — cover button + prompt negative
     const val notifications = "Notifications" // plain label; P4-A constant supersedes (W-4)
+    // todo #56: Pi-agent terminal settings (desktop ~/.pi/agent/settings.json port).
+    const val agentGroup = "AGENT"
+    const val hostGroup = "HOST-MANAGED"
+    const val agentModel = "Model"
+    const val agentProvider = "Provider"
+    const val agentThinking = "Thinking"
+    const val agentModelTitle = "Model"
+    const val agentProviderTitle = "Provider"
+    const val agentThinkingTitle = "Thinking level"
+    const val rowTerminalProgress = "Terminal progress"
+    const val rowSubagentRouting = "Per-agent routing"
+    const val rowCompaction = "Context compaction"
+    const val rowToolPolicy = "Tool policy"
+    const val rowRetryPolicy = "Retry policy"
+    const val rowTuiMode = "TUI mode"
+    const val rowSkillCommands = "Skill commands"
+    const val rowHardwareCursor = "Hardware cursor"
+    const val rowCacheNotices = "Cache notices"
+    const val rowProjectTrust = "Project trust"
+    const val rowAgentCards = "Agent cards"
+    const val rowComposerChrome = "Composer chrome"
+    const val rowExtensions = "Extensions"
+    const val managedByHost = "managed by host"
+    const val hostDriven = "host-driven"
+    const val desktopOnly = "desktop only"
+    const val serverSide = "server-side"
 }
