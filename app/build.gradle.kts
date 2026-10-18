@@ -57,4 +57,7 @@ dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // todo #61: Termux terminal-view (pulls terminal-emulator via api) — the Live
+    // viewport renders the remote PTY byte stream with the real xterm engine.
+    implementation(project(":terminal-view"))
 }
