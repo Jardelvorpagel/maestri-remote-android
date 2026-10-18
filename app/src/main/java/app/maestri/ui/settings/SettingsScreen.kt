@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -123,7 +124,7 @@ fun SettingsScreen(
                 onPartituras = { openPartituras?.invoke() },
                 onOpenAgentPicker = { agentPicker = it },
             )
-        } else     Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        } else     Column(Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "‹",
@@ -485,7 +486,7 @@ private fun SettingsPhoneBody(
     onOpenAgentPicker: (String) -> Unit,
 ) {
     val colors = LocalMaestriColors.current
-    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+    Column(Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("‹", fontSize = 20.sp, modifier = Modifier.clickable { onBack() }.padding(end = 12.dp))
             Text("Settings", style = app.maestri.ui.Style.RootTitleStyle)
