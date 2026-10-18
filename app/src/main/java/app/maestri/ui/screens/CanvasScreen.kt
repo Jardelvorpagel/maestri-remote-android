@@ -133,6 +133,9 @@ fun CanvasScreen(
     // Canvas writes (P1a): one controller owns the modes, the selection, the dialogs and every
     // route; the optimistic overlay it exposes is what makes a write visible before the host echoes.
     val ctl = remember(session, wsId, scope) { CanvasWriteController(session, scope, wsId) }
+    val caps = session.serverInfo
+    val canWrite = caps?.has("canvasWrite") == true || caps?.role == "owner"
+    val writeReason = if (canWrite) null else CanvasStrings.guestReadsOnly
     val optimism = ctl.optimism
     var marquee by remember { mutableStateOf<Rect?>(null) }
     var addMenu by remember { mutableStateOf(false) }
@@ -545,17 +548,28 @@ fun CanvasScreen(
         // The 7-pill toolbar rides BOTH states (the example page shows it over the
         // stack preview); tap-needing modes (＋/✎/⌘) auto-switch to Board above.
         val selCount = ctl.selection.size
-        Row(
+        Column(
             Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = if (compact) 16.dp else 24.dp)
                 .zIndex(10f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            writeReason?.let {
+                Text(
+                    it,
+                    fontSize = 10.5.sp,
+                    color = LocalMaestriColors.current.secondaryLabel,
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+            Row(
                 horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                GlassPill("＋", "Add node", false, true, false, onClick = { addMenu = true; viewMode = CanvasViewMode.Board })
+                GlassPill("＋", "Add node", false, canWrite, false, onClick = { addMenu = true; viewMode = CanvasViewMode.Board })
                 GlassPill(
-                    "✎", "Draw with one finger", penActive, true, false, liftOnActive = compact,
+                    "✎", "Draw with one finger", penActive, canWrite, false, liftOnActive = compact,
                     onClick = {
                         penActive = !penActive
                         ctl.enterMode(CanvasMode.Idle)
@@ -565,7 +579,7 @@ fun CanvasScreen(
                 GlassPill(
                     "⌘", "Tie two ropes",
                     if (compact) ctl.mode is CanvasMode.TieLinking else false,
-                    (canvas?.connections?.size ?: 0) >= 1,
+                    canWrite && (canvas?.connections?.size ?: 0) >= 1,
                     false,
                     liftOnActive = compact,
                     onClick = {
@@ -574,9 +588,9 @@ fun CanvasScreen(
                         viewMode = CanvasViewMode.Board
                     },
                 )
-                GlassPill("⌫", "Erase last drawing", false, true, false, onClick = { ctl.eraseLastDrawing() })
+                GlassPill("⌫", "Erase last drawing", false, canWrite, false, onClick = { ctl.eraseLastDrawing() })
                 GlassPill(
-                    "◐", "Change color", false, selCount > 0, false,
+                    "◐", "Change color", false, canWrite && selCount > 0, false,
                     onClick = {
                         val node = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }
                         ctl.colorFor = node?.groupId?.let { ColorTarget.Group(it) }
@@ -584,7 +598,7 @@ fun CanvasScreen(
                     },
                 )
                 GlassPill(
-                    "⊞", "Group or rename group", true, selCount > 0, false,
+                    "⊞", "Group or rename group", true, canWrite && selCount > 0, false,
                     onClick = {
                         val sel = canvas?.nodes?.filter { ctl.selection.containsKey(it.id) }.orEmpty()
                         val gid = sel.firstOrNull()?.groupId
@@ -593,10 +607,11 @@ fun CanvasScreen(
                     },
                 )
                 GlassPill(
-                    "✕", CanvasStrings.deleteSelectedNodes, false, selCount > 0, true,
+                    "✕", CanvasStrings.deleteSelectedNodes, false, canWrite && selCount > 0, true,
                     onClick = { ctl.askDelete(ctl.selection.keys.toList()) },
                 )
             }
+        }
         if (viewMode == CanvasViewMode.Stack) {
             // ── Stack state (primary): single-column node cards + board preview strip (spec §4)
             Column(
@@ -647,6 +662,7 @@ fun CanvasScreen(
             NodeContextMenu(
                 node = node,
                 connections = canvas?.connections.orEmpty(),
+                writeDisabledReason = writeReason,
                 onDismiss = { ctl.menuFor = null },
                 onUngroup = {
                     ctl.menuFor = null
@@ -682,6 +698,7 @@ fun CanvasScreen(
         tieMenu?.let { tie ->
             TieContextMenu(
                 onDismiss = { tieMenu = null },
+                writeDisabledReason = writeReason,
                 onCut = {
                     ctl.cutTie(tie.id)
                     tieMenu = null

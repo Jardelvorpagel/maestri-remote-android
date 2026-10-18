@@ -1053,8 +1053,10 @@ fun NodeContextMenu(
     // design-v2 modern: the floating toolbar's ⊞ pill is group-or-rename; UNGROUP
     // rides here so the 7-pill spec toolbar loses no action.
     onUngroup: (() -> Unit)? = null,
+    writeDisabledReason: String? = null,
 ) {
     val mine = connections.filter { it.fromNodeId == node.id || it.toNodeId == node.id }
+    val itemsEnabled = writeDisabledReason == null
     MenuCard(onDismiss) {
         Text(
             node.title.ifBlank { node.kind },
@@ -1062,15 +1064,23 @@ fun NodeContextMenu(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
         )
-        MenuItem(CanvasStrings.rename, onRename)
-        if (onEditText != null) MenuItem("Edit text", onEditText)
-        MenuItem(if (node.isNodeLocked) "Unlock" else "Lock", onLock)
-        MenuItem("Duplicate", onDuplicate)
-        if (onUngroup != null && node.groupId != null) MenuItem(CanvasStrings.ungroup + " · " + (node.groupId ?: ""), onUngroup)
-        MenuItem(CanvasStrings.connectToAnotherNode, onConnect)
-        if (mine.size > 1) MenuItem(CanvasStrings.removeAllConnections, onDisconnectAll)
-        MenuItem(CanvasStrings.removeConnection, onDisconnectAll)
-        MenuItem("Delete", onDelete)
+        MenuItem(CanvasStrings.rename, onRename, itemsEnabled)
+        if (onEditText != null) MenuItem("Edit text", onEditText, itemsEnabled)
+        MenuItem(if (node.isNodeLocked) "Unlock" else "Lock", onLock, itemsEnabled)
+        MenuItem("Duplicate", onDuplicate, itemsEnabled)
+        if (onUngroup != null && node.groupId != null) MenuItem(CanvasStrings.ungroup + " · " + (node.groupId ?: ""), onUngroup, itemsEnabled)
+        MenuItem(CanvasStrings.connectToAnotherNode, onConnect, itemsEnabled)
+        if (mine.size > 1) MenuItem(CanvasStrings.removeAllConnections, onDisconnectAll, itemsEnabled)
+        MenuItem(CanvasStrings.removeConnection, onDisconnectAll, itemsEnabled)
+        MenuItem("Delete", onDelete, itemsEnabled)
+        writeDisabledReason?.let {
+            Text(
+                it,
+                fontSize = 10.5.sp,
+                color = LocalMaestriColors.current.secondaryLabel,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
     }
 }
 
@@ -1079,10 +1089,19 @@ fun NodeContextMenu(
 fun TieContextMenu(
     onDismiss: () -> Unit,
     onCut: () -> Unit,
+    writeDisabledReason: String? = null,
 ) {
     MenuCard(onDismiss) {
         Text("Tie", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        MenuItem("Cut the tie", onCut)
+        MenuItem("Cut the tie", onCut, writeDisabledReason == null)
+        writeDisabledReason?.let {
+            Text(
+                it,
+                fontSize = 10.5.sp,
+                color = LocalMaestriColors.current.secondaryLabel,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
     }
 }
 
@@ -1100,14 +1119,19 @@ private fun MenuCard(onDismiss: () -> Unit, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun MenuItem(label: String, onClick: () -> Unit) {
+private fun MenuItem(label: String, onClick: () -> Unit, enabled: Boolean = true) {
     Box(
         Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
+            .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        Text(label, fontSize = 14.sp, maxLines = 1)
+        Text(
+            label,
+            fontSize = 14.sp,
+            maxLines = 1,
+            color = if (enabled) Color.Unspecified else LocalMaestriColors.current.secondaryLabel.copy(alpha = 0.4f),
+        )
     }
 }
 

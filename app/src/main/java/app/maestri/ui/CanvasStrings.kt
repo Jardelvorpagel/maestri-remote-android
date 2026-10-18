@@ -132,4 +132,5 @@ object CanvasStrings {
     const val searchThisWorkspace2 = "Search this workspace"
     const val showsThisPage = "Shows this page"
     const val showsTheRepositorySChanges = "Shows the repository's changes"
+    const val guestReadsOnly = "guest · reads only"
 }
