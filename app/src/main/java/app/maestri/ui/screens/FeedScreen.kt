@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,6 +89,9 @@ fun FeedScreen(
     onOpenTerminal: (terminalId: String, terminalName: String) -> Unit,
     onOpenFloors: () -> Unit = {},
 ) {
+    // v2.1 phone-compact (frame 02, todo #45): below 480dp the header/chips/rows follow
+    // the artifact; above, the tablet arrangement is byte-identical (compact == false).
+    val compact = LocalConfiguration.current.screenWidthDp < 480
     val scope = rememberCoroutineScope()
     val snapshot by session.feed.snapshot.collectAsState()
     val socketState by session.feed.state.collectAsState()
@@ -196,6 +200,7 @@ fun FeedScreen(
                     label = f.label,
                     selected = filter == f,
                     onClick = { filter = f },
+                    compact = compact,
                 )
             }
         }
@@ -278,6 +283,7 @@ fun FeedScreen(
                         first = i == 0 && !showBanner,
                         session = session,
                         scope = scope,
+                        compact = compact,
                     )
                 }
 
@@ -446,6 +452,7 @@ private fun FeedFilterChip(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
+    compact: Boolean = false,
 ) {
     val c = LocalMaestriColors.current
     // `.tchip` / `.tchip.on`: glass pill + hairline ring; active = terracotta 55 % ring
@@ -453,19 +460,28 @@ private fun FeedFilterChip(
     // the heavy touch traffic).
     Box(
         Modifier
-            .heightIn(min = 32.dp)
-            .border(1.dp, if (selected) c.accent.copy(alpha = 0.55f) else c.hairline, pillShape())
+            .heightIn(min = if (compact) 30.dp else 32.dp)
+            .border(
+                1.dp,
+                if (selected) c.accent.copy(alpha = 0.55f) else c.hairline,
+                pillShape(),
+            )
             .background(c.glass, pillShape())
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = if (compact) 14.dp else 12.dp)
+            .padding(vertical = if (compact) 8.dp else 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
             fontFamily = MaestriType.Mono,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (selected) c.accent else monoMetaColor(),
+            fontSize = if (compact) 11.5.sp else 11.sp,
+            fontWeight = if (compact) FontWeight.Normal else FontWeight.SemiBold,
+            color = if (selected) {
+                if (compact) Palette.TerracottaLight else c.accent  // .on = accent-hi on phone
+            } else {
+                monoMetaColor()
+            },
         )
     }
 }
@@ -483,23 +499,29 @@ private fun FeedEventRow(
     first: Boolean,
     session: WireSession,
     scope: kotlinx.coroutines.CoroutineScope,
+    compact: Boolean = false,
 ) {
     if (!first) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(LocalMaestriColors.current.hairline))
+        // frame 02: separators run --hair (.10) on phone; tablet keeps the ring hairline
+        Box(
+            Modifier.fillMaxWidth().height(1.dp).background(
+                if (compact) LocalMaestriColors.current.separator else LocalMaestriColors.current.hairline,
+            ),
+        )
     }
     when (row) {
         is FeedRow.Item -> when (val item = row.item) {
             is FeedItem.TerminalFeedItem ->
-                TerminalEventRow(item.terminal, time, onOpen)
+                TerminalEventRow(item.terminal, time, onOpen, compact)
             is FeedItem.PendingPromptFeedItem ->
-                PendingPromptEventRow(item.terminal, item.prompt, arrival = time, onOpen = onOpen, session = session, scope = scope)
+                PendingPromptEventRow(item.terminal, item.prompt, arrival = time, onOpen = onOpen, session = session, scope = scope, compact = compact)
             is FeedItem.NoteFeedItem ->
-                NoteEventRow(item.note, time)
+                NoteEventRow(item.note, time, compact)
             is FeedItem.UnknownFeedItem ->
-                UnknownEventRow(item, time)
+                UnknownEventRow(item, time, compact)
         }
-        is FeedRow.FloorEvent -> FloorEventRow(row.floor, row.event, time, onOpenFloors)
-        is FeedRow.PendingBuild -> PendingBuildRow(row.build, time, onOpenFloors)
+        is FeedRow.FloorEvent -> FloorEventRow(row.floor, row.event, time, onOpenFloors, compact)
+        is FeedRow.PendingBuild -> PendingBuildRow(row.build, time, onOpenFloors, compact)
     }
 }
 
@@ -512,6 +534,7 @@ private fun RowScaffold(
     meta: (@Composable () -> Unit)? = null,
     body: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
+    compact: Boolean = false,
 ) {
     val clickMod = onClick?.let { Modifier.clickable(onClick = it) } ?: Modifier
     Row(
@@ -533,7 +556,7 @@ private fun RowScaffold(
         Text(
             time,
             fontFamily = MaestriType.Mono,
-            fontSize = 11.sp,
+            fontSize = if (compact) 11.5.sp else 11.sp,  // frame 02 .v = mono 11.5
             color = if (time.isBlank()) Color.Transparent else MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
         )
@@ -546,6 +569,7 @@ private fun TerminalEventRow(
     t: TerminalCard,
     time: String,
     onOpen: (terminalId: String, terminalName: String) -> Unit,
+    compact: Boolean = false,
 ) {
     val c = LocalMaestriColors.current
     RowScaffold(
@@ -576,6 +600,7 @@ private fun TerminalEventRow(
             )
         },
         onClick = { onOpen(t.id, t.name) },
+        compact = compact,
     )
 }
 
@@ -612,6 +637,7 @@ private fun PendingPromptEventRow(
     onOpen: (terminalId: String, terminalName: String) -> Unit,
     session: WireSession,
     scope: kotlinx.coroutines.CoroutineScope,
+    compact: Boolean = false,
 ) {
     var busy by remember(t.id) { mutableStateOf(false) }
     var fail by remember(t.id) { mutableStateOf<String?>(null) }
@@ -703,11 +729,12 @@ private fun PendingPromptEventRow(
             }
         },
         onClick = { onOpen(t.id, t.name) },
+        compact = compact,
     )
 }
 
 @Composable
-private fun NoteEventRow(n: NoteCard, time: String) {
+private fun NoteEventRow(n: NoteCard, time: String, compact: Boolean) {
     val noteMeta: String = listOf(n.floorName, n.preview.firstOrNull()?.trim()?.takeIf { it.isNotBlank() })
         .filterNotNull()
         .joinToString(" · ")
@@ -731,11 +758,12 @@ private fun NoteEventRow(n: NoteCard, time: String) {
         } else {
             null
         },
+        compact = compact,
     )
 }
 
 @Composable
-private fun UnknownEventRow(item: FeedItem.UnknownFeedItem, time: String) {
+private fun UnknownEventRow(item: FeedItem.UnknownFeedItem, time: String, compact: Boolean) {
     val subtitle: String? = item.title
     RowScaffold(
         dot = Palette.StoneGray,
@@ -763,6 +791,7 @@ private fun UnknownEventRow(item: FeedItem.UnknownFeedItem, time: String) {
                 )
             }
         },
+        compact = compact,
     )
 }
 
@@ -773,6 +802,7 @@ private fun FloorEventRow(
     event: FloorEventKind,
     time: String,
     onOpenFloors: () -> Unit,
+    compact: Boolean = false,
 ) {
     val c = LocalMaestriColors.current
     val dot: Color
@@ -842,6 +872,7 @@ private fun FloorEventRow(
             null
         },
         onClick = onOpenFloors,
+        compact = compact,
     )
 }
 
@@ -867,7 +898,7 @@ private fun pullCaption(f: FloorMeta): String? {
 
 /** P4-A pending floor build — real progress from pendingFloors, surfaced in floors/PR filters. */
 @Composable
-private fun PendingBuildRow(p: PendingFloorMeta, time: String, onOpenFloors: () -> Unit) {
+private fun PendingBuildRow(p: PendingFloorMeta, time: String, onOpenFloors: () -> Unit, compact: Boolean = false) {
     val c = LocalMaestriColors.current
     RowScaffold(
         dot = if (p.error != null) c.danger else c.warning,
@@ -897,6 +928,7 @@ private fun PendingBuildRow(p: PendingFloorMeta, time: String, onOpenFloors: () 
             )
         },
         onClick = onOpenFloors,
+        compact = compact,
     )
 }
 
