@@ -456,7 +456,12 @@ fun TerminalScreen(
             PreviewPanel(card)
         }
 
-        if (!fullscreen) {
+        // todo #58: the agent prompt composer belongs to the Preview face — Live already
+        // has the terminal composer + rail, and stacking both stranded "Prompt to the
+        // agent…" under the rail with a focus ring (reno_termbox). Pre-#42 rendered it on
+        // both faces (a922c8a:356 gated fullscreen-only, 361cbef:282 unconditional) — that
+        // both-faces state IS the reported duplicate, so history keeps no other owner.
+        if (!live && !fullscreen) {
             Spacer(Modifier.height(12.dp))
             PromptComposer(
                 value = promptText,
