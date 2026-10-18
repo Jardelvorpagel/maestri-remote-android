@@ -237,7 +237,7 @@ fun LiveTerminalView(
                 Button(
                     onClick = {
                         if (input.isNotEmpty()) {
-                            onInput(input)
+                            onInput(input + "\r")
                             input = ""
                         }
                     },
