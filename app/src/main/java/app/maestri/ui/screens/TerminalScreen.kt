@@ -4,15 +4,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -92,6 +95,7 @@ private val TERMLIB_TOKYO_NIGHT = intArrayOf(
  *  - resize requests are clamped to 20..250 cols × 5..120 rows
  *  - prompt/approve/reject clear attention on the host; 409s surface as inline notices
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TerminalScreen(
     session: WireSession,
@@ -272,6 +276,7 @@ fun TerminalScreen(
             ?.filterIsInstance<FeedItem.PendingPromptFeedItem>()
             ?.firstOrNull { it.terminal.id == terminalId }?.prompt
 
+    val imeUp = WindowInsets.isImeVisible
     // todo #57: edge-to-edge + adjustResize delivers the IME as an inset — the window does
     // NOT shrink (reno_kb2 proves it: the viewport extends under Gboard) — so the screen
     // consumes it here. One shared fix lifting the Live input + rail AND the agent prompt
@@ -444,7 +449,7 @@ fun TerminalScreen(
             Text(it, color = LocalMaestriColors.current.warning, fontSize = 12.sp)
         }
 
-        if (!fullscreen) {
+        if (!fullscreen && !imeUp) {
         Spacer(Modifier.height(10.dp))
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(

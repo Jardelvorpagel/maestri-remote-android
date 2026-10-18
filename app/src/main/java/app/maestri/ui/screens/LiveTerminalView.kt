@@ -158,7 +158,8 @@ fun LiveTerminalView(
     val cols = geometry?.cols ?: 80
 
     Column(modifier) {
-        if (!fullscreen) {
+        val imeOpen = WindowInsets.isImeVisible
+        if (!fullscreen && !imeOpen) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.width(60.dp)) { ConnChip(state, error) }
                 Text(
@@ -180,7 +181,6 @@ fun LiveTerminalView(
         // longer fits above the composer, so the viewport flexes (weight) while the IME
         // padding at the screen root lifts the whole bottom bar. Keyboard closed — or
         // fullscreen, which already flexes — resolves to the exact previous modifiers.
-        val imeOpen = WindowInsets.isImeVisible
         val bodyModifier = if (fullscreen || imeOpen) {
             Modifier.fillMaxWidth().weight(1f)
         } else {
