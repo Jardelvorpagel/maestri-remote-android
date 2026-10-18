@@ -355,7 +355,7 @@ private fun RoutineCard(
             Spacer(Modifier.height(4.dp))
             Text(
                 scheduleLine(routine),
-                style = monoHud(10.5, color = Palette.StoneGray),
+                style = monoHud(11, color = Palette.StoneGray),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -363,7 +363,7 @@ private fun RoutineCard(
             Text(
                 targetLine(routine, target) + " · fired ×${routine.fireCount}" +
                     (routine.lastFiredAt?.let { " · last ${timeLine(it)}" } ?: ""),
-                style = monoHud(10.5, color = Palette.StoneGray),
+                style = monoHud(11, color = Palette.StoneGray),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -396,14 +396,14 @@ private fun FireRecordRow(f: FireRecord) {
             Spacer(Modifier.width(8.dp))
             Text(
                 f.outcome,
-                style = monoHud(10.5, color = outcomeColor(f.outcome, c)),
+                style = monoHud(11, color = outcomeColor(f.outcome, c)),
             )
         }
         Row {
             Text(
                 (f.firedAt?.let { timeLine(it) } ?: "") +
                     (f.terminalName?.let { " · → $it" } ?: ""),
-                style = monoHud(10.5, color = Palette.StoneGray),
+                style = monoHud(11, color = Palette.StoneGray),
             )
         }
         if (f.prompt.isNotBlank()) {
@@ -718,7 +718,7 @@ private fun RoutineSheet(
             if (editing != null && editing.schedule.kind == "weekly") {
                 Text(
                     "host sent: ${scheduleLine(editing)}",
-                    style = monoHud(10.5, color = Palette.StoneGray),
+                    style = monoHud(11, color = Palette.StoneGray),
                     modifier = Modifier.padding(start = 14.dp, bottom = 6.dp),
                 )
             }
