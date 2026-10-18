@@ -129,7 +129,7 @@ fun PairingScreen(
         ) {
             if (cancelNow != null) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { cancelNow() }) { Text("Close") }
+                    TextButton(onClick = { if (!busy) cancelNow() }, enabled = !busy) { Text("Close") }
                 }
                 Spacer(Modifier.height(18.dp))
             }
