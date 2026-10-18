@@ -1306,6 +1306,7 @@ private fun CanvasPortalNode(
     }
 }
 
+@Composable
 private fun portalDotColor(portal: CanvasPortal): Color = when (portal.runtime) {
     "ready", "live" -> LiveGreen
     "loading" -> LocalMaestriColors.current.warning
