@@ -143,14 +143,7 @@ fun CanvasScreen(
     val ctl = remember(session, wsId, scope) { CanvasWriteController(session, scope, wsId) }
     val caps = session.serverInfo
     val canWrite = caps?.has("canvasWrite") == true && caps?.role == "owner"
-    // N5 (round 3): the caption states only what the app knows — the guest role when it
-    // says guest, the host's own capability answer otherwise, nothing when nothing was heard.
-    val writeReason = when {
-        canWrite -> null
-        caps?.role == "guest" -> CanvasStrings.guestReadsOnly
-        caps != null -> CanvasStrings.readsOnlyHost
-        else -> CanvasStrings.readsOnly
-    }
+    val writeReason = CanvasStrings.writeGateReason(canWrite, caps)
     val optimism = ctl.optimism
     var marquee by remember { mutableStateOf<Rect?>(null) }
     var addMenu by remember { mutableStateOf(false) }

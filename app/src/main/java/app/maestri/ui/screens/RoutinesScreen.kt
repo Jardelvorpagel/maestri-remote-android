@@ -112,7 +112,7 @@ fun RoutinesScreen(
     // sits disabled-with-reason; the host answers 403 regardless (defense in depth).
     val caps = session.serverInfo
     val canWrite = caps?.has("routines") == true && caps?.role == "owner"
-    val writeReason = if (canWrite) null else app.maestri.ui.CanvasStrings.guestReadsOnly
+    val writeReason = app.maestri.ui.CanvasStrings.writeGateReason(canWrite, caps)
 
     fun load() {
         scope.launch {

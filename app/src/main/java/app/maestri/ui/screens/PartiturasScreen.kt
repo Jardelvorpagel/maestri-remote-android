@@ -230,7 +230,7 @@ fun PartiturasScreen(
                             onStamp = { confirmFor = p },
                             stampEnabled = canStamp && !busy && stampWsId != null,
                             stampHint = when {
-                                !canStamp -> app.maestri.ui.CanvasStrings.guestReadsOnly
+                                !canStamp -> app.maestri.ui.CanvasStrings.writeGateReason(canStamp, caps)
                                 stampWsId == null -> "pick a stamp destination first"
                                 else -> null
                             },

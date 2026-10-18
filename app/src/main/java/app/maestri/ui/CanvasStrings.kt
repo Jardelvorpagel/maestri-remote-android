@@ -139,3 +139,18 @@ object CanvasStrings {
     const val readsOnlyHost = "reads only (host)"
     const val readsOnly = "reads only"
 }
+
+/**
+ * Shared three-state disabled-write caption for every capability-gated write screen (round 4,
+ * extracting the canvas N5 shape): the app states only what it knows — the guest role when the
+ * host's answer names one, the host's capability answer otherwise, and nothing at all when
+ * nothing was heard. Compose-free by design so any screen can call it: [caps] is the parsed
+ * `/api/info` (`ServerInfo`), [canWrite] is the CALLER's own gate formula (its capability
+ * family); the strings live in [CanvasStrings].
+ */
+fun writeGateReason(canWrite: Boolean, caps: app.maestri.wire.ServerInfo?): String? = when {
+    canWrite -> null
+    caps?.role == "guest" -> CanvasStrings.guestReadsOnly
+    caps != null -> CanvasStrings.readsOnlyHost
+    else -> CanvasStrings.readsOnly
+}
