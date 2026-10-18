@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.maestri.ui.MaestriTheme
@@ -51,9 +52,12 @@ import app.maestri.ui.notificationsDestination
 import app.maestri.ui.screens.WorkspacesScreen
 import app.maestri.wire.DeepLinkBus
 import app.maestri.wire.session.WireSession
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.withTimeoutOrNull
 import app.maestri.ui.Style.LocalMaestriColors
 
 class MainActivity : FragmentActivity() {
@@ -158,6 +162,32 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                     (activityContext as? ComponentActivity)?.lifecycle?.removeObserver(observer)
                     router.stop()
                 }
+            }
+            // ---- todo #55: last-destination persistence + cold restore (nav host half).
+            // The save observes the back stack (resolved route + args rebuilt from the
+            // entry bundle — DataStore survives process death; SavedStateHandle alone
+            // would not). The one-shot restore runs UNDER the lock gate: the cover
+            // hides everything until unlock, and the restored screen is what unlock
+            // reveals — lock/security semantics untouched.
+            val navRestore = remember { NavRestoreStore(activityContext.applicationContext) }
+            val currentEntry by nav.currentBackStackEntryAsState()
+            LaunchedEffect(currentEntry) {
+                val pattern = currentEntry?.destination?.route ?: return@LaunchedEffect
+                val resolved = restoreResolveRoute(pattern, currentEntry?.arguments)
+                    ?: return@LaunchedEffect
+                navRestore.saveRoute(resolved)
+            }
+            LaunchedEffect(Unit) {
+                // A buffered cold-start deep link (notification tap) always wins: the
+                // settle delay lets its collect navigate first, and the guard below
+                // refuses to clobber it — or any user navigation that already happened.
+                delay(750)
+                if (nav.currentDestination?.route != "workspaces") return@LaunchedEffect
+                val saved = navRestore.awaitRoute()?.takeIf { it.isNotBlank() }
+                    ?: return@LaunchedEffect
+                val target = runCatching { validatedRestoreRoute(session, saved) }.getOrNull()
+                    ?: return@LaunchedEffect
+                runCatching { nav.navigate(target) }
             }
             // v2 chrome: last-visited workspace/terminal feed the 3-tab spine targets.
             var lastWs by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -290,3 +320,53 @@ fun enc(value: String): String = android.net.Uri.encode(value)
 
 /** Decode a nav argument that was URL-encoded by [enc]. */
 fun dec(value: String): String = android.net.Uri.decode(value)
+
+/** Rebuild a resolved route from a destination pattern + its argument bundle.
+ *  The nav library Uri-decodes segments once on parse; re-encoding inverts it
+ *  exactly — including the floors lane's double-encoded values. Null when any
+ *  placeholder has no value (a half-resolved route is never persisted). */
+fun restoreResolveRoute(pattern: String, args: Bundle?): String? {
+    if (args == null) return null
+    val names = Regex("\\{([^}]+)\\}").findAll(pattern).map { it.groupValues[1] }.toList()
+    if (names.isEmpty()) return pattern
+    var out = pattern
+    for (name in names) {
+        val value = args.getString(name) ?: return null
+        out = out.replace("{$name}", android.net.Uri.encode(value))
+    }
+    return out
+}
+
+/** Validate a persisted route against live host state. Returns the route when it
+ *  is safe to navigate, else null — the caller stays on Workspaces, the honest
+ *  fallback for stale ids (deleted workspace/terminal). Never throws; every hop
+ *  is a read-only call on existing session APIs (~16s worst-case budget). */
+suspend fun validatedRestoreRoute(session: WireSession, route: String): String? {
+    val head = route.substringBefore('/')
+    if (head == "workspaces") return null // already the start destination
+    if (head == "settings" || head == "notifications-settings") return route
+    val segs = route.split('/')
+    // Workspace-scoped heads: segment 1 is the id (floors double-encodes it).
+    val wsId = when (head) {
+        "feed", "canvas", "terminal", "chat", "note" ->
+            segs.getOrNull(1)?.let { runCatching { dec(it) }.getOrNull() }
+        "floors" ->
+            segs.getOrNull(1)?.let { runCatching { FloorsNav.decp(it) }.getOrNull() }
+        else -> return null // unknown pattern — never navigate blind
+    } ?: return null
+    val known = withTimeoutOrNull(8000) { runCatching { session.workspaces() }.getOrNull() }
+        ?: return null // offline / unpaired / 401: stay on root; screens show their own states
+    if (known.none { it.id == wsId }) return null // deleted workspace -> honest root
+    if (head == "terminal" || head == "chat") {
+        val terminalId = segs.getOrNull(2)?.let { runCatching { dec(it) }.getOrNull() }
+            ?: return null
+        val pairing = withTimeoutOrNull(8000) {
+            runCatching { session.pairing.first { it != null } }.getOrNull()
+        } ?: return null
+        val cards = withTimeoutOrNull(8000) {
+            runCatching { session.feedOnce(pairing, wsId, null).terminalCards }.getOrNull()
+        } ?: return null
+        if (cards.none { it.id == terminalId }) return null // deleted terminal -> honest root
+    }
+    return route
+}
