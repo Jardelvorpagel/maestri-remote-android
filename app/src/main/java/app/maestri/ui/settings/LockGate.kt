@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.draw.clip
@@ -194,7 +195,10 @@ private fun AppLockCoverPhone(store: AppLockStore, activity: FragmentActivity?, 
                 } else {
                     { }
                 },
-                color = androidx.compose.ui.graphics.Color.Transparent,
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    contentColor = Palette.Ivory,
+                ),
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(MaestriRadii.Card),
                 modifier = Modifier
                     .fillMaxWidth()
