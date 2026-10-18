@@ -50,10 +50,14 @@ import java.util.Locale
  */
 
 private object ChatImageCache {
-    private const val MAX_ENTRIES = 24
+    private const val MAX_CACHE_BYTES = 32L * 1024 * 1024
+    private var usedBytes = 0L
     private val lru = object : LinkedHashMap<String, android.graphics.Bitmap>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.Bitmap>): Boolean =
-            size > MAX_ENTRIES
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.Bitmap>): Boolean {
+            if (usedBytes <= MAX_CACHE_BYTES) return false
+            usedBytes -= eldest.value.byteCount
+            return true
+        }
     }
 
     @Synchronized
@@ -61,12 +65,28 @@ private object ChatImageCache {
 
     @Synchronized
     fun put(url: String, bmp: android.graphics.Bitmap) {
+        lru.remove(url)?.let { usedBytes -= it.byteCount }
         lru[url] = bmp
+        usedBytes += bmp.byteCount
     }
 }
 
+private const val MAX_IMAGE_BYTES = 20L * 1024 * 1024
+
+private fun decodeSampled(bytes: ByteArray, requestW: Int, requestH: Int): android.graphics.Bitmap? {
+    val bounds = android.graphics.BitmapFactory.Options()
+    bounds.inJustDecodeBounds = true
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (bounds.outWidth / (sample * 2) >= requestW && bounds.outHeight / (sample * 2) >= requestH) sample *= 2
+    val opts = android.graphics.BitmapFactory.Options()
+    opts.inSampleSize = sample
+    return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+}
+
 /** GET the image and decode; null on any failure (honest fallback at the call site). */
-internal suspend fun chatImageBitmap(url: String): android.graphics.Bitmap? {
+internal suspend fun chatImageBitmap(url: String, maxDisplayW: Int, maxDisplayH: Int): android.graphics.Bitmap? {
     if (url.isBlank()) return null
     ChatImageCache.get(url)?.let { return it }
     return withContext(Dispatchers.IO) {
@@ -77,9 +97,28 @@ internal suspend fun chatImageBitmap(url: String): android.graphics.Bitmap? {
             conn.instanceFollowRedirects = true
             conn.setRequestProperty("User-Agent", "MaestriAndroid/chat-images")
             if (conn.responseCode !in 200..299) return@runCatching null
-            val bytes = conn.inputStream.use { it.readBytes() }
+            val declared = conn.getHeaderField("Content-Length")?.toLongOrNull() ?: 0L
+            if (declared > MAX_IMAGE_BYTES) {
+                conn.disconnect()
+                return@runCatching null
+            }
+            val out = java.io.ByteArrayOutputStream()
+            conn.inputStream.use {
+                val buf = ByteArray(16 * 1024)
+                var read = 0L
+                while (true) {
+                    val n = it.read(buf)
+                    if (n < 0) break
+                    read += n
+                    if (read > MAX_IMAGE_BYTES) {
+                        conn.disconnect()
+                        return@runCatching null
+                    }
+                    out.write(buf, 0, n)
+                }
+            }
             conn.disconnect()
-            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            decodeSampled(out.toByteArray(), maxDisplayW, maxDisplayH)
         }.getOrNull()
     }?.also { ChatImageCache.put(url, it) }
 }
@@ -91,9 +130,13 @@ internal fun ChatMarkdownImage(url: String, alt: String, modifier: Modifier = Mo
     // 0 = loading, 1 = ok, 2 = failed — honest states, never a broken box
     var state by remember(url) { mutableStateOf(0) }
     var bmp by remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     LaunchedEffect(url) {
         state = 0
-        val b = chatImageBitmap(url)?.asImageBitmap()
+        val maxW = (configuration.screenWidthDp * density.density).toInt().coerceAtMost(1600)
+        val maxH = with(density) { 260.dp.roundToPx() }
+        val b = chatImageBitmap(url, maxW, maxH)?.asImageBitmap()
         if (b != null) {
             bmp = b
             state = 1
