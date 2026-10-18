@@ -200,6 +200,7 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                     ?: return@LaunchedEffect
                 val target = runCatching { validatedRestoreRoute(session, saved) }.getOrNull()
                     ?: return@LaunchedEffect
+                if (nav.currentDestination?.route != "workspaces") return@LaunchedEffect
                 runCatching { nav.navigate(target) }
             }
             // v2 chrome: last-visited workspace/terminal feed the 3-tab spine targets.
