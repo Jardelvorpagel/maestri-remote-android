@@ -441,10 +441,12 @@ fun CanvasScreen(
                         .padding(start = 16.dp, bottom = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    fun meta(t: String) = Text(t, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp)
-                    meta("${canvas.nodes.size} pts · ${snap.floors.size} floors · rope ")
+                    Text(
+                        "${canvas.nodes.size} pts · ${snap.floors.size} floors · rope ",
+                        fontFamily = FontFamily.Monospace, fontSize = 9.5.sp,
+                    )
                     Text("#F0A65E", fontFamily = FontFamily.Monospace, fontSize = 9.5.sp, color = RopeInk)
-                    meta(" · note ")
+                    Text(" · note ", fontFamily = FontFamily.Monospace, fontSize = 9.5.sp)
                     Text("#F5D142", fontFamily = FontFamily.Monospace, fontSize = 9.5.sp, color = NoteYellow)
                 }
             }
@@ -551,38 +553,49 @@ fun CanvasScreen(
                 horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                GlassPill("＋", "Add node", false, true, false) { addMenu = true; viewMode = CanvasViewMode.Board }
-                GlassPill("✎", "Draw with one finger", penActive, true, false, liftOnActive = compact) {
-                    penActive = !penActive
-                    ctl.enterMode(CanvasMode.Idle)
-                    if (penActive) viewMode = CanvasViewMode.Board
-                }
+                GlassPill("＋", "Add node", false, true, false, onClick = { addMenu = true; viewMode = CanvasViewMode.Board })
+                GlassPill(
+                    "✎", "Draw with one finger", penActive, true, false, liftOnActive = compact,
+                    onClick = {
+                        penActive = !penActive
+                        ctl.enterMode(CanvasMode.Idle)
+                        if (penActive) viewMode = CanvasViewMode.Board
+                    },
+                )
                 GlassPill(
                     "⌘", "Tie two ropes",
                     if (compact) ctl.mode is CanvasMode.TieLinking else false,
                     (canvas?.connections?.size ?: 0) >= 1,
                     false,
                     liftOnActive = compact,
-                ) {
-                    penActive = false
-                    ctl.enterMode(CanvasMode.TieLinking(""))
-                    viewMode = CanvasViewMode.Board
-                }
-                GlassPill("⌫", "Erase last drawing", false, true, false) { ctl.eraseLastDrawing() }
-                GlassPill("◐", "Change color", false, selCount > 0, false) {
-                    val node = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }
-                    ctl.colorFor = node?.groupId?.let { ColorTarget.Group(it) }
-                        ?: node?.let { ColorTarget.Node(it) }
-                }
-                GlassPill("⊞", "Group or rename group", true, selCount > 0, false) {
-                    val sel = canvas?.nodes?.filter { ctl.selection.containsKey(it.id) }.orEmpty()
-                    val gid = sel.firstOrNull()?.groupId
-                    if (gid == null) ctl.groupSelected(ctl.selection.keys.toList())
-                    else ctl.groupActionsFor = gid          // already grouped: renames it
-                }
-                GlassPill("✕", CanvasStrings.deleteSelectedNodes, false, selCount > 0, true) {
-                    ctl.askDelete(ctl.selection.keys.toList())
-                }
+                    onClick = {
+                        penActive = false
+                        ctl.enterMode(CanvasMode.TieLinking(""))
+                        viewMode = CanvasViewMode.Board
+                    },
+                )
+                GlassPill("⌫", "Erase last drawing", false, true, false, onClick = { ctl.eraseLastDrawing() })
+                GlassPill(
+                    "◐", "Change color", false, selCount > 0, false,
+                    onClick = {
+                        val node = canvas?.nodes?.firstOrNull { ctl.selection.containsKey(it.id) }
+                        ctl.colorFor = node?.groupId?.let { ColorTarget.Group(it) }
+                            ?: node?.let { ColorTarget.Node(it) }
+                    },
+                )
+                GlassPill(
+                    "⊞", "Group or rename group", true, selCount > 0, false,
+                    onClick = {
+                        val sel = canvas?.nodes?.filter { ctl.selection.containsKey(it.id) }.orEmpty()
+                        val gid = sel.firstOrNull()?.groupId
+                        if (gid == null) ctl.groupSelected(ctl.selection.keys.toList())
+                        else ctl.groupActionsFor = gid          // already grouped: renames it
+                    },
+                )
+                GlassPill(
+                    "✕", CanvasStrings.deleteSelectedNodes, false, selCount > 0, true,
+                    onClick = { ctl.askDelete(ctl.selection.keys.toList()) },
+                )
             }
         if (viewMode == CanvasViewMode.Stack) {
             // ── Stack state (primary): single-column node cards + board preview strip (spec §4)
