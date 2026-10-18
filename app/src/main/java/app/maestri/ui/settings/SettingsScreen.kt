@@ -493,6 +493,7 @@ private fun SettingsPhoneBody(
         }
         Spacer(Modifier.height(16.dp))
 
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
         GroupLabel("SECURITY")
         SettingsGroup {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -635,6 +636,7 @@ private fun SettingsPhoneBody(
         )
         Spacer(Modifier.height(12.dp))
         HostManagedGroup()
+        }
     }
 }
 
