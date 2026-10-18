@@ -616,13 +616,16 @@ class ChatFaceState(
     private val _freshEntryIds = MutableStateFlow<Set<String>>(emptySet())
     val freshEntryIds: StateFlow<Set<String>> = _freshEntryIds
     private val seenEntryIds = LinkedHashSet<String>()
-    private var chatSeeded = false
+    private var seededFor: String? = null
 
     private fun applyFullSnapshot(snap: ChatSnapshot) {
-        if (!chatSeeded) {
-            chatSeeded = true // first (seeding) snapshot: mark nothing incoming
+        if (seededFor != snap.conversationId) {
+            seededFor = snap.conversationId
+            seenEntryIds.clear()
+            snap.entries.takeLast(400).forEach { seenEntryIds.add(it.id) }
+            _freshEntryIds.value = emptySet()
         } else {
-            val freshIds = snap.entries.asSequence().take(6) // newest end of the reverse list
+            val freshIds = snap.entries.takeLast(6)
                 .map { it.id }.filter { it !in seenEntryIds }.toSet()
             if (freshIds.isNotEmpty()) {
                 _freshEntryIds.value = (_freshEntryIds.value + freshIds).toList().takeLast(24).toSet()
