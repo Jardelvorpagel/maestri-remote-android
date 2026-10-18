@@ -46,6 +46,13 @@ object Chrome {
     val tabLabels = listOf("Workspaces", "Feed", "Chat")
 }
 
+/**
+ * `.ipill.press` (v2.1 frame 01): the THUMBED-IN active pill renders at 1.06 — an active-state
+ * scale, not the transient tap, which stays [Motion.PressScale] (0.97). Animation is the
+ * artifact's split: transform 240 ms on the active settle, 150 ms on the tap.
+ */
+private const val ActivePillScale = 1.06f
+
 @Composable
 fun MaestriSpine(
     active: Int,
@@ -134,14 +141,20 @@ fun IconPill(
     active: Boolean = false,
     enabled: Boolean = true,
     destructive: Boolean = false,
+    /** v2.1 frame 01 `.ipill.press`: render [active] thumbed-in at 1.06 (compact legs opt in). */
+    thumbedIn: Boolean = false,
     onClick: () -> Unit,
 ) {
     val c = LocalMaestriColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed) Motion.PressScale else 1f,
-        animationSpec = tween(Motion.Fast, easing = Motion.Ease),
+        targetValue = when {
+            pressed -> Motion.PressScale
+            active && thumbedIn -> ActivePillScale
+            else -> 1f
+        },
+        animationSpec = tween(if (pressed) Motion.Fast else Motion.Slow, easing = Motion.Ease),
         label = "ipill-press",
     )
     val tint = when {

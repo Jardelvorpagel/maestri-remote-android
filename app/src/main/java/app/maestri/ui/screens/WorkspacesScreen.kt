@@ -2,8 +2,10 @@ package app.maestri.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +43,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,12 +58,16 @@ import app.maestri.ui.Style.GlyphOrIcon
 import app.maestri.ui.Style.IconPill
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriRadii
+import app.maestri.ui.Style.Overline
 import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.Rhythm
 import app.maestri.ui.Style.RootTitle
 import app.maestri.ui.Style.cardShape
+import app.maestri.ui.Style.containerShape
 import app.maestri.ui.Style.monoHud
+import app.maestri.ui.Style.pillShape
 import app.maestri.ui.Style.softHalo
+import app.maestri.ui.Style.terracottaGradient
 import app.maestri.ui.Style.warmRing
 import app.maestri.wire.WorkspaceMeta
 import app.maestri.wire.session.WireSession
@@ -133,8 +143,19 @@ fun WorkspacesScreen(
             },
             modifier = Modifier.padding(pad).fillMaxSize(),
         ) {
-            Box(Modifier.fillMaxSize()) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                // v2.1 frame 01 (leg L1): the phone-compact arrangement below 480 dp — glass
+                // thumb floater with the thumbed-in active pill, hero + `ic` radii, `--bg-2`
+                // pill chips, "Live now" well. The >=480 dp arrangement below is untouched.
+                val compact = maxWidth < 480.dp
+                Box(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxSize().statusBarsPadding().padding(Rhythm.Gutter.dp)) {
+                    if (compact) {
+                        CompactNav(
+                            title = "Workspaces",
+                            onAdd = onAddMachine,
+                        )
+                    } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RootTitle(
                             "Workspaces",
@@ -159,12 +180,15 @@ fun WorkspacesScreen(
                             )
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "live · polled 15 s · tap to open the feed",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    }
+                    if (!compact) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "live · polled 15 s · tap to open the feed",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Spacer(Modifier.height(12.dp))
 
                     if (loading && list.isEmpty()) {
@@ -179,9 +203,25 @@ fun WorkspacesScreen(
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.fillMaxSize(),
-                        // clear the thumb action bar + spine (Rhythm.SpineHeight + bar + gap)
-                        contentPadding = PaddingValues(bottom = 132.dp),
+                        // clear the thumb action bar + spine (Rhythm.SpineHeight + bar + gap);
+                        // the compact floater sits higher, so the phone list clears 176.
+                        contentPadding = PaddingValues(bottom = if (compact) 176.dp else 132.dp),
                     ) {
+                        if (compact) {
+                            itemsIndexed(list, key = { _, ws -> ws.id }) { i, ws ->
+                                WorkspaceCard(
+                                    ws = ws,
+                                    onOpen = { onOpenWorkspace(ws.id, ws.name) },
+                                    onLocked = {
+                                        scope.launch { snack.showSnackbar("Workspace locked on the host plan — feed unavailable") }
+                                    },
+                                    onOpenFloors = { onOpenFloors(ws.id, ws.name) },
+                                    compact = true,
+                                    hero = i == 0,
+                                )
+                            }
+                            item { LiveNowWell(list) }
+                        } else {
                         items(list, key = { it.id }) { ws ->
                             WorkspaceCard(
                                 ws = ws,
@@ -192,12 +232,24 @@ fun WorkspacesScreen(
                                 onOpenFloors = { onOpenFloors(ws.id, ws.name) },
                             )
                         }
+                        }
                     }
                 }
 
                 // Thumb action bar (spec frame 01): 4 × 44 pt icon pills, bottom-right,
                 // above the spine. Real affordances wired; unavailable ones disabled with
                 // semantics — never dead-looking-active.
+                if (compact) {
+                    ThumbFloater(
+                        onAddMachine = onAddMachine,
+                        onOpenSettings = onOpenSettings,
+                        onOpenNotifications = onOpenNotifications,
+                        notificationsArmed = notificationsArmed,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 14.dp, end = 14.dp, bottom = 96.dp),
+                    )
+                } else {
                 Row(
                     Modifier
                         .align(Alignment.BottomEnd)
@@ -227,6 +279,134 @@ fun WorkspacesScreen(
                     // in the mock) — no touch equivalent; honest-disabled, mock glyph.
                     HotkeyPill()
                 }
+                }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * v2.1 frame 01 `.ic` tile radius. The artifact literal is 14 px — off the 12/18/24 ramp, so it
+ * lives here as a frame constant rather than in [MaestriRadii] (the shared ramp stays clean).
+ */
+private val CompactIcRadius = 14.dp
+
+/**
+ * v2.1 frame 01 `.lnav` (phone-compact): serif root title on the left, the gradient ＋
+ * (`.act.gr`, 44 pt, terracotta `135deg` ramp) on the right. The phone frame carries no
+ * server/role meta line — settings and notifications live in the thumb floater instead.
+ */
+@Composable
+private fun CompactNav(
+    title: String,
+    onAdd: (() -> Unit)?,
+) {
+    val dark = isSystemInDarkTheme()
+    Row(
+        Modifier.fillMaxWidth().height(56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RootTitle(title, modifier = Modifier.weight(1f))
+        Box(
+            Modifier
+                .size(Rhythm.TouchTarget.dp)
+                .alpha(if (onAdd != null) 1f else 0.4f)
+                .background(Brush.linearGradient(terracottaGradient(dark)), CircleShape)
+                .clickable(enabled = onAdd != null) { onAdd?.invoke() }
+                .semantics { contentDescription = "Pair another computer" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("＋", color = Palette.Ivory, fontSize = 19.sp)
+        }
+    }
+}
+
+/**
+ * v2.1 frame 01 `.floater`: the glass thumb bar floating above the spine — r-26, 10 pt
+ * padding, 4 × 44 pt pills, centred. The ACTIVE pill rides thumbed-in at 1.06
+ * (`.ipill.press`, [IconPill] `thumbedIn`) rather than merely tinted; the mock uses the
+ * state swatch on ＋, the app applies it to whichever pill is genuinely active.
+ * Compose 1.7 cannot blur the backdrop, so the glass is the documented translucency +
+ * hairline + halo (Chrome.kt note).
+ */
+@Composable
+private fun ThumbFloater(
+    onAddMachine: (() -> Unit)?,
+    onOpenSettings: (() -> Unit)?,
+    onOpenNotifications: (() -> Unit)?,
+    notificationsArmed: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val c = LocalMaestriColors.current
+    val floaterRadius = RoundedCornerShape(26.dp)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .softHalo(radius = 26.dp, elevation = 10.dp)
+            .background(c.glass, floaterRadius)
+            .border(1.dp, c.hairline, floaterRadius)
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconPill(
+            glyph = "＋",
+            label = "Pair another computer",
+            enabled = onAddMachine != null,
+            thumbedIn = true,
+            onClick = { onAddMachine?.invoke() },
+        )
+        IconPill(
+            glyph = "⚙",
+            label = "Settings",
+            enabled = onOpenSettings != null,
+            thumbedIn = true,
+            onClick = { onOpenSettings?.invoke() },
+        )
+        IconPill(
+            glyph = "🔔",
+            label = "Notifications",
+            active = notificationsArmed,
+            enabled = onOpenNotifications != null,
+            thumbedIn = true,
+            onClick = { onOpenNotifications?.invoke() },
+        )
+        HotkeyPill()
+    }
+}
+
+/**
+ * v2.1 frame 01 "Live now": `.h2sec` overline + a `--card-2` well (8 pt ok dot, 12.5 pt dim
+ * line, mono count right). Real data only — the busiest workspace by running terminals and
+ * the running total; nothing renders when no terminal is running.
+ */
+@Composable
+private fun LiveNowWell(list: List<WorkspaceMeta>) {
+    val live = list.filter { it.runningTerminalCount > 0 }
+    val top = live.maxByOrNull { it.runningTerminalCount }
+    if (top != null) {
+        val c = LocalMaestriColors.current
+        Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            Overline("Live now", Modifier.padding(start = 2.dp, bottom = 6.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(c.cardSunken, RoundedCornerShape(MaestriRadii.Card))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(8.dp).background(Palette.Success, CircleShape))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "${top.name} · ${top.runningTerminalCount} running",
+                    fontSize = 12.5.sp,
+                    color = c.secondaryLabel,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("${live.sumOf { it.runningTerminalCount }}", style = monoHud(11, color = Palette.StoneGray))
             }
         }
     }
@@ -260,20 +440,29 @@ private fun WorkspaceCard(
     onOpen: () -> Unit,
     onLocked: () -> Unit,
     onOpenFloors: () -> Unit,
+    /** v2.1 compact leg: 16 pt padding, r-14 `ic` tile, `--bg-2` pill chips. */
+    compact: Boolean = false,
+    /** v2.1 frame 01 hero card: r-24 container + soft shadow + accent `ic` tile. */
+    hero: Boolean = false,
 ) {
     val c = LocalMaestriColors.current
-    val chipRadius = RoundedCornerShape(15.dp)
+    val radius = if (hero) MaestriRadii.Container else MaestriRadii.Card
+    val chipRadius = if (compact) pillShape() else RoundedCornerShape(15.dp)
     Box(
         Modifier
             .fillMaxWidth()
             .then(if (ws.isLocked) Modifier.alpha(0.45f) else Modifier)
+            .then(if (hero) Modifier.softHalo(radius = radius, elevation = 10.dp) else Modifier)
             .warmRing(
                 if (ws.attentionCount > 0) c.danger.copy(alpha = 0.55f) else c.hairline,
-                MaestriRadii.Card,
+                radius,
             )
-            .background(c.card, cardShape())
+            .background(c.card, if (hero) containerShape() else cardShape())
             .clickable { if (ws.isLocked) onLocked() else onOpen() }
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(
+                horizontal = if (compact) 16.dp else 14.dp,
+                vertical = if (compact) 16.dp else 12.dp,
+            ),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // 44 pt icon squircle: accent 18–22 % mix + accent glyph. WorkspaceMeta has
@@ -282,12 +471,15 @@ private fun WorkspaceCard(
             Box(
                 Modifier
                     .size(Rhythm.TouchTarget.dp)
-                    .background(c.accentSoft, RoundedCornerShape(MaestriRadii.Control)),
+                    .background(
+                        c.accentSoft,
+                        RoundedCornerShape(if (compact) CompactIcRadius else MaestriRadii.Control),
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 GlyphOrIcon(ws.icon, fontSize = 19.sp, tint = c.accent)
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(if (compact) 14.dp else 12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     ws.name,
@@ -339,8 +531,8 @@ private fun WorkspaceCard(
                 Box(
                     Modifier
                         .defaultMinSize(minHeight = 30.dp)
-                        .softHalo(radius = 15.dp, elevation = 2.dp)
-                        .background(c.glass, chipRadius)
+                        .softHalo(radius = if (compact) 22.dp else 15.dp, elevation = 2.dp)
+                        .background(if (compact) Palette.AmbientRaised else c.glass, chipRadius)
                         .border(1.dp, c.hairline, chipRadius)
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
@@ -351,9 +543,9 @@ private fun WorkspaceCard(
                 // heightIn (visual stays the mock's compact chip inside a taller target).
                 Box(
                     Modifier
-                        .softHalo(radius = 15.dp, elevation = 2.dp)
+                        .softHalo(radius = if (compact) 22.dp else 15.dp, elevation = 2.dp)
                         .heightIn(min = Rhythm.TouchTarget.dp)
-                        .background(c.glass, chipRadius)
+                        .background(if (compact) Palette.AmbientRaised else c.glass, chipRadius)
                         .border(1.dp, c.hairline, chipRadius)
                         .clickable(onClick = onOpenFloors),
                     contentAlignment = Alignment.Center,
