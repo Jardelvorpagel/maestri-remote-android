@@ -3,6 +3,9 @@ package app.maestri.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -203,8 +206,12 @@ fun TerminalScreen(
             ?.firstOrNull { it.terminal.id == terminalId }?.prompt
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { BackLabel("Back") }
+        // Header: responsive below a 480dp breakpoint (todo #42, Reno 411dp case).
+        // The tablet path is the ARRANGEMENT-IDENTICAL row it has always been; the
+        // compact path re-flows chips + controls onto a second, right-aligned row and
+        // gives the Enter-Chat pill a measured minimum width so it renders on one line.
+        val backBtn: @Composable () -> Unit = { TextButton(onClick = onBack) { BackLabel("Back") } }
+        val titleBlock: @Composable RowScope.() -> Unit = {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -232,9 +239,11 @@ fun TerminalScreen(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            ConnChip(feedState, feedError)
-            // Mono workspace chip (design v2 §4-03): floor name when the card carries one,
-            // else the short workspace id — never a styled/serif value.
+        }
+        val connChip: @Composable () -> Unit = { ConnChip(feedState, feedError) }
+        // Mono workspace chip (design v2 §4-03): floor name when the card carries one,
+        // else the short workspace id — never a styled/serif value.
+        val floorChip: @Composable () -> Unit = {
             Text(
                 (card?.floorName?.takeIf { it.isNotBlank() } ?: wsId.take(8)),
                 fontFamily = MaestriType.Mono,
@@ -245,22 +254,80 @@ fun TerminalScreen(
                     .background(LocalMaestriColors.current.canvasSurface, pillShape())
                     .padding(horizontal = 8.dp, vertical = 3.dp),
             )
-            Spacer(Modifier.width(6.dp))
-            // Aa stepper chip: current persisted size, tap = the stepper row.
+        }
+        // Aa stepper chip: current persisted size, tap = the stepper row.
+        val aaStepper: @Composable () -> Unit = {
             TextButton(onClick = { showTypeScale = !showTypeScale }) {
                 Text("Aa $fontSp", fontFamily = MaestriType.Mono, fontSize = 12.sp)
             }
+        }
+        val fullscreenBtn: @Composable () -> Unit = {
             if (live && canStream) {
                 TextButton(onClick = { fullscreen = !fullscreen }) {
                     Text(if (fullscreen) "\u2921" else "\u2922", fontSize = 18.sp)
                 }
             }
+        }
+        // Enter-Chat pill. Tablet: the plain call, UNCHANGED. Compact: a min-width
+        // floor keeps the label on ONE line (12sp "Enter Chat Mode" measures ~117dp
+        // incl. its 12dp side paddings; at larger font scales the loose upper bound
+        // lets it grow instead of wrapping).
+        val chatPill: @Composable () -> Unit = {
             if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
                 app.maestri.ui.screens.EnterChatModeButton(
                     session = session,
                     terminalId = terminalId,
                     onChatReady = { onEnterChat?.invoke(terminalId, terminalName) },
                 )
+            }
+        }
+        val chatPillCapped: @Composable () -> Unit = {
+            if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
+                Box(Modifier.defaultMinSize(minWidth = 128.dp)) {
+                    app.maestri.ui.screens.EnterChatModeButton(
+                        session = session,
+                        terminalId = terminalId,
+                        onChatReady = { onEnterChat?.invoke(terminalId, terminalName) },
+                    )
+                }
+            }
+        }
+        BoxWithConstraints {
+            val compact = maxWidth < 480.dp
+            if (!compact) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    backBtn()
+                    titleBlock()
+                    connChip()
+                    floorChip()
+                    Spacer(Modifier.width(6.dp))
+                    aaStepper()
+                    fullscreenBtn()
+                    chatPill()
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        backBtn()
+                        titleBlock()
+                        connChip()
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        floorChip()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            aaStepper()
+                            fullscreenBtn()
+                            chatPillCapped()
+                        }
+                    }
+                }
             }
         }
 

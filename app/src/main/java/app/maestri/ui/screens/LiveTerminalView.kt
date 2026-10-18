@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -174,15 +175,19 @@ fun LiveTerminalView(
         )
         Spacer(Modifier.height(6.dp))
         // Quickkeys: 44 dp Tokyo-blue tint chips, horizontally scrolling, above the keyboard.
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(Palette.Paper, controlShape())
-                .padding(6.dp)
-                .horizontalScroll(rememberScrollState()),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+        // todo #42 narrow-affordance: the rail overflows ~411dp-wide phones and the last key
+        // sat half-clipped with no cue — the trailing spacer + the right-edge fade (below)
+        // give the horizontal scroll a visible affordance; touch targets stay 44dp.
+        Box(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Palette.Paper, controlShape())
+                    .padding(6.dp)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
             QuickKey("\u23CE", TerminalThemes.TokyoNight.blue) { onInput("\r") }
             QuickKey("\u2303C", TerminalThemes.TokyoNight.blue) { onInput("\u0003") }
             QuickKey("\u2303D", TerminalThemes.TokyoNight.blue) { onInput("\u0004") }
@@ -196,9 +201,24 @@ fun LiveTerminalView(
             QuickKey("\u2193", TerminalThemes.TokyoNight.blue) { onInput("\u001B[B") }
             QuickKey("\u2190", TerminalThemes.TokyoNight.blue) { onInput("\u001B[D") }
             QuickKey("\u2192", TerminalThemes.TokyoNight.blue) { onInput("\u001B[C") }
-            onChat?.let {
-                QuickKey("Chat \u21E2", TerminalThemes.TokyoNight.green, onClick = it)
+                onChat?.let {
+                    QuickKey("Chat \u21E2", TerminalThemes.TokyoNight.green, onClick = it)
+                }
+                Spacer(Modifier.width(4.dp))
             }
+            // Scroll-affordance fade at the rail's right edge (Paper → transparent);
+            // a plain background Box is pointer-transparent — key taps stay live.
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(22.dp)
+                    .height(56.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Palette.Paper.copy(alpha = 0f), Palette.Paper),
+                        ),
+                    ),
+            )
         }
         Spacer(Modifier.height(4.dp))
         val warn = when {
