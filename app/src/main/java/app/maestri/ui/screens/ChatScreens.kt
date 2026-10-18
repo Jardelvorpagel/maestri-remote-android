@@ -631,7 +631,8 @@ class ChatFaceState(
                 _freshEntryIds.value = (_freshEntryIds.value + freshIds).toList().takeLast(24).toSet()
                 seenEntryIds.addAll(freshIds)
                 if (seenEntryIds.size > 400) {
-                    val it = seenEntryIds.iterator(); it.next(); it.remove()
+                    val it = seenEntryIds.iterator()
+                    while (seenEntryIds.size > 400) { it.next(); it.remove() }
                 }
             }
         }
