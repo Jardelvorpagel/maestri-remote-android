@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -268,6 +271,10 @@ fun TerminalScreen(
                 }
             }
         }
+        // Compact-only: breathing room around the expand glyph on the re-flowed row.
+        val fullscreenPadded: @Composable () -> Unit = {
+            Box(Modifier.padding(horizontal = 3.dp)) { fullscreenBtn() }
+        }
         // Enter-Chat pill. Tablet: the plain call, UNCHANGED. Compact: a min-width
         // floor keeps the label on ONE line (12sp "Enter Chat Mode" measures ~117dp
         // incl. its 12dp side paddings; at larger font scales the loose upper bound
@@ -323,7 +330,7 @@ fun TerminalScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             aaStepper()
-                            fullscreenBtn()
+                            fullscreenPadded()
                             chatPillCapped()
                         }
                     }
@@ -484,14 +491,21 @@ private fun PromptComposer(
     sending: Boolean,
 ) {
     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // todo #42 round 2: the composer is the prompt line — single-line with the IME
+        // Send action driving the SAME guarded path as the Send button (hardware Enter
+        // must submit; multi-line entry no longer reachable by keyboard, by design).
         OutlinedTextField(
             value = value,
             onValueChange = onChange,
             placeholder = { Text("Prompt to the agent…") },
             modifier = Modifier.weight(1f),
-            maxLines = 4,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(
+                onSend = { if (!sending && value.isNotBlank()) onSend() },
+            ),
         )
-        Button(onClick = onSend, enabled = !sending && value.isNotBlank()) {
+        Button(onClick = { if (!sending && value.isNotBlank()) onSend() }, enabled = !sending && value.isNotBlank()) {
             Text(if (sending) "…" else "Send")
         }
     }

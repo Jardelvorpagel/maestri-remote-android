@@ -33,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -188,34 +190,39 @@ fun LiveTerminalView(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-            QuickKey("\u23CE", TerminalThemes.TokyoNight.blue) { onInput("\r") }
-            QuickKey("\u2303C", TerminalThemes.TokyoNight.blue) { onInput("\u0003") }
-            QuickKey("\u2303D", TerminalThemes.TokyoNight.blue) { onInput("\u0004") }
-            QuickKey("\u2303L", TerminalThemes.TokyoNight.blue) { onInput("\u000C") }
-            QuickKey("\u2303R", TerminalThemes.TokyoNight.blue) { onInput("\u0012") }
+            QuickKey("\u23CE", "Enter key", TerminalThemes.TokyoNight.blue) { onInput("\r") }
+            QuickKey("\u2303C", "Control C — interrupt", TerminalThemes.TokyoNight.blue) { onInput("\u0003") }
+            QuickKey("\u2303D", "Control D — end of file", TerminalThemes.TokyoNight.blue) { onInput("\u0004") }
+            QuickKey("\u2303L", "Control L — clear screen", TerminalThemes.TokyoNight.blue) { onInput("\u000C") }
+            QuickKey("\u2303R", "Control R — reverse search", TerminalThemes.TokyoNight.blue) { onInput("\u0012") }
             // ⌘ has no PTY encoding; the rail maps ⌘K to Ctrl-K (kill-line), the nearest byte.
-            QuickKey("\u2318K", TerminalThemes.TokyoNight.blue) { onInput("\u000B") }
-            QuickKey("\u21E5", TerminalThemes.TokyoNight.blue) { onInput("\t") }
-            QuickKey("esc", TerminalThemes.TokyoNight.blue) { onInput("\u001B") }
-            QuickKey("\u2191", TerminalThemes.TokyoNight.blue) { onInput("\u001B[A") }
-            QuickKey("\u2193", TerminalThemes.TokyoNight.blue) { onInput("\u001B[B") }
-            QuickKey("\u2190", TerminalThemes.TokyoNight.blue) { onInput("\u001B[D") }
-            QuickKey("\u2192", TerminalThemes.TokyoNight.blue) { onInput("\u001B[C") }
+            QuickKey("\u2318K", "Command K — kill line", TerminalThemes.TokyoNight.blue) { onInput("\u000B") }
+            QuickKey("\u21E5", "Tab key", TerminalThemes.TokyoNight.blue) { onInput("\t") }
+            QuickKey("esc", "Escape key", TerminalThemes.TokyoNight.blue) { onInput("\u001B") }
+            QuickKey("\u2191", "Arrow up", TerminalThemes.TokyoNight.blue) { onInput("\u001B[A") }
+            QuickKey("\u2193", "Arrow down", TerminalThemes.TokyoNight.blue) { onInput("\u001B[B") }
+            QuickKey("\u2190", "Arrow left", TerminalThemes.TokyoNight.blue) { onInput("\u001B[D") }
+            QuickKey("\u2192", "Arrow right", TerminalThemes.TokyoNight.blue) { onInput("\u001B[C") }
                 onChat?.let {
-                    QuickKey("Chat \u21E2", TerminalThemes.TokyoNight.green, onClick = it)
+                    QuickKey("Chat \u21E2", "Switch to chat mode", TerminalThemes.TokyoNight.green, onClick = it)
                 }
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(28.dp))
             }
-            // Scroll-affordance fade at the rail's right edge (Paper → transparent);
-            // a plain background Box is pointer-transparent — key taps stay live.
+            // Scroll-affordance fade at the rail's right edge (round 2: 36dp, ramp
+            // starting at 0.2 so the peeked key reads as dissolving into the paper).
+            // A plain background Box is pointer-transparent — key taps stay live.
             Box(
                 Modifier
                     .align(Alignment.CenterEnd)
-                    .width(22.dp)
+                    .width(36.dp)
                     .height(56.dp)
                     .background(
                         Brush.horizontalGradient(
-                            listOf(Palette.Paper.copy(alpha = 0f), Palette.Paper),
+                            listOf(
+                                Palette.Paper.copy(alpha = 0f),
+                                Palette.Paper.copy(alpha = 0.6f),
+                                Palette.Paper,
+                            ),
                         ),
                     ),
             )
@@ -271,17 +278,19 @@ private fun promptPrefixEnd(line: String): Int {
 }
 
 @Composable
-private fun QuickKey(label: String, tint: Color, onClick: () -> Unit) {
+private fun QuickKey(label: String, desc: String, tint: Color, onClick: () -> Unit) {
     Box(
         Modifier
             .defaultMinSize(minWidth = 44.dp)
             .height(44.dp)
             .background(tint.copy(alpha = 0.16f), pillShape())
             .border(1.dp, tint.copy(alpha = 0.38f), pillShape())
+            .semantics { contentDescription = desc }
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
+        // label glyphs carry no text semantics — [desc] is the accessible/automation name.
         Text(label, fontFamily = MaestriType.Mono, fontSize = 13.sp, color = tint)
     }
 }
