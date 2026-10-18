@@ -51,7 +51,8 @@ import app.maestri.ui.Style.Overline
 import app.maestri.ui.Style.RootTitle
 import app.maestri.ui.Style.MaestriRadii
 import app.maestri.ui.Style.warmRing
-import app.maestri.ui.Style.iconGlyph
+import app.maestri.ui.Style.cardShape
+import app.maestri.ui.iconGlyph
 import app.maestri.ui.Style.monoHud
 import app.maestri.wire.ApiException
 import app.maestri.wire.Partitura
@@ -328,7 +329,7 @@ private fun partituraTint(raw: String?): androidx.compose.ui.graphics.Color {
         ?: MaterialTheme.colorScheme.primary
 }
 
-private fun errLinePt(e: Exception): String = when (e) {
+private fun errLinePt(e: Throwable): String = when (e) {
     is ApiException -> e.message.ifBlank { "HTTP ${e.status}" }
     else -> e.message ?: "network error"
 }
