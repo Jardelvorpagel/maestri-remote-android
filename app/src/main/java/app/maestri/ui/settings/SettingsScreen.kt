@@ -75,6 +75,8 @@ fun SettingsScreen(
     openNotificationsRoute: ((String) -> Unit)? = null,
     /** P5 usage lane: the Usage screen lives at its own route ("usage"). */
     openUsage: (() -> Unit)? = null,
+    /** P5 routines lane: the Routines screen lives at its own route ("routines"). */
+    openRoutines: (() -> Unit)? = null,
 ) {
     val colors = app.maestri.ui.Style.LocalMaestriColors.current
     val scope = rememberCoroutineScope()
@@ -115,6 +117,7 @@ fun SettingsScreen(
                 onOpenGrace = { pickerOpen = true },
                 onNotifications = { openNotificationsRoute?.invoke("notifications-settings") },
                 onUsage = { openUsage?.invoke() },
+                onRoutines = { openRoutines?.invoke() },
                 onOpenAgentPicker = { agentPicker = it },
             )
         } else     Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -198,6 +201,24 @@ fun SettingsScreen(
                 Text("Usage", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
                 Text(
                     "provider limits · live wss",
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Palette.WarmSilver,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+            }
+            DividerHair()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clickable(enabled = openRoutines != null) { openRoutines?.invoke() },
+            ) {
+                Text("Routines", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text(
+                    "scheduled prompts · host scheduler",
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
                     color = Palette.WarmSilver,
@@ -438,6 +459,7 @@ private fun SettingsPhoneBody(
     onOpenGrace: () -> Unit,
     onNotifications: () -> Unit,
     onUsage: (() -> Unit)?,
+    onRoutines: (() -> Unit)?,
     onOpenAgentPicker: (String) -> Unit,
 ) {
     val colors = LocalMaestriColors.current
@@ -516,6 +538,24 @@ private fun SettingsPhoneBody(
                 Text("Usage", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
                 Text(
                     "provider limits · live wss",
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Palette.WarmSilver,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("›", fontSize = 18.sp, color = Palette.WarmSilver)
+            }
+            DividerHair()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .clickable(enabled = onRoutines != null) { onRoutines?.invoke() },
+            ) {
+                Text("Routines", fontSize = 13.5.sp, color = Palette.Ivory, modifier = Modifier.weight(1f))
+                Text(
+                    "scheduled prompts · host scheduler",
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
                     color = Palette.WarmSilver,

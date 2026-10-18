@@ -39,6 +39,8 @@ import app.maestri.ui.screens.PairingScreen
 import app.maestri.ui.screens.PairingMode
 import app.maestri.ui.screens.TerminalScreen
 import app.maestri.ui.screens.UsageNav
+import app.maestri.ui.screens.RoutinesNav
+import app.maestri.ui.screens.routinesDestination
 import app.maestri.ui.screens.usageDestination
 import app.maestri.ui.chatDestinations
 import android.content.Intent
@@ -313,12 +315,16 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                         openNotificationsRoute = { r -> if (nav.graph.findNode(r) != null) nav.navigate(r) },
                         // P5 usage lane: same existence-checked navigation pattern.
                         openUsage = { if (nav.graph.findNode(UsageNav.pattern) != null) nav.navigate(UsageNav.pattern) },
+                        // P5 routines lane: same pattern.
+                        openRoutines = { if (nav.graph.findNode(RoutinesNav.pattern) != null) nav.navigate(RoutinesNav.pattern) },
                     )
                 }
                 chatDestinations(session, nav)
                 notificationsDestination(router)
                 // ── P5 usage lane ───────────────────────────────────────────────────
                 usageDestination(session, pop = { nav.popBackStack() })
+                // ── P5 routines lane ───────────────────────────────────────────────
+                routinesDestination(session, pop = { nav.popBackStack() })
                 // ── P3 floors lane ────────────────────────────────────────────────────
                 // Entry affordances live on WorkspacesScreen rows and the FeedScreen
                 // chips row (both navigate via FloorsNav.link); the floor-chips lane
@@ -364,7 +370,7 @@ fun restoreResolveRoute(pattern: String, args: Bundle?): String? {
 suspend fun validatedRestoreRoute(session: WireSession, route: String): String? {
     val head = route.substringBefore('/')
     if (head == "workspaces") return null // already the start destination
-    if (head == "settings" || head == "notifications-settings" || head == UsageNav.pattern) return route
+    if (head == "settings" || head == "notifications-settings" || head == UsageNav.pattern || head == RoutinesNav.pattern) return route
     val segs = route.split('/')
     // Workspace-scoped heads: segment 1 is the id (floors double-encodes it).
     val wsId = when (head) {
