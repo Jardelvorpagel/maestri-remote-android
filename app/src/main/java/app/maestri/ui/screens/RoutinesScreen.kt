@@ -515,6 +515,22 @@ private fun RoutineSheet(
     val scope = rememberCoroutineScope()
     val targets = targetsRaw.sortedWith(compareBy({ it.workspaceId }, { it.floorName ?: "" }, { it.name }))
 
+    // S3 (round 3): PUT is a full substitution. Editing a routine whose parsed schedule or
+    // end-repeat is docs-typed CANDIDATE (weekly / onDate / any unknown kind) must ride the
+    // parsed shape verbatim on save — read what the host sent, re-send the same shape
+    // untouched — because composing another kind would silently destroy its rhythm. The
+    // schedule sections go read-only in that case; every other field still edits normally.
+    val scheduleLocked = editing?.let { !it.schedule.confirmedWrite } ?: false
+    val endRepeatLocked = editing?.let { !it.endRepeat.confirmedWrite } ?: false
+    val lockedScheduleNote: String? = editing?.takeIf { !it.schedule.confirmedWrite }?.let { e ->
+        "host sent: ${scheduleLine(e)} — schedule is read-only here; save re-sends it unchanged"
+    }
+    val lockedEndRepeatNote: String? = editing?.takeIf { !it.endRepeat.confirmedWrite }?.let { e ->
+        "host sent: end repeat ${e.endRepeat.kind}" +
+            (e.endRepeat.date?.let { d -> " · $d" } ?: "") +
+            " — read-only here; save re-sends it unchanged"
+    }
+
     fun scheduleFor(): RoutineSchedule? = when (kindKey) {
         "once" -> {
             val parsed = parseInstant(atText.trim()) ?: run { error = "unparseable 'at' time — use ISO-8601 (2026-10-18T09:30:00Z)"; null }
@@ -547,8 +563,12 @@ private fun RoutineSheet(
     fun save() {
         error = null
         val editingLocal = editing
-        val schedule = scheduleFor() ?: return
-        val endRepeat = endRepeatFor() ?: return
+        // An existing CANDIDATE schedule/end-repeat round-trips verbatim (S3); the composed
+        // paths below run only for confirmed kinds or a new routine.
+        val schedule =
+            editingLocal?.schedule?.takeIf { !it.confirmedWrite } ?: scheduleFor() ?: return
+        val endRepeat =
+            editingLocal?.endRepeat?.takeIf { !it.confirmedWrite } ?: endRepeatFor() ?: return
         if (name.isBlank()) { error = "name is required (the host 400s an empty name)"; return }
         val terminalId = if (reminderMode) null else {
             targetId ?: run { error = "pick a target terminal"; return }
@@ -663,7 +683,7 @@ private fun RoutineSheet(
             Text("SCHEDULE", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
             ScheduleKindRow(
                 title = "Once at…", selected = kindKey == "once", confirmed = true,
-                onClick = { kindKey = "once" },
+                onClick = { if (!scheduleLocked) kindKey = "once" },
             ) {
                 OutlinedTextField(
                     value = atText,
@@ -675,7 +695,7 @@ private fun RoutineSheet(
             }
             ScheduleKindRow(
                 title = "Daily (wall clock on the host)", selected = kindKey == "daily", confirmed = true,
-                onClick = { kindKey = "daily" },
+                onClick = { if (!scheduleLocked) kindKey = "daily" },
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -698,7 +718,7 @@ private fun RoutineSheet(
             }
             ScheduleKindRow(
                 title = "Interval (every N seconds)", selected = kindKey == "interval", confirmed = true,
-                onClick = { kindKey = "interval" },
+                onClick = { if (!scheduleLocked) kindKey = "interval" },
             ) {
                 OutlinedTextField(
                     value = secondsText,
@@ -719,6 +739,13 @@ private fun RoutineSheet(
             if (editing != null && editing.schedule.kind == "weekly") {
                 Text(
                     "host sent: ${scheduleLine(editing)}",
+                    style = monoHud(11, color = Palette.StoneGray),
+                    modifier = Modifier.padding(start = 14.dp, bottom = 6.dp),
+                )
+            }
+            lockedScheduleNote?.let {
+                Text(
+                    it,
                     style = monoHud(11, color = Palette.StoneGray),
                     modifier = Modifier.padding(start = 14.dp, bottom = 6.dp),
                 )
@@ -751,6 +778,13 @@ private fun RoutineSheet(
                 pendingNote = "docs-typed residue — awaiting live confirmation, not writable here",
                 compact = true,
             )
+            lockedEndRepeatNote?.let {
+                Text(
+                    it,
+                    style = monoHud(11, color = Palette.StoneGray),
+                    modifier = Modifier.padding(start = 14.dp, bottom = 6.dp),
+                )
+            }
 
             Spacer(Modifier.height(12.dp))
             ToggleRow("Notify on fire", notifyOnFire) { notifyOnFire = it }
