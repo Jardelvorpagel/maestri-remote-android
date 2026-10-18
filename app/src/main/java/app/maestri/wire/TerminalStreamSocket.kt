@@ -61,7 +61,9 @@ class TerminalStreamSocket(
     private var term: MiniTerm? = null
     /** Termlib renderer (todo #62): the screen owns one emulator per terminal and
      *  attaches it here; host bytes flow verbatim into `writeInput` (mutex-guarded
-     *  inside the lib, so the socket thread can write directly). Nulled on close. */
+     *  inside the lib, so the socket thread can write directly). The socket never
+     *  detaches it — the screen owns the renderer's lifecycle: attach on every
+     *  stream open, detach on screen dispose. */
     var termlib: TerminalEmulator? = null
 
     /** Tolerant UTF-8 decode: PTY output is usually UTF-8; malformed bytes → U+FFFD. */
@@ -90,7 +92,6 @@ class TerminalStreamSocket(
         _geometry.value = null
         _cursor.value = null
         term = null
-        termlib = null
     }
 
     private fun connect() {
