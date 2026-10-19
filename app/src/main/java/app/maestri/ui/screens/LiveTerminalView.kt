@@ -140,16 +140,20 @@ fun LiveTerminalView(
     // ---- auto-size (todo #62): forcedSize is the grid contract. Phone-compact takes
     // the measured viewport fit (Aa metrics, same numbers as the dialog-prefill report);
     // tablet takes the host geometry verbatim (dialog-owned, byte-identical path).
-    // Fallbacks always resolve to the host grid — never below it — so the library can
-    // never show a window the host isn't drawing. The emulator reports its actual grid
-    // through onResize, which refits the host; that converges instead of looping because
-    // the host echo matches lastSentGrid. Grow freely, never shrink below the host, so
-    // keyboard transients (smaller box, same host) keep the grid stable with no resend.
+    // Rows keep growing to the host — the font-fit floor below keeps every row on
+    // screen. Cols CAP at the measured fit on the phone: a wider host PTY is narrowed
+    // through the same onResize→sendResize refit path (capability-gated, deduped), so
+    // the host's own wrapping reflows instead of the right edge clipping; without the
+    // capability the capped grid letterboxes what fits and the inline notice below
+    // says the tails are unreachable. The emulator reports its actual grid
+    // through onResize; that converges instead of looping because the host echo
+    // matches lastSentGrid. Keyboard transients (smaller box, same host) keep the
+    // grid stable with no resend.
     val liveForced: Pair<Int, Int>? = geometry?.let { host ->
         if (!compact) {
             host.rows to host.cols
         } else if (viewportPx != IntSize.Zero && fitCols >= 20 && fitRows >= 5) {
-            maxOf(fitRows.coerceIn(5, 120), host.rows) to maxOf(fitCols.coerceIn(20, 250), host.cols)
+            maxOf(fitRows.coerceIn(5, 120), host.rows) to minOf(fitCols.coerceIn(20, 250), host.cols)
         } else {
             host.rows to host.cols
         }
@@ -328,6 +332,18 @@ fun LiveTerminalView(
                 color = if (state == SocketState.CLOSED) MaterialTheme.colorScheme.error else LocalMaestriColors.current.warning,
                 fontSize = 11.sp,
             )
+        }
+        val colCapNotice: String? = if (
+            compact && !canResize && viewportPx != IntSize.Zero &&
+            fitCols >= 20 && fitRows >= 5 && geometry != null &&
+            geometry.cols > fitCols.coerceIn(20, 250)
+        ) {
+            "pty ${geometry.cols} cols — wider than this screen; terminal resize is unavailable on this host, so line tails past the edge are unreachable"
+        } else {
+            null
+        }
+        colCapNotice?.let {
+            Text(it, color = LocalMaestriColors.current.warning, fontSize = 11.sp)
         }
     }
 }
