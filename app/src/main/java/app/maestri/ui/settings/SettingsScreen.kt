@@ -80,6 +80,9 @@ fun SettingsScreen(
     openRoutines: (() -> Unit)? = null,
     /** P5 partituras lane: the Partituras screen lives at its own route ("partituras"). */
     openPartituras: (() -> Unit)? = null,
+    /** Live Pi event-stream lane ("live"): caption states the relay state honestly. */
+    openLive: (() -> Unit)? = null,
+    liveRelayCaption: String = "not configured",
 ) {
     val colors = app.maestri.ui.Style.LocalMaestriColors.current
     val scope = rememberCoroutineScope()
@@ -122,6 +125,8 @@ fun SettingsScreen(
                 onUsage = { openUsage?.invoke() },
                 onRoutines = { openRoutines?.invoke() },
                 onPartituras = { openPartituras?.invoke() },
+                onLive = { openLive?.invoke() },
+                liveRelayCaption = liveRelayCaption,
                 onOpenAgentPicker = { agentPicker = it },
             )
         } else     Column(Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp)) {
@@ -242,6 +247,24 @@ fun SettingsScreen(
                 Text("Partituras", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "canvas library · preview + stamp",
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = LocalMaestriColors.current.secondaryLabel,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
+            }
+            DividerHair()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clickable(enabled = openLive != null) { openLive?.invoke() },
+            ) {
+                Text("Live", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                Text(
+                    liveRelayCaption,
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
                     color = LocalMaestriColors.current.secondaryLabel,
@@ -485,6 +508,8 @@ private fun SettingsPhoneBody(
     onUsage: (() -> Unit)?,
     onRoutines: (() -> Unit)?,
     onPartituras: (() -> Unit)?,
+    onLive: (() -> Unit)?,
+    liveRelayCaption: String,
     onOpenAgentPicker: (String) -> Unit,
 ) {
     val colors = LocalMaestriColors.current
@@ -600,6 +625,24 @@ private fun SettingsPhoneBody(
                 Text("Partituras", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                 Text(
                     "canvas library · preview + stamp",
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = LocalMaestriColors.current.secondaryLabel,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
+            }
+            DividerHair()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .clickable(enabled = onLive != null) { onLive?.invoke() },
+            ) {
+                Text("Live", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                Text(
+                    liveRelayCaption,
                     fontSize = 11.5.sp,
                     fontFamily = FontFamily.Monospace,
                     color = LocalMaestriColors.current.secondaryLabel,

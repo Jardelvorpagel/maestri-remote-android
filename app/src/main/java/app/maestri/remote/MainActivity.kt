@@ -55,6 +55,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import app.maestri.ui.ChatNav
+import app.maestri.ui.LiveNav
+import app.maestri.live.DataStorePiRelayStore
 import app.maestri.wire.NotificationsRouter
 import app.maestri.ui.NotificationsNav
 import app.maestri.ui.notificationsDestination
@@ -312,6 +314,8 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                     )
                 }
                 composable("settings") {
+                    val relayStore = remember(activityContext) { DataStorePiRelayStore(activityContext.applicationContext) }
+                    val relayUrl by relayStore.url.collectAsState()
                     SettingsScreen(
                         session = session,
                         appLock = appLock,
@@ -324,6 +328,8 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                         openRoutines = { if (nav.graph.findNode(RoutinesNav.pattern) != null) nav.navigate(RoutinesNav.pattern) },
                         // P5 partituras lane: same pattern.
                         openPartituras = { if (nav.graph.findNode(PartiturasNav.pattern) != null) nav.navigate(PartiturasNav.pattern) },
+                        openLive = { if (nav.graph.findNode(LiveNav.pattern) != null) nav.navigate(LiveNav.route()) },
+                        liveRelayCaption = if (relayUrl.isBlank()) "not configured" else "Pi event stream",
                     )
                 }
                 chatDestinations(session, nav)
@@ -380,7 +386,7 @@ suspend fun validatedRestoreRoute(session: WireSession, route: String): String? 
     val head = route.substringBefore('/')
     if (head == "workspaces") return null // already the start destination
     if (head == "settings" || head == "notifications-settings" || head == UsageNav.pattern
-        || head == RoutinesNav.pattern || head == PartiturasNav.pattern) return route
+        || head == RoutinesNav.pattern || head == PartiturasNav.pattern || head == LiveNav.pattern) return route
     val segs = route.split('/')
     // Workspace-scoped heads: segment 1 is the id (floors double-encodes it).
     val wsId = when (head) {
