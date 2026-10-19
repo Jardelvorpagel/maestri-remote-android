@@ -66,10 +66,13 @@ class TerminalStreamSocket(
      *  stream open, detach on screen dispose. */
     var termlib: TerminalEmulator? = null
 
-    /** Tolerant UTF-8 decode: PTY output is usually UTF-8; malformed bytes → U+FFFD. */
-    private val utf8Decode = Charsets.UTF_8.newDecoder()
-        .onMalformedInput(CodingErrorAction.REPLACE)
-        .onUnmappableCharacter(CodingErrorAction.REPLACE)
+    /** Tolerant UTF-8 decode: PTY output is usually UTF-8; malformed bytes → U+FFFD.
+     *  QA-round-1 fix: this used to be a SHARED stateful CharsetDecoder field — two live
+     *  reader threads (the stranded-socket class: an overwritten ws + its reconnect)
+     *  corrupt the decoder's position state and kill the process with
+     *  CoderMalfunctionError. Now every frame decodes with a FRESH decoder; the field
+     *  is gone. Allocation per binary frame is acceptable (the termlib path already
+     *  byte-copies per frame). */
 
     fun open(targetUrl: String) {
         closedByUs = false
@@ -152,7 +155,10 @@ class TerminalStreamSocket(
                     if (webSocket !== ws) return
                     android.util.Log.d("QATerm", "binary frame ${bytes.size} bytes")
                     termlib?.writeInput(bytes.toByteArray())
-                    val decoded = utf8Decode.decode(ByteBuffer.wrap(bytes.toByteArray())).toString()
+                    val decoded = Charsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPLACE)
+                        .onUnmappableCharacter(CodingErrorAction.REPLACE)
+                        .decode(ByteBuffer.wrap(bytes.toByteArray())).toString()
                     val t = term ?: return
                     t.feed(decoded)
                     _screenText.value = t.render()
