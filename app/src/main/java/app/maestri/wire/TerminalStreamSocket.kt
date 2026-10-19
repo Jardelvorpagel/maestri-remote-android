@@ -94,6 +94,14 @@ class TerminalStreamSocket(
         term = null
     }
 
+    // Ownership guard (QA round-2 teardown fix): every callback must belong to the CURRENT
+    // WebSocket. A stale listener from a replaced/closed connection must not touch shared
+    // state: after the webterm's close(), a late onFailure from the old connection poisoned
+    // _error with "stream failed" (the banner the phone lane saw), and a late onClosed that
+    // raced a reopen (open() resets closedByUs) fired a stray scheduleReconnect, minting a
+    // competing reader that fought the live one over geometry. All five callbacks now bail
+    // unless `webSocket === ws`. Stale frames are simply dropped; the close handshake's
+    // trailing events are inert instead of lies.
     private fun connect() {
         if (closedByUs) return
         val target = url ?: return
@@ -102,6 +110,7 @@ class TerminalStreamSocket(
             Request.Builder().url(target).build(),
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    if (webSocket !== ws) return
                     backoffAttempts = 0
                     _state.value = SocketState.OPEN
                     _error.value = null
@@ -115,6 +124,7 @@ class TerminalStreamSocket(
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    if (webSocket !== ws) return
                     try {
                         val msg = JSONObject(text)
                         when (msg.optString("type")) {
@@ -139,6 +149,7 @@ class TerminalStreamSocket(
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    if (webSocket !== ws) return
                     android.util.Log.d("QATerm", "binary frame ${bytes.size} bytes")
                     termlib?.writeInput(bytes.toByteArray())
                     val decoded = utf8Decode.decode(ByteBuffer.wrap(bytes.toByteArray())).toString()
@@ -149,6 +160,7 @@ class TerminalStreamSocket(
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    if (webSocket !== ws) return
                     _state.value = SocketState.CLOSED
                     _error.value = t.message ?: "stream failed"
                     android.util.Log.d("QATerm", "stream onFailure: ${t.message}")
@@ -157,6 +169,7 @@ class TerminalStreamSocket(
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (webSocket !== ws) return
                     if (!closedByUs) {
                         _state.value = SocketState.CLOSED
                         ws = null
