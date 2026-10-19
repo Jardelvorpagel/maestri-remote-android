@@ -433,6 +433,7 @@ data class Approval(
     val tool: String = "",
     val summary: String = "",
     val argsPreview: String = "",
+    val reason: String = "",
     val status: String = "",
     val decision: String = "",
 )
@@ -451,6 +452,7 @@ fun parseApproval(root: Map<*, *>): Approval? {
         tool = tool,
         summary = root["summary"] as? String ?: "",
         argsPreview = ((root["argsPreview"] as? String ?: "")).take(500),
+        reason = root["reason"] as? String ?: "",
         status = root["status"] as? String ?: "",
         decision = root["decision"] as? String ?: "",
     )

@@ -102,6 +102,12 @@ class PiRelayCommandsTest {
         val flat = parseApproval(parsed("""{"kind":"approval_request","callId":"c2","tool":"bash"}"""))!!
         assertEquals("bash", flat.tool)
         assertEquals("", flat.summary)
+        assertEquals("", flat.reason)
+
+        val withReason = parseApproval(
+            parsed("""{"kind":"approval_request","callId":"c3","reason":"needs network"}"""),
+        )!!
+        assertEquals("needs network", withReason.reason)
 
         assertNull(parseApproval(parsed("""{"kind":"approval_request","tool":"bash"}""")))
     }
