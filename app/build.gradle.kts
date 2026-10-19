@@ -60,4 +60,6 @@ dependencies {
     // todo #62: ConnectBot termlib (Compose terminal renderer, Apache-2.0) — the Live
     // viewport renders the remote PTY byte stream with the real libvterm engine.
     implementation("org.connectbot:termlib:0.3.13")
+    // Pi relay transport tests only: JUnit4 for the JVM unit-test source set.
+    testImplementation("junit:junit:4.13.2")
 }
