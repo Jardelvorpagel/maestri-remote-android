@@ -46,6 +46,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,7 +73,13 @@ import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.controlShape
 import app.maestri.ui.Style.pillShape
 import app.maestri.ui.settings.LocalAppLocked
+import androidx.lifecycle.viewmodel.compose.viewModel
+import app.maestri.live.DataStorePiRelayStore
+import app.maestri.live.LiveFeedContent
+import app.maestri.live.LiveViewModel
+import app.maestri.live.LiveViewModelFactory
 import app.maestri.ui.settings.TerminalFontStore
+import app.maestri.ui.settings.TerminalViewModeStore
 import app.maestri.wire.ChatApi
 import app.maestri.ui.Style.TerminalThemes
 import app.maestri.ui.Style.BackLabel
@@ -105,11 +112,33 @@ fun TerminalScreen(
     wsId: String,
     onBack: () -> Unit,
     onEnterChat: ((String, String) -> Unit)? = null,
+    startView: String? = null,
 ) {
     val scope = rememberCoroutineScope()
     // Aa stepper (design v2 §5.4): persisted 10–20 terminal type scale.
     val ctx = LocalContext.current
     val fontStore = remember(ctx) { TerminalFontStore(ctx.applicationContext) }
+    // View mode (Terminal | Chat) persisted per terminal, same DataStore idiom as
+    // the font store: survives rotation (StateFlow) and re-entry (DataStore).
+    val viewModeStore = remember(ctx) { TerminalViewModeStore(ctx.applicationContext) }
+    val viewMode by viewModeStore.mode(terminalId).collectAsState()
+    val inChat = viewMode == TerminalViewModeStore.CHAT
+    // Deep-link seed (Settings Live row): consumed once per entry so a rotation
+    // after switching back to Terminal does not yank the user into Chat again.
+    var startConsumed by rememberSaveable(terminalId) { mutableStateOf(false) }
+    LaunchedEffect(terminalId, startView) {
+        if (!startConsumed && startView == TerminalViewModeStore.CHAT) {
+            startConsumed = true
+            viewModeStore.setMode(terminalId, TerminalViewModeStore.CHAT)
+        }
+    }
+    // Relay feed VM hoisted above the mode switch: the socket stays open while
+    // flipping Terminal <-> Chat, and the entry-scoped key keeps one VM per terminal.
+    val relayStore = remember(ctx) { DataStorePiRelayStore(ctx.applicationContext) }
+    val liveVm: LiveViewModel = viewModel(
+        key = "live-$terminalId",
+        factory = LiveViewModelFactory(relayStore),
+    )
     val fontSp by fontStore.sizeSp.collectAsState()
     var showTypeScale by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
@@ -199,16 +228,19 @@ fun TerminalScreen(
         }
     }
 
-    LaunchedEffect(live, terminalId, canStream, locked) {
+    LaunchedEffect(live, terminalId, canStream, locked, inChat) {
         // held while locked: no PTY stream starts under the cover; re-lock changes
         // nothing about a stream opened before the lock (the close-on-leave branch
         // below stays the only teardown)
-        if (live && canStream && !locked) {
+        // Chat mode closes the stream too: the grid is detached cleanly (close()
+        // only tears down the socket) while the remembered termlib emulator keeps
+        // every cell, so flipping back re-attaches without a blank frame.
+        if (live && canStream && !locked && !inChat) {
             // attach before open on EVERY reopen: close() must not detach the
             // screen-owned renderer, and nothing else may rely on a stale one
             session.terminalStream.termlib = termlibEmulator
             session.openTerminalStream(terminalId)
-        } else if (!live) session.terminalStream.close()
+        } else if (!live || inChat) session.terminalStream.close()
     }
 
     // Defect 2 (termlib era): the refit trigger moved into the emulator — the
@@ -419,6 +451,29 @@ fun TerminalScreen(
             }
         }
 
+        // View mode: Terminal keeps the renderer below untouched; Chat hosts the Pi
+        // relay feed (settings, event list, decision banner, composer) with its own
+        // scroller. The terminal grid is uncomposed in Chat and its stream closed
+        // above; the remembered emulator retains the grid for a blank-free return.
+        if (!fullscreen) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SegmentedButton(
+                selected = !inChat,
+                onClick = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },
+                shape = SegmentedButtonDefaults.itemShape(0, 2),
+            ) { Text("Terminal") }
+            SegmentedButton(
+                selected = inChat,
+                onClick = { viewModeStore.setMode(terminalId, TerminalViewModeStore.CHAT) },
+                shape = SegmentedButtonDefaults.itemShape(1, 2),
+            ) { Text("Chat") }
+        }
+        Spacer(Modifier.height(10.dp))
+        }
+
+        if (inChat) {
+            LiveFeedContent(liveVm)
+        } else {
         if (showTypeScale && !fullscreen) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -526,6 +581,7 @@ fun TerminalScreen(
                 onSend = ::sendPrompt,
                 sending = sending,
             )
+        }
         }
     }
 }

@@ -268,4 +268,51 @@ class PiRelayClientTest {
             relayAuthFailureMessage(false),
         )
     }
+
+    // ------------------------------------------------------- decision mirror
+
+    @Test
+    fun decisionPromptOpenParses() {
+        val frame = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"open","promptKind":"approve","title":"Run ls?","at":"2026-10-19T00:00:00Z"}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertTrue(frame.prompt.isOpen)
+        assertEquals("Run ls?", frame.prompt.label())
+        assertEquals("approve", frame.prompt.promptKind)
+    }
+
+    @Test
+    fun decisionPromptClosedParses() {
+        val frame = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"closed","promptKind":"approve"}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertFalse(frame.prompt.isOpen)
+    }
+
+    @Test
+    fun decisionPromptLabelFallsBackToKind() {
+        val frame = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"open","promptKind":"deny"}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertEquals("deny", frame.prompt.label())
+    }
+
+    @Test
+    fun decisionPromptBadShapesIgnored() {
+        assertNull(PiRelayParser.parseFrame("""{"kind":"decision_prompt"}"""))
+        assertNull(
+            PiRelayParser.parseFrame(
+                """{"kind":"decision_prompt","decision":{"phase":"maybe","promptKind":"x"}}""",
+            ),
+        )
+    }
+
+    @Test
+    fun decisionPromptNeverParsesAsEvent() {
+        assertNull(
+            PiRelayParser.parseEvent(
+                """{"kind":"decision_prompt","seq":1,"decision":{"phase":"open"}}""",
+            ),
+        )
+    }
 }

@@ -55,7 +55,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import app.maestri.ui.ChatNav
-import app.maestri.ui.LiveNav
 import app.maestri.live.DataStorePiRelayStore
 import app.maestri.wire.NotificationsRouter
 import app.maestri.ui.NotificationsNav
@@ -291,16 +290,22 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                     )
                 }
                 composable(
-                    route = "terminal/{wsId}/{terminalId}/{terminalName}",
+                    route = "terminal/{wsId}/{terminalId}/{terminalName}?view={view}",
                     arguments = listOf(
                         navArgument("wsId") { type = NavType.StringType },
                         navArgument("terminalId") { type = NavType.StringType },
                         navArgument("terminalName") { type = NavType.StringType },
+                        navArgument("view") {
+                            type = NavType.StringType
+                            defaultValue = "terminal"
+                            nullable = true
+                        },
                     ),
                 ) { entry ->
                     val terminalId = entry.arguments?.getString("terminalId") ?: return@composable
                     val terminalName = dec(entry.arguments?.getString("terminalName") ?: "")
                     val wsId = entry.arguments?.getString("wsId") ?: ""
+                    val startView = entry.arguments?.getString("view")
                     LaunchedEffect(terminalId) { lastTerm = Triple(wsId, terminalId, terminalName) }
                     TerminalScreen(
                         session = session,
@@ -308,6 +313,7 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                         terminalName = terminalName,
                         wsId = wsId,
                         onBack = { nav.popBackStack() },
+                        startView = startView,
                         onEnterChat = { chatTerminalId, chatTerminalName ->
                             nav.navigate(ChatNav.route(wsId, chatTerminalId, chatTerminalName))
                         },
@@ -328,7 +334,14 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                         openRoutines = { if (nav.graph.findNode(RoutinesNav.pattern) != null) nav.navigate(RoutinesNav.pattern) },
                         // P5 partituras lane: same pattern.
                         openPartituras = { if (nav.graph.findNode(PartiturasNav.pattern) != null) nav.navigate(PartiturasNav.pattern) },
-                        openLive = { if (nav.graph.findNode(LiveNav.pattern) != null) nav.navigate(LiveNav.route()) },
+                        // Live row deep-links into the last-opened terminal already in Chat
+                        // mode (the feed is a terminal view mode, no separate screen). No
+                        // terminal opened yet in this process: the row is disabled (null).
+                        openLive = lastTerm?.let { lt ->
+                            {
+                                nav.navigate("terminal/${enc(lt.first)}/${enc(lt.second)}/${enc(lt.third)}?view=chat")
+                            }
+                        },
                         liveRelayCaption = if (relayUrl.isBlank()) "not configured" else "Pi event stream",
                     )
                 }
@@ -386,7 +399,7 @@ suspend fun validatedRestoreRoute(session: WireSession, route: String): String? 
     val head = route.substringBefore('/')
     if (head == "workspaces") return null // already the start destination
     if (head == "settings" || head == "notifications-settings" || head == UsageNav.pattern
-        || head == RoutinesNav.pattern || head == PartiturasNav.pattern || head == LiveNav.pattern) return route
+        || head == RoutinesNav.pattern || head == PartiturasNav.pattern) return route
     val segs = route.split('/')
     // Workspace-scoped heads: segment 1 is the id (floors double-encodes it).
     val wsId = when (head) {

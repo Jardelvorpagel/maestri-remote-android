@@ -64,6 +64,13 @@ class PiRelayClient(
     private val _attachments = MutableStateFlow<Map<String, Attachment>>(emptyMap())
     val attachments: StateFlow<Map<String, Attachment>> = _attachments.asStateFlow()
 
+    /**
+     * Pi's own decision box, mirrored: the latest open prompt, null when closed
+     * or never seen. The phone never answers these — no resolver in the API.
+     */
+    private val _decisionPrompt = MutableStateFlow<DecisionPrompt?>(null)
+    val decisionPrompt: StateFlow<DecisionPrompt?> = _decisionPrompt.asStateFlow()
+
     private val lock = Any()
     private var socket: WebSocket? = null
     private var reconnectJob: Job? = null
@@ -102,6 +109,7 @@ class PiRelayClient(
             helloSeen = false
         }
         _commandsSupported.value = null
+        _decisionPrompt.value = null
         synchronized(lock) {
             socket?.close(1000, null)
             socket = null
@@ -288,6 +296,10 @@ class PiRelayClient(
                     _attachments.value = _attachments.value + (a.id to a)
                     relayLog(RELAY_LOG_TAG, "attachment ready id=${a.id.take(16)} bytes=${a.bytes}")
                 }
+            }
+            is RelayFrame.DecisionPromptFrame -> {
+                _decisionPrompt.value = if (frame.prompt.isOpen) frame.prompt else null
+                relayLog(RELAY_LOG_TAG, "decision prompt phase=${frame.prompt.phase} kind=${frame.prompt.promptKind.take(32)}")
             }
         }
     }

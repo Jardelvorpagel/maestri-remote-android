@@ -53,6 +53,7 @@ sealed interface RelayFrame {
     data class ApprovalRequest(val approval: Approval) : RelayFrame
     data class ApprovalResolved(val approval: Approval) : RelayFrame
     data class AttachmentReady(val attachment: Attachment) : RelayFrame
+    data class DecisionPromptFrame(val prompt: DecisionPrompt) : RelayFrame
     data object Ping : RelayFrame
     data object Pong : RelayFrame
     data class ResumeGap(val oldestSeq: Long?) : RelayFrame
@@ -235,6 +236,7 @@ object PiRelayParser {
             "approval_resolved" -> parseApproval(root)?.let(RelayFrame::ApprovalResolved)
             "send_ack" -> parseSendAck(root)?.let(RelayFrame::SendAckFrame)
             "attachment_ready" -> parseAttachment(root)?.let(RelayFrame::AttachmentReady)
+            "decision_prompt" -> parseDecisionPrompt(root)?.let(RelayFrame::DecisionPromptFrame)
             "ping" -> RelayFrame.Ping
             "pong" -> RelayFrame.Pong
             "resume_gap" -> RelayFrame.ResumeGap(oldestSeq = asLong(root["oldestSeq"]))
@@ -246,7 +248,7 @@ object PiRelayParser {
     fun parseEvent(json: String): PiEvent? {
         val root = MiniJson.parse(json) as? Map<*, *> ?: return null
         val kind = root["kind"] as? String ?: return null
-        if (kind == "hello" || kind == "ping" || kind == "pong" || kind == "resume_gap" || kind == "resume") return null
+        if (kind == "hello" || kind == "ping" || kind == "pong" || kind == "resume_gap" || kind == "resume" || kind == "decision_prompt") return null
         return parseEvent(root, kind)
     }
 
@@ -455,6 +457,42 @@ fun parseApproval(root: Map<*, *>): Approval? {
         reason = root["reason"] as? String ?: "",
         status = root["status"] as? String ?: "",
         decision = root["decision"] as? String ?: "",
+    )
+}
+
+// ------------------------------------------------------- decision mirror
+
+/**
+ * Pi's own decision box, mirrored from the host: `open` shows the banner,
+ * `closed` clears it. The phone never answers these — the reply is typed at
+ * Pi's keyboard; the app only mirrors. No resolver exists in the API.
+ */
+data class DecisionPrompt(
+    val phase: String = "",
+    val promptKind: String = "",
+    val title: String = "",
+    val at: String = "",
+)
+
+val DecisionPrompt.isOpen: Boolean get() = phase == "open"
+
+/** Banner headline: title wins, promptKind is the fallback, never blank. */
+fun DecisionPrompt.label(): String =
+    title.ifBlank { promptKind.ifBlank { "decision" } }
+
+/**
+ * Tolerant `decision_prompt` parse: unknown phases yield null (ignored, the
+ * banner keeps its current state); extra fields are ignored.
+ */
+fun parseDecisionPrompt(root: Map<*, *>): DecisionPrompt? {
+    val inner = root["decision"] as? Map<*, *> ?: return null
+    val phase = ((inner["phase"] as? String) ?: "").lowercase()
+    if (phase != "open" && phase != "closed") return null
+    return DecisionPrompt(
+        phase = phase,
+        promptKind = inner["promptKind"] as? String ?: "",
+        title = inner["title"] as? String ?: "",
+        at = inner["at"] as? String ?: "",
     )
 }
 

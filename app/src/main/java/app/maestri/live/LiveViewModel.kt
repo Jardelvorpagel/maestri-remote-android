@@ -142,6 +142,9 @@ class LiveViewModel(
     private val _approvals = MutableStateFlow<Map<String, Approval>>(emptyMap())
     val approvals: StateFlow<Map<String, Approval>> = _approvals
 
+    private val _decisionPrompt = MutableStateFlow<DecisionPrompt?>(null)
+    val decisionPrompt: StateFlow<DecisionPrompt?> = _decisionPrompt
+
     init {
         refreshComposeState()
     }
@@ -175,6 +178,7 @@ class LiveViewModel(
             launch { made.state.collect { _relayState.value = it } }
             launch { made.commandsSupported.collect { refreshComposeState() } }
             launch { made.approvals.collect { _approvals.value = it } }
+            launch { made.decisionPrompt.collect { _decisionPrompt.value = it } }
             launch {
                 made.sendOutcomes.collect { map ->
                     map.values.forEach { outcome ->
@@ -209,6 +213,7 @@ class LiveViewModel(
     fun disconnect() {
         collectJob?.cancel()
         collectJob = null
+        _decisionPrompt.value = null
         runCatching { client?.disconnect() }
         client = null
         if (_relayState.value != RelayState.Disconnected) {

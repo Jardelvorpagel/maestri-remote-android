@@ -6,7 +6,6 @@ import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavType
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import app.maestri.live.LiveRoute
 import app.maestri.ui.screens.ChatThreadScreen
 import app.maestri.wire.session.WireSession
 
@@ -15,12 +14,14 @@ import app.maestri.wire.session.WireSession
  *
  * Registration is ADDITIVE in the app Root: after the terminal composable,
  * call `chatDestinations(nav, session)` (see INTEGRATION in this spec dir).
+ *
+ * The standalone `live` route is retired: the Pi relay feed is a view mode of
+ * TerminalScreen (Terminal | Chat switch, Chat renders LiveFeedContent), so no
+ * separate Live screen exists anymore. Settings' Live row deep-links into the
+ * last-opened terminal already in Chat mode. The LiveNav constant is gone with
+ * it; a stale persisted `live` route fails validation and falls back to
+ * Workspaces (see validatedRestoreRoute).
  */
-object LiveNav {
-    const val pattern = "live"
-    fun route(): String = pattern
-}
-
 object ChatNav {
     const val pattern = "chat/{wsId}/{terminalId}/{terminalName}"
 
@@ -52,8 +53,5 @@ fun NavGraphBuilder.chatDestinations(session: WireSession, nav: NavHostControlle
             terminalName = terminalName,
             onBack = { nav.popBackStack() },
         )
-    }
-    composable(route = LiveNav.pattern) {
-        LiveRoute(onBack = { nav.popBackStack() })
     }
 }
