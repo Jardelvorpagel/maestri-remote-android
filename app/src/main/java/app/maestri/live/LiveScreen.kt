@@ -217,7 +217,7 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
             when {
                 url.isBlank() -> LiveEmpty(
                     title = "No relay configured",
-                    body = "Set the relay URL and token above — nothing connects until then.",
+                    body = "Set the relay URL above — nothing connects until then. Token is optional, only for relays that require one.",
                 )
                 rows.isEmpty() && relayState is RelayState.Open -> LiveEmpty(
                     title = "Waiting for events…",
@@ -359,7 +359,7 @@ private fun RelaySettingsCard(
                 OutlinedTextField(
                     value = token,
                     onValueChange = onToken,
-                    label = { Text("Token", fontSize = 11.sp) },
+                    label = { Text("Token (optional)", fontSize = 11.sp) },
                     textStyle = monoHud(12),
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),

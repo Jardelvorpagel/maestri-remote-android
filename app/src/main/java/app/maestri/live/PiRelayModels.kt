@@ -1,5 +1,7 @@
 package app.maestri.live
 
+import okhttp3.Request
+
 /** Maximum inbound events kept in [PiRelayClient.events]: oldest seqs drop first. */
 const val MAX_BUFFERED_EVENTS = 2000
 
@@ -323,3 +325,21 @@ fun withTokenQuery(url: String, token: String): String {
     }
     return url + sep + "token=" + encoded
 }
+
+/**
+ * Handshake request: no `Authorization` header at all when the token is blank
+ * (never a bare `Bearer `); `?token=` only on the post-401 fallback path.
+ */
+fun buildRelayRequest(url: String, token: String, queryFallback: Boolean): Request {
+    val base = normalizeRelayUrl(url)
+    require(base.isNotBlank()) { "blank relay URL" }
+    val endpoint = if (queryFallback && token.isNotBlank()) withTokenQuery(base, token) else base
+    val builder = Request.Builder().url(endpoint)
+    if (token.isNotBlank()) builder.header("Authorization", "Bearer $token")
+    return builder.build()
+}
+
+/** 401 copy fits both modes: tokenless relays vs a rejected token. */
+fun relayAuthFailureMessage(tokenBlank: Boolean): String =
+    if (tokenBlank) "This relay requires a token (HTTP 401)."
+    else "Relay rejected the token (HTTP 401)."

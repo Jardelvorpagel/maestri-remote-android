@@ -1,6 +1,7 @@
 package app.maestri.live
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -170,15 +171,45 @@ class PiRelayClientTest {
     }
 
     @Test
-    fun unconfiguredClientNeverLeavesDisconnected() {
+    fun blankUrlStaysDisconnectedAndBlankTokenIsConfigured() {
         val noUrl = PiRelayClient("", "tok")
+        assertFalse(noUrl.configured)
         noUrl.connect()
         assertTrue(noUrl.state.value is RelayState.Disconnected)
+        noUrl.disconnect()
 
         val noToken = PiRelayClient("ws://h:1/stream", "")
-        noToken.connect()
-        assertTrue(noToken.state.value is RelayState.Disconnected)
-        noUrl.disconnect()
+        assertTrue(noToken.configured)
         noToken.disconnect()
+    }
+
+    @Test
+    fun blankTokenSendsNoAuthHeader() {
+        val request = buildRelayRequest("ws://h:1/stream", "", false)
+        assertNull(request.header("Authorization"))
+        assertEquals("http://h:1/stream", request.url.toString())
+    }
+
+    @Test
+    fun tokenPresentSendsBearer() {
+        val direct = buildRelayRequest("ws://h:1/stream", "tok", false)
+        assertEquals("Bearer tok", direct.header("Authorization"))
+        assertEquals("http://h:1/stream", direct.url.toString())
+
+        val fallback = buildRelayRequest("ws://h:1/stream", "tok", true)
+        assertEquals("Bearer tok", fallback.header("Authorization"))
+        assertEquals("http://h:1/stream?token=tok", fallback.url.toString())
+    }
+
+    @Test
+    fun authFailureCopyFitsBothModes() {
+        assertEquals(
+            "This relay requires a token (HTTP 401).",
+            relayAuthFailureMessage(true),
+        )
+        assertEquals(
+            "Relay rejected the token (HTTP 401).",
+            relayAuthFailureMessage(false),
+        )
     }
 }

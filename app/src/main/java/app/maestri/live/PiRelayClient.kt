@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -49,7 +48,7 @@ class PiRelayClient(
     private var queryFallback = false
     private var pendingResume: Long? = null
 
-    val configured: Boolean get() = url.isNotBlank() && token.isNotBlank()
+    val configured: Boolean get() = url.isNotBlank()
 
     fun connect() {
         if (!configured) return
@@ -85,16 +84,8 @@ class PiRelayClient(
 
     private fun openSocket() {
         if (!configured || closedByUs || authFailed) return
-        val endpoint = try {
-            val base = normalizeRelayUrl(url)
-            if (base.isBlank()) return
-            if (queryFallback) withTokenQuery(base, token) else base
-        } catch (_: Exception) {
-            _state.value = RelayState.Error("Bad relay URL.")
-            return
-        }
         val request = try {
-            Request.Builder().url(endpoint).header("Authorization", "Bearer $token").build()
+            buildRelayRequest(url, token, queryFallback)
         } catch (_: Exception) {
             _state.value = RelayState.Error("Bad relay URL.")
             return
@@ -191,7 +182,7 @@ class PiRelayClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            if (response?.code == 401 && !queryFallback) {
+            if (response?.code == 401 && !queryFallback && token.isNotBlank()) {
                 queryFallback = true
                 failures = 0
                 reconnectJob?.cancel()
@@ -207,7 +198,7 @@ class PiRelayClient(
                 synchronized(lock) { socket = null }
                 pingJob?.cancel()
                 pingJob = null
-                _state.value = RelayState.Error("Relay rejected the token (HTTP 401).")
+                _state.value = RelayState.Error(relayAuthFailureMessage(token.isBlank()))
                 return
             }
             scheduleReconnect()
