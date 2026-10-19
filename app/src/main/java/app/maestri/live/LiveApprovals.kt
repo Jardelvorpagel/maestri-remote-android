@@ -102,7 +102,7 @@ fun buildApprovalViews(
             callId = approval.callId,
             toolName = approval.tool.takeIf { it.isNotBlank() } ?: "tool",
             argsPreview = approval.argsPreview.take(500),
-            reason = approval.summary.take(500),
+            reason = approval.reason.take(500).ifBlank { approval.summary.take(500) },
             expiresAtMs = null,
             state = state,
             decidedApprove = decided[approval.callId]?.approved,
