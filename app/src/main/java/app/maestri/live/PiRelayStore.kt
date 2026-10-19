@@ -12,8 +12,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.security.KeyStore
@@ -27,7 +27,7 @@ private val Context.piRelayDataStore by preferencesDataStore(name = "maestri_pi_
 /**
  * Pi relay endpoint settings behind Loom's PiRelayStore interface, so LiveViewModel
  * wiring is untouched: the composition swaps InMemoryPiRelayStore for this.
- * Default-off (blank url or token means [PiRelayClient] never dials). Shape mirrors
+ * Default-off (blank url means [PiRelayClient] never dials; the token is optional). Shape mirrors
  * AgentSettingsStore (StateFlow pair + DataStore-backed setters); the token encrypts
  * at rest with an Android Keystore AES-256/GCM key, the PairingStore idiom for
  * secrets — DataStore holds only base64(iv ‖ ciphertext).
@@ -50,9 +50,8 @@ class DataStorePiRelayStore(private val context: Context) : PiRelayStore {
         tokenState.stateIn(scope, SharingStarted.Eagerly, "")
 
     val isConfigured: StateFlow<Boolean> =
-        combine(urlState, tokenState) { url, token ->
-            url.isNotBlank() && token.isNotBlank()
-        }.stateIn(scope, SharingStarted.Eagerly, false)
+        urlState.map { it.isNotBlank() }
+            .stateIn(scope, SharingStarted.Eagerly, false)
 
     init {
         scope.launch {

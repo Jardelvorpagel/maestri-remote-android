@@ -22,7 +22,7 @@ private const val CLIENT_PING_MS = 25_000L
  * Pi relay WebSocket transport (contract v1): `ws(s)://host:port/stream` with an
  * `Authorization: Bearer` header plus a `?token=` fallback after the first 401.
  *
- * Default-off: a blank url or token means [connect] is a no-op — no socket, no
+ * Default-off: a blank url means [connect] is a no-op — no socket, no
  * network, no retry. Inbound text frames route through [PiRelayParser]; anything
  * malformed is ignored and the socket never takes the client down with it.
  */

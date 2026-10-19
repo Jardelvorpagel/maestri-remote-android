@@ -3,6 +3,7 @@ package app.maestri.live
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +44,7 @@ class InMemoryPiRelayStore : PiRelayStore {
 class LiveViewModel(
     private val store: PiRelayStore,
     private val clientFactory: (url: String, token: String) -> PiRelayClient = { url, token -> PiRelayClient(url, token) },
+    private val scope: CoroutineScope? = null,
 ) : ViewModel() {
 
     val url: StateFlow<String> = store.url
@@ -84,16 +86,12 @@ class LiveViewModel(
             _notice.value = "Set the relay URL first — no connection attempted."
             return
         }
-        if (store.token.value.isBlank()) {
-            _notice.value = "Set the relay token first — no connection attempted."
-            return
-        }
         if (client != null) return
         _notice.value = null
         val made = clientFactory(urlValue, store.token.value)
         client = made
         _relayState.value = RelayState.Connecting
-        collectJob = viewModelScope.launch {
+        collectJob = (scope ?: viewModelScope).launch {
             launch { made.state.collect { _relayState.value = it } }
             launch {
                 made.events.collect { list ->
