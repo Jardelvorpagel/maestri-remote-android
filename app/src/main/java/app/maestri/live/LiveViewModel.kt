@@ -66,7 +66,24 @@ data class LivePendingSend(
     val attachments: List<LivePendingAttachment>,
     val status: LiveSendStatus,
     val detail: String = "",
+    val createdAtMs: Long = 0L,
 )
+
+/**
+ * Watchdog sweep (pure): no SENDING row may outlive [timeoutMs] — any stall the
+ * per-send timeout missed still lands FAILED with a Retry hint instead of
+ * sitting on screen as an unreadable stuck bubble.
+ */
+fun sweepStalePending(
+    current: List<LivePendingSend>,
+    nowMs: Long,
+    timeoutMs: Long = SEND_ACK_TIMEOUT_MS,
+): List<LivePendingSend> =
+    current.map {
+        if (it.status == LiveSendStatus.SENDING && nowMs - it.createdAtMs > timeoutMs) {
+            it.copy(status = LiveSendStatus.FAILED, detail = "no send_ack from the relay — tap retry")
+        } else it
+    }
 
 sealed interface LiveComposeState {
     data class Disabled(val reason: String) : LiveComposeState
@@ -187,7 +204,12 @@ class LiveViewModel(
         client = made
         _relayState.value = RelayState.Connecting
         collectJob = (scope ?: viewModelScope).launch {
-            launch { made.state.collect { _relayState.value = it } }
+            launch { made.state.collect {
+                _relayState.value = it
+                // Fresh session, old complaints moot: error-era notices clear the
+                // moment the socket opens (the error strip is state-driven too).
+                if (it is RelayState.Open) _notice.value = null
+            } }
             launch { made.commandsSupported.collect { refreshComposeState() } }
             launch { made.approvals.collect { _approvals.value = it } }
             launch { made.decisionPrompt.collect { _decisionPrompt.value = it } }
@@ -216,6 +238,17 @@ class LiveViewModel(
                     _events.value = list
                     list.lastOrNull()?.seq?.let { lastDeliveredSeq = it }
                     reconcilePending(list)
+                }
+            }
+            // Watchdog ticker: bounds any SENDING stall to timeout + tick even when
+            // no events or acks arrive to trigger the collectors above. Dies with
+            // the session (collectJob scope); the per-send delay stays the fast path.
+            launch {
+                while (true) {
+                    delay(5_000L)
+                    if (_pending.value.any { it.status == LiveSendStatus.SENDING }) {
+                        _pending.value = sweepStalePending(_pending.value, System.currentTimeMillis())
+                    }
                 }
             }
         }
@@ -289,7 +322,7 @@ class LiveViewModel(
         ioScope().launch {
             val attachments = uploadStaged() ?: return@launch
             _staged.value = emptyList()
-            _pending.value = _pending.value + LivePendingSend(id, text, attachments, LiveSendStatus.SENDING)
+            _pending.value = _pending.value + LivePendingSend(id, text, attachments, LiveSendStatus.SENDING, createdAtMs = System.currentTimeMillis())
             val sent = runCatching {
                 target.sendMessage(text, attachments.mapNotNull { it.attachmentId }, id)
             }.isSuccess
@@ -313,7 +346,7 @@ class LiveViewModel(
         val row = _pending.value.firstOrNull { it.clientMsgId == clientMsgId } ?: return
         if (row.status != LiveSendStatus.FAILED) return
         _pending.value = _pending.value.map {
-            if (it.clientMsgId == clientMsgId) it.copy(status = LiveSendStatus.SENDING, detail = "") else it
+            if (it.clientMsgId == clientMsgId) it.copy(status = LiveSendStatus.SENDING, detail = "", createdAtMs = System.currentTimeMillis()) else it
         }
         ioScope().launch {
             val sent = runCatching {
@@ -411,6 +444,7 @@ class LiveViewModel(
     }
 
     private fun reconcilePending(list: List<PiEvent>) {
+        _pending.value = sweepStalePending(_pending.value, System.currentTimeMillis())
         val awaiting = _pending.value.filter { it.status == LiveSendStatus.SENDING }
         if (awaiting.isEmpty()) return
         val echoed = list.filter { it.kind == LiveKinds.USER_MESSAGE }.mapNotNull { it.text }.toSet()

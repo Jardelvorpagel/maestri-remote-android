@@ -96,4 +96,17 @@ class LiveViewModelTest {
         created?.disconnect()
         vm.disconnect()
     }
+
+    @Test
+    fun sweepStalePendingFailsOnlyOldSendingRows() {
+        val old = LivePendingSend("m1", "hi", emptyList(), LiveSendStatus.SENDING, createdAtMs = 0L)
+        val fresh = LivePendingSend("m2", "hi", emptyList(), LiveSendStatus.SENDING, createdAtMs = 1_999_000L)
+        val failed = LivePendingSend("m3", "hi", emptyList(), LiveSendStatus.FAILED, "x", createdAtMs = 0L)
+        val out = sweepStalePending(listOf(old, fresh, failed), nowMs = 2_000_000L)
+        assertEquals(LiveSendStatus.FAILED, out.first { it.clientMsgId == "m1" }.status)
+        assertEquals("no send_ack from the relay — tap retry", out.first { it.clientMsgId == "m1" }.detail)
+        assertEquals(LiveSendStatus.SENDING, out.first { it.clientMsgId == "m2" }.status)
+        assertEquals(LiveSendStatus.FAILED, out.first { it.clientMsgId == "m3" }.status)
+        assertEquals("x", out.first { it.clientMsgId == "m3" }.detail)
+    }
 }

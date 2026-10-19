@@ -375,4 +375,38 @@ class PiRelayClientTest {
         assertFalse(client.autoRetry.value)
         assertTrue(client.state.value is RelayState.Disconnected)
     }
+
+    @Test
+    fun unauthorizedSchedulesPoliteRetryInsteadOfDying() {
+        val server = com.sun.net.httpserver.HttpServer.create(
+            java.net.InetSocketAddress("127.0.0.1", 0),
+            0,
+        )
+        server.createContext("/stream") { exchange ->
+            exchange.sendResponseHeaders(401, -1)
+            exchange.close()
+        }
+        server.start()
+        try {
+            val port = server.address.port
+            val client = PiRelayClient("ws://127.0.0.1:$port/stream", "")
+            try {
+                client.connect()
+                runBlocking {
+                    withTimeout(15_000) {
+                        while (!client.autoRetry.value) delay(50)
+                    }
+                }
+                val state = client.state.value
+                assertTrue(state is RelayState.Error)
+                assertEquals("This relay requires a token (HTTP 401).", (state as RelayState.Error).message)
+                assertTrue(client.autoRetry.value)
+            } finally {
+                client.disconnect()
+            }
+            assertFalse(client.autoRetry.value)
+        } finally {
+            server.stop(0)
+        }
+    }
 }

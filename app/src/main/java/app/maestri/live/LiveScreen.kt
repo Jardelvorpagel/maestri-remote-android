@@ -176,6 +176,7 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
     val composeState by vm.composeState.collectAsState()
     val decisionPrompt by vm.decisionPrompt.collectAsState()
     val autoRetry by vm.autoRetry.collectAsState()
+    val relayError = relayState as? RelayState.Error
 
     // Auto-connect on entering Chat when a relay URL is already stored: one shot
     // per composition (leaving Chat disposes it, so re-entry retries; Stop sets a
@@ -239,6 +240,17 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
             onDisconnect = { vm.disconnect() },
         )
 
+        // Persistent outage strip: the empty-state error card below only shows with
+        // zero rows, but outages usually strike with history on screen — then the
+        // only signal was the Connect button. This strip shows iff the relay is in
+        // Error (title + reason + retry position) and hides itself on Open, so a
+        // stale banner after reconnect is structurally impossible. It carries no
+        // buttons, unlike the relay approval cards, and sits above the feed while
+        // the Pi decision mirror sits above the composer.
+        if (relayError != null && allRows.isNotEmpty()) {
+            LiveErrorStrip(message = relayError.message, url = url, autoRetry = autoRetry)
+        }
+
         notice?.let { n ->
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
@@ -262,7 +274,6 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
         }
 
         Box(Modifier.weight(1f)) {
-            val relayError = relayState as? RelayState.Error
             when {
                 url.isBlank() -> LiveEmpty(
                     title = "No relay configured",
@@ -329,6 +340,33 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
 
         decisionPrompt?.takeIf { it.isOpen }?.let { LiveDecisionBanner(prompt = it) }
         LiveComposerBar(vm)
+    }
+}
+
+@Composable
+private fun LiveErrorStrip(message: String, url: String, autoRetry: Boolean) {
+    val colors = LocalMaestriColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(top = 6.dp)
+            .background(colors.warning.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .border(1.dp, colors.warning.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            "Relay error",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.warning,
+        )
+        Text(
+            relayErrorBody(url, message, autoRetry),
+            fontSize = 12.5.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
