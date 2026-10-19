@@ -6,6 +6,7 @@ import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavType
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import app.maestri.live.LiveRoute
 import app.maestri.ui.screens.ChatThreadScreen
 import app.maestri.wire.session.WireSession
 
@@ -15,6 +16,11 @@ import app.maestri.wire.session.WireSession
  * Registration is ADDITIVE in the app Root: after the terminal composable,
  * call `chatDestinations(nav, session)` (see INTEGRATION in this spec dir).
  */
+object LiveNav {
+    const val pattern = "live"
+    fun route(): String = pattern
+}
+
 object ChatNav {
     const val pattern = "chat/{wsId}/{terminalId}/{terminalName}"
 
@@ -46,5 +52,8 @@ fun NavGraphBuilder.chatDestinations(session: WireSession, nav: NavHostControlle
             terminalName = terminalName,
             onBack = { nav.popBackStack() },
         )
+    }
+    composable(route = LiveNav.pattern) {
+        LiveRoute(onBack = { nav.popBackStack() })
     }
 }
