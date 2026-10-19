@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -62,9 +63,10 @@ import kotlinx.coroutines.launch
 @Composable
 fun LiveRoute(
     onBack: () -> Unit,
-    clientFactory: (url: String, token: String) -> PiRelayClient? = { _, _ -> null },
+    clientFactory: (url: String, token: String) -> PiRelayClient = { url, token -> PiRelayClient(url, token) },
 ) {
-    val store = remember { InMemoryPiRelayStore() }
+    val appContext = LocalContext.current.applicationContext
+    val store = remember { DataStorePiRelayStore(appContext) }
     val vm: LiveViewModel = viewModel(
         key = "live",
         factory = LiveViewModelFactory(store, clientFactory),
@@ -112,11 +114,11 @@ private fun buildRows(events: List<PiEvent>): List<DisplayRow> {
 
 private val tsFmt = DateTimeFormatter.ofPattern("HH:mm")
 
-private fun formatTs(ts: Long): String =
-    if (ts <= 0) ""
+private fun formatTs(ts: String): String =
+    if (ts.isBlank()) ""
     else runCatching {
-        Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault()).format(tsFmt)
-    }.getOrDefault("")
+        Instant.parse(ts).atZone(ZoneId.systemDefault()).format(tsFmt)
+    }.getOrDefault(ts.take(16))
 
 @Composable
 fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
@@ -217,7 +219,7 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
                     title = "No relay configured",
                     body = "Set the relay URL and token above — nothing connects until then.",
                 )
-                rows.isEmpty() && relayState is LiveRelayState.Open -> LiveEmpty(
+                rows.isEmpty() && relayState is RelayState.Open -> LiveEmpty(
                     title = "Waiting for events…",
                     body = "The stream is open. New Pi activity lands here.",
                 )
@@ -285,19 +287,19 @@ private fun LiveEmpty(title: String, body: String) {
 }
 
 @Composable
-private fun RelayChip(state: LiveRelayState) {
+private fun RelayChip(state: RelayState) {
     val colors = LocalMaestriColors.current
     val label = when (state) {
-        LiveRelayState.Disconnected -> "Disconnected"
-        LiveRelayState.Connecting -> "Connecting"
-        LiveRelayState.Open -> "Open"
-        is LiveRelayState.Error -> "Error"
+        RelayState.Disconnected -> "Disconnected"
+        RelayState.Connecting -> "Connecting"
+        RelayState.Open -> "Open"
+        is RelayState.Error -> "Error"
     }
     val dot = when (state) {
-        LiveRelayState.Disconnected -> colors.secondaryLabel
-        LiveRelayState.Connecting -> colors.warning
-        LiveRelayState.Open -> colors.positive
-        is LiveRelayState.Error -> colors.errorText
+        RelayState.Disconnected -> colors.secondaryLabel
+        RelayState.Connecting -> colors.warning
+        RelayState.Open -> colors.positive
+        is RelayState.Error -> colors.errorText
     }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -310,7 +312,7 @@ private fun RelayChip(state: LiveRelayState) {
         Spacer(Modifier.width(6.dp))
         Text(label, style = monoHud(11, color = MaterialTheme.colorScheme.onSurface))
     }
-    if (state is LiveRelayState.Error) {
+    if (state is RelayState.Error) {
         Text(
             state.message.take(120),
             color = colors.errorText,
@@ -326,14 +328,14 @@ private fun RelayChip(state: LiveRelayState) {
 private fun RelaySettingsCard(
     url: String,
     token: String,
-    state: LiveRelayState,
+    state: RelayState,
     onUrl: (String) -> Unit,
     onToken: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
     val colors = LocalMaestriColors.current
-    val open = state is LiveRelayState.Open || state is LiveRelayState.Connecting
+    val open = state is RelayState.Open || state is RelayState.Connecting
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -394,7 +396,7 @@ private fun MessageRow(event: PiEvent) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (mine) "you" else event.role.takeIf { it.isNotBlank() } ?: "assistant",
+                    if (mine) "you" else (event.role?.takeIf { it.isNotBlank() }) ?: "assistant",
                     style = monoHud(10, color = if (mine) colors.bubbleMineText.copy(alpha = 0.75f) else colors.secondaryLabel),
                     modifier = Modifier.weight(1f),
                 )
@@ -408,7 +410,7 @@ private fun MessageRow(event: PiEvent) {
             }
             Spacer(Modifier.height(2.dp))
             Text(
-                event.text.ifBlank { "—" },
+                event.text.orEmpty().ifBlank { "—" },
                 fontSize = 13.5.sp,
                 color = if (mine) colors.bubbleMineText else MaterialTheme.colorScheme.onSurface,
             )
@@ -428,7 +430,7 @@ private fun ToolRow(call: PiEvent, result: PiEvent?) {
         "error" -> colors.errorText
         else -> colors.warning
     }
-    val summary = (result?.tool?.summary ?: info?.summary ?: result?.text ?: call.text)
+    val summary = (result?.tool?.summary ?: info?.summary ?: result?.text ?: call.text).orEmpty()
         .take(140).ifBlank { status.ifBlank { "running" } }
     Column(
         modifier = Modifier
@@ -515,10 +517,11 @@ private fun StatusLineRow(event: PiEvent) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = monoHud(10, color = colors.secondaryLabel))
-        if (event.text.isNotBlank()) {
+        val body = event.text.orEmpty()
+        if (body.isNotBlank()) {
             Spacer(Modifier.width(6.dp))
             Text(
-                event.text.take(120),
+                body.take(120),
                 fontSize = 12.sp,
                 color = colors.secondaryLabel,
                 maxLines = 1,
@@ -542,7 +545,7 @@ private fun ErrorRow(event: PiEvent) {
         Text("!", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.warning)
         Spacer(Modifier.width(8.dp))
         Text(
-            event.text.ifBlank { "error" }.take(300),
+            event.text.orEmpty().ifBlank { "error" }.take(300),
             fontSize = 12.5.sp,
             color = colors.warning,
         )
@@ -566,7 +569,7 @@ private fun UnknownRow(event: PiEvent) {
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            event.text.take(200).ifBlank { "—" },
+            event.text.orEmpty().take(200).ifBlank { "—" },
             fontSize = 12.5.sp,
             color = colors.secondaryLabel,
             maxLines = 2,

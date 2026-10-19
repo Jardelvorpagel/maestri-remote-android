@@ -24,42 +24,6 @@ object LiveKinds {
     )
 }
 
-data class ToolInfo(
-    val name: String,
-    val callId: String,
-    val status: String,
-    val summary: String,
-    val argsPreview: String = "",
-    val resultPreview: String = "",
-)
-
-data class PiEvent(
-    val v: Int = 1,
-    val seq: Long = -1,
-    val sessionId: String = "",
-    val entryId: String = "",
-    val ts: Long = 0L,
-    val kind: String = "",
-    val role: String = "",
-    val text: String = "",
-    val tool: ToolInfo? = null,
-)
-
-sealed interface LiveRelayState {
-    data object Disconnected : LiveRelayState
-    data object Connecting : LiveRelayState
-    data object Open : LiveRelayState
-    data class Error(val message: String) : LiveRelayState
-}
-
-interface PiRelayClient {
-    val state: StateFlow<LiveRelayState>
-    val events: StateFlow<List<PiEvent>>
-    fun connect()
-    fun disconnect()
-    fun resumeAfter(seq: Long)
-}
-
 interface PiRelayStore {
     val url: StateFlow<String>
     val token: StateFlow<String>
@@ -78,14 +42,14 @@ class InMemoryPiRelayStore : PiRelayStore {
 
 class LiveViewModel(
     private val store: PiRelayStore,
-    private val clientFactory: (url: String, token: String) -> PiRelayClient? = { _, _ -> null },
+    private val clientFactory: (url: String, token: String) -> PiRelayClient = { url, token -> PiRelayClient(url, token) },
 ) : ViewModel() {
 
     val url: StateFlow<String> = store.url
     val token: StateFlow<String> = store.token
 
-    private val _relayState = MutableStateFlow<LiveRelayState>(LiveRelayState.Disconnected)
-    val relayState: StateFlow<LiveRelayState> = _relayState
+    private val _relayState = MutableStateFlow<RelayState>(RelayState.Disconnected)
+    val relayState: StateFlow<RelayState> = _relayState
 
     private val _events = MutableStateFlow<List<PiEvent>>(emptyList())
     val events: StateFlow<List<PiEvent>> = _events
@@ -120,15 +84,15 @@ class LiveViewModel(
             _notice.value = "Set the relay URL first — no connection attempted."
             return
         }
+        if (store.token.value.isBlank()) {
+            _notice.value = "Set the relay token first — no connection attempted."
+            return
+        }
         if (client != null) return
         _notice.value = null
         val made = clientFactory(urlValue, store.token.value)
-        if (made == null) {
-            _notice.value = "Relay transport is not wired yet — URL kept, nothing opened."
-            return
-        }
         client = made
-        _relayState.value = LiveRelayState.Connecting
+        _relayState.value = RelayState.Connecting
         collectJob = viewModelScope.launch {
             launch { made.state.collect { _relayState.value = it } }
             launch {
@@ -151,8 +115,8 @@ class LiveViewModel(
         collectJob = null
         runCatching { client?.disconnect() }
         client = null
-        if (_relayState.value !is LiveRelayState.Disconnected) {
-            _relayState.value = LiveRelayState.Disconnected
+        if (_relayState.value != RelayState.Disconnected) {
+            _relayState.value = RelayState.Disconnected
         }
     }
 
@@ -177,7 +141,7 @@ class LiveViewModel(
 
 class LiveViewModelFactory(
     private val store: PiRelayStore,
-    private val clientFactory: (url: String, token: String) -> PiRelayClient? = { _, _ -> null },
+    private val clientFactory: (url: String, token: String) -> PiRelayClient = { url, token -> PiRelayClient(url, token) },
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
