@@ -169,7 +169,12 @@ class LiveViewModel(
             _notice.value = "Set the relay URL first — no connection attempted."
             return
         }
-        if (client != null) return
+        if (client != null) {
+            // Re-dial path: a dead client (e.g. after an auth failure, which sets no
+            // retry) must not make a later Connect tap a no-op. Tear down first so
+            // the tap always dials; the button only offers Connect when not open.
+            disconnect()
+        }
         _notice.value = null
         val made = clientFactory(urlValue, store.token.value)
         client = made

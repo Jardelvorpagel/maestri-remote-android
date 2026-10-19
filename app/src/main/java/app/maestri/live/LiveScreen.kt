@@ -44,6 +44,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -173,6 +175,18 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
     val approvalsMap by vm.approvals.collectAsState()
     val composeState by vm.composeState.collectAsState()
     val decisionPrompt by vm.decisionPrompt.collectAsState()
+
+    // Auto-connect on entering Chat when a relay URL is already stored: one shot
+    // per composition (leaving Chat disposes it, so re-entry retries; Stop sets a
+    // disconnected state with autoTried true, so it never loops against the user).
+    // No stored URL → the config-first empty state below stays, nothing invented.
+    var autoTried by remember { mutableStateOf(false) }
+    LaunchedEffect(url) {
+        if (!autoTried && url.isNotBlank() && vm.relayState.value is RelayState.Disconnected) {
+            autoTried = true
+            vm.connect()
+        }
+    }
 
     val approvalViews = remember(events, approvalsMap, decided, expiredSet) {
         buildApprovalViews(approvalsMap, events, decided, expiredSet)
@@ -434,6 +448,10 @@ private fun RelaySettingsCard(
                     label = { Text("Relay URL", fontSize = 11.sp) },
                     textStyle = monoHud(12),
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        autoCorrect = false,
+                    ),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(6.dp))

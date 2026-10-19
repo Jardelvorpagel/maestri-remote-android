@@ -69,4 +69,28 @@ class LiveViewModelTest {
         assertTrue(vm.relayState.value is RelayState.Disconnected)
         vm.disconnect()
     }
+
+    @Test
+    fun connectAfterDeadClientRedials() {
+        val store = InMemoryPiRelayStore()
+        store.setUrl("ws://127.0.0.1:9/stream")
+        var calls = 0
+        var created: PiRelayClient? = null
+        val vm = LiveViewModel(
+            store = store,
+            clientFactory = { url, token ->
+                calls++
+                PiRelayClient(url, token).also { created = it }
+            },
+            scope = testScope(),
+        )
+        vm.connect()
+        assertEquals(1, calls)
+        // A second Connect (e.g. after an auth failure left a dead client) must dial
+        // again, never no-op on the stale client.
+        vm.connect()
+        assertEquals(2, calls)
+        created?.disconnect()
+        vm.disconnect()
+    }
 }
