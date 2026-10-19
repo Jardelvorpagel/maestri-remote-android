@@ -15,7 +15,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ProvidableCompositionLocal
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -324,6 +327,13 @@ private fun AppLockCoverTablet(store: AppLockStore, activity: FragmentActivity?,
 }
 
 /** The gate itself: renders the cover when locked, otherwise the app content. */
+/** The gate itself: renders the cover when locked, otherwise the app content. */
+
+/** Hold one-shot/host-visible effects until the gate releases them: every path composed
+ *  outside the gate (pairing, tests) reads the default false. The cover composes the
+ *  content either way — this local is about side effects, not visuals. */
+val LocalAppLocked: ProvidableCompositionLocal<Boolean> = compositionLocalOf { false }
+
 @Composable
 fun AppLockGate(
     store: AppLockStore,
@@ -354,7 +364,9 @@ fun AppLockGate(
     }
 
     Box(Modifier.fillMaxSize()) {
-        content()
+        CompositionLocalProvider(LocalAppLocked provides (locked || loading)) {
+            content()
+        }
         if (locked || loading) {
             AppLockCover(store, activity, interactive = locked)
         }

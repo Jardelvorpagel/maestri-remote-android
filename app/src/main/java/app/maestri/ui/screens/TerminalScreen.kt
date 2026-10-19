@@ -71,6 +71,7 @@ import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.controlShape
 import app.maestri.ui.Style.pillShape
+import app.maestri.ui.settings.LocalAppLocked
 import app.maestri.ui.settings.TerminalFontStore
 import app.maestri.wire.ChatApi
 import app.maestri.ui.Style.TerminalThemes
@@ -171,8 +172,12 @@ fun TerminalScreen(
         session.terminalStream.termlib = termlibEmulator
     }
 
-    // seen + presence on open
-    LaunchedEffect(terminalId) {
+    val locked = LocalAppLocked.current
+
+    // seen + presence on open (held while the lock gate covers the screen — no
+    // host-visible markers before unlock)
+    LaunchedEffect(terminalId, locked) {
+        if (locked) return@LaunchedEffect
         session.seen(terminalId)
         val node = snapshot?.items
             ?.filterIsInstance<FeedItem.TerminalFeedItem>()
@@ -194,8 +199,11 @@ fun TerminalScreen(
         }
     }
 
-    LaunchedEffect(live, terminalId, canStream) {
-        if (live && canStream) {
+    LaunchedEffect(live, terminalId, canStream, locked) {
+        // held while locked: no PTY stream starts under the cover; re-lock changes
+        // nothing about a stream opened before the lock (the close-on-leave branch
+        // below stays the only teardown)
+        if (live && canStream && !locked) {
             // attach before open on EVERY reopen: close() must not detach the
             // screen-owned renderer, and nothing else may rely on a stale one
             session.terminalStream.termlib = termlibEmulator

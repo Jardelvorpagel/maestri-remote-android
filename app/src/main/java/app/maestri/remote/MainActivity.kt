@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.fragment.app.FragmentActivity
 import app.maestri.ui.settings.AppLockGate
 import app.maestri.ui.settings.AppLockStore
+import app.maestri.ui.settings.LocalAppLocked
 import app.maestri.ui.settings.applyRecentsBlanking
 import app.maestri.ui.settings.SettingsScreen
 import androidx.compose.foundation.layout.Box
@@ -190,13 +191,15 @@ fun Root(session: WireSession, appLock: AppLockStore) {
             // reveals — lock/security semantics untouched.
             val navRestore = remember { NavRestoreStore(activityContext.applicationContext) }
             val currentEntry by nav.currentBackStackEntryAsState()
+            val locked = LocalAppLocked.current
             LaunchedEffect(currentEntry) {
                 val pattern = currentEntry?.destination?.route ?: return@LaunchedEffect
                 val resolved = restoreResolveRoute(pattern, currentEntry?.arguments)
                     ?: return@LaunchedEffect
                 navRestore.saveRoute(resolved)
             }
-            LaunchedEffect(Unit) {
+            LaunchedEffect(locked) {
+                if (locked) return@LaunchedEffect
                 // A buffered cold-start deep link (notification tap) always wins: the
                 // settle delay lets its collect navigate first, and the guard below
                 // refuses to clobber it — or any user navigation that already happened.
