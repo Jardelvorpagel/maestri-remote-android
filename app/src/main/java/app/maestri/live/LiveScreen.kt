@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -338,7 +339,13 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
             }
         }
 
-        decisionPrompt?.takeIf { it.isOpen }?.let { LiveDecisionBanner(prompt = it) }
+        decisionPrompt?.takeIf { it.isOpen }?.let {
+            LiveDecisionBanner(
+                prompt = it,
+                sending = pending.any { send -> send.status == LiveSendStatus.SENDING },
+                onOption = { label -> vm.sendOption(label) },
+            )
+        }
         LiveComposerBar(vm)
     }
 }
@@ -371,9 +378,9 @@ private fun LiveErrorStrip(message: String, url: String, autoRetry: Boolean) {
 }
 
 @Composable
-private fun LiveDecisionBanner(prompt: DecisionPrompt) {
+private fun LiveDecisionBanner(prompt: DecisionPrompt, sending: Boolean, onOption: (String) -> Unit) {
     val colors = LocalMaestriColors.current
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
@@ -381,26 +388,61 @@ private fun LiveDecisionBanner(prompt: DecisionPrompt) {
             .background(colors.warning.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
             .border(1.dp, colors.warning.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
             .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Box(Modifier.size(7.dp).background(colors.warning, CircleShape))
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                "Pi aguardando decisão: " + prompt.label(),
-                fontSize = 12.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                "Responda no teclado do Pi — o app só espelha.",
-                fontSize = 11.sp,
-                color = colors.secondaryLabel,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(7.dp).background(colors.warning, CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Pi aguardando decisão: " + prompt.label(),
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (prompt.options.isEmpty()) {
+                        "Responda no teclado do Pi — o app só espelha."
+                    } else {
+                        "Toque para enviar como mensagem, ou responda no Pi."
+                    },
+                    fontSize = 11.sp,
+                    color = colors.secondaryLabel,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (prompt.options.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                prompt.options.forEach { option ->
+                    TextButton(
+                        onClick = { onOption(option) },
+                        enabled = !sending,
+                        modifier = Modifier
+                            .border(1.dp, colors.warning.copy(alpha = 0.45f), pillShape())
+                            .background(
+                                colors.warning.copy(alpha = if (sending) 0.04f else 0.12f),
+                                pillShape(),
+                            ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            option,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (sending) colors.secondaryLabel else colors.warning,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -318,22 +318,50 @@ class LiveViewModel(
         }
         val text = _draft.value.trim()
         if (text.isEmpty() && _staged.value.isEmpty()) return
-        val id = UUID.randomUUID().toString()
         ioScope().launch {
             val attachments = uploadStaged() ?: return@launch
             _staged.value = emptyList()
-            _pending.value = _pending.value + LivePendingSend(id, text, attachments, LiveSendStatus.SENDING, createdAtMs = System.currentTimeMillis())
-            val sent = runCatching {
-                target.sendMessage(text, attachments.mapNotNull { it.attachmentId }, id)
-            }.isSuccess
-            if (!sent) {
-                markFailed(id, "send threw — tap retry")
-                return@launch
-            }
-            delay(SEND_ACK_TIMEOUT_MS)
-            if (_pending.value.any { it.clientMsgId == id && it.status == LiveSendStatus.SENDING }) {
-                markFailed(id, "no send_ack from the relay — tap retry")
-            }
+            enqueueText(text, attachments)
+        }
+    }
+
+    /**
+     * Decision-banner shortcut: sends the tapped option label as a NORMAL chat
+     * message through the same optimistic + ack + retry path as typed sends —
+     * no new API, no approval semantics. While any send is in flight the banner
+     * disables its buttons; the ack reconciles the row like a typed message.
+     */
+    fun sendOption(label: String) {
+        val text = label.trim()
+        if (text.isEmpty()) return
+        val gate = _composeState.value
+        if (gate is LiveComposeState.Disabled) {
+            _notice.value = gate.reason
+            return
+        }
+        val target = client
+        if (target == null || _relayState.value !is RelayState.Open) {
+            _notice.value = "Not connected — connect first, then send."
+            return
+        }
+        ioScope().launch { enqueueText(text, emptyList()) }
+    }
+
+    /** Shared tail of [send] and [sendOption]: optimistic row, dial, 15s ack watchdog. */
+    private suspend fun enqueueText(text: String, attachments: List<LivePendingAttachment>) {
+        val target = client ?: return
+        val id = UUID.randomUUID().toString()
+        _pending.value = _pending.value + LivePendingSend(id, text, attachments, LiveSendStatus.SENDING, createdAtMs = System.currentTimeMillis())
+        val sent = runCatching {
+            target.sendMessage(text, attachments.mapNotNull { it.attachmentId }, id)
+        }.isSuccess
+        if (!sent) {
+            markFailed(id, "send threw — tap retry")
+            return
+        }
+        delay(SEND_ACK_TIMEOUT_MS)
+        if (_pending.value.any { it.clientMsgId == id && it.status == LiveSendStatus.SENDING }) {
+            markFailed(id, "no send_ack from the relay — tap retry")
         }
     }
 

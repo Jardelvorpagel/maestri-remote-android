@@ -499,14 +499,16 @@ fun parseApproval(root: Map<*, *>): Approval? {
 
 /**
  * Pi's own decision box, mirrored from the host: `open` shows the banner,
- * `closed` clears it. The phone never answers these — the reply is typed at
- * Pi's keyboard; the app only mirrors. No resolver exists in the API.
+ * `closed` clears it. `options` (possibly absent on old frames) renders as
+ * plain chat-message shortcuts: tapping one sends its label through the normal
+ * optimistic send path — no approval semantics, no resolver in the API.
  */
 data class DecisionPrompt(
     val phase: String = "",
     val promptKind: String = "",
     val title: String = "",
     val at: String = "",
+    val options: List<String> = emptyList(),
 )
 
 val DecisionPrompt.isOpen: Boolean get() = phase == "open"
@@ -517,17 +519,23 @@ fun DecisionPrompt.label(): String =
 
 /**
  * Tolerant `decision_prompt` parse: unknown phases yield null (ignored, the
- * banner keeps its current state); extra fields are ignored.
+ * banner keeps its current state); extra fields are ignored; `options` is
+ * null-safe (absent/empty/non-list all mean no buttons, never a crash).
  */
 fun parseDecisionPrompt(root: Map<*, *>): DecisionPrompt? {
     val inner = root["decision"] as? Map<*, *> ?: return null
     val phase = ((inner["phase"] as? String) ?: "").lowercase()
     if (phase != "open" && phase != "closed") return null
+    val options = (inner["options"] as? List<*>)
+        ?.mapNotNull { it as? String }
+        ?.filter { it.isNotBlank() }
+        ?: emptyList()
     return DecisionPrompt(
         phase = phase,
         promptKind = inner["promptKind"] as? String ?: "",
         title = inner["title"] as? String ?: "",
         at = inner["at"] as? String ?: "",
+        options = options,
     )
 }
 

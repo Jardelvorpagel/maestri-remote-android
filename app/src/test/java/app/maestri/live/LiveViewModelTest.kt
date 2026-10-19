@@ -109,4 +109,33 @@ class LiveViewModelTest {
         assertEquals(LiveSendStatus.FAILED, out.first { it.clientMsgId == "m3" }.status)
         assertEquals("x", out.first { it.clientMsgId == "m3" }.detail)
     }
+
+    @Test
+    fun sendOptionBlankLabelIsNoop() {
+        val store = InMemoryPiRelayStore()
+        store.setUrl("ws://127.0.0.1:9/stream")
+        val vm = LiveViewModel(
+            store = store,
+            clientFactory = { url, token -> PiRelayClient(url, token) },
+            scope = testScope(),
+        )
+        vm.sendOption("   ")
+        assertTrue(vm.pending.value.isEmpty())
+        vm.disconnect()
+    }
+
+    @Test
+    fun sendOptionWhileDisconnectedNoticesInsteadOfQueueing() {
+        val store = InMemoryPiRelayStore()
+        store.setUrl("ws://127.0.0.1:9/stream")
+        val vm = LiveViewModel(
+            store = store,
+            clientFactory = { url, token -> PiRelayClient(url, token) },
+            scope = testScope(),
+        )
+        vm.sendOption("Yes")
+        assertTrue(vm.pending.value.isEmpty())
+        assertEquals("Not connected — connect first, then send.", vm.notice.value)
+        vm.disconnect()
+    }
 }
