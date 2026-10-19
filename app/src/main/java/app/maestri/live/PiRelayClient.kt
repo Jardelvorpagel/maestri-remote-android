@@ -1,5 +1,6 @@
 package app.maestri.live
 
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,6 +19,9 @@ import okio.ByteString
 /** Client heartbeat while open; the server pings every 20–30s and we answer pong. */
 private const val CLIENT_PING_MS = 25_000L
 
+/** Transport-boundary log tag. Attempt lines carry host/port + outcome only, never the token. */
+private const val RELAY_LOG_TAG = "PiRelay"
+
 /**
  * Pi relay WebSocket transport (contract v1): `ws(s)://host:port/stream` with an
  * `Authorization: Bearer` header plus a `?token=` fallback after the first 401.
@@ -31,6 +35,7 @@ class PiRelayClient(
     val token: String,
     private val okHttp: OkHttpClient = OkHttpClient(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val connectTimeoutMs: Long = 10_000L,
 ) {
     private val _state = MutableStateFlow<RelayState>(RelayState.Disconnected)
     val state: StateFlow<RelayState> = _state.asStateFlow()
@@ -42,6 +47,8 @@ class PiRelayClient(
     private var socket: WebSocket? = null
     private var reconnectJob: Job? = null
     private var pingJob: Job? = null
+    private var timeoutJob: Job? = null
+    private var attemptId = 0L
     private var failures = 0
     private var closedByUs = false
     private var authFailed = false
@@ -64,6 +71,8 @@ class PiRelayClient(
         reconnectJob = null
         pingJob?.cancel()
         pingJob = null
+        timeoutJob?.cancel()
+        timeoutJob = null
         synchronized(lock) {
             socket?.close(1000, null)
             socket = null
@@ -90,25 +99,57 @@ class PiRelayClient(
             _state.value = RelayState.Error("Bad relay URL.")
             return
         }
+        val host = request.url.host
+        val port = request.url.port
+        val id: Long
+        synchronized(lock) {
+            attemptId++
+            id = attemptId
+        }
         _state.value = RelayState.Connecting
+        log("connecting host=$host port=$port")
         try {
             synchronized(lock) { socket = okHttp.newWebSocket(request, listener) }
-        } catch (_: Exception) {
-            scheduleReconnect()
+        } catch (e: Exception) {
+            timeoutJob?.cancel()
+            timeoutJob = null
+            val cause = safeFailure(e)
+            log("create failed host=$host port=$port $cause")
+            _state.value = RelayState.Error("Relay connect failed ($cause).")
+            return
+        }
+        timeoutJob?.cancel()
+        timeoutJob = scope.launch {
+            delay(connectTimeoutMs)
+            var expired = false
+            synchronized(lock) {
+                if (attemptId == id && _state.value is RelayState.Connecting) {
+                    socket?.cancel()
+                    socket = null
+                    expired = true
+                }
+            }
+            if (expired) {
+                log("connect timeout host=$host port=$port after ${connectTimeoutMs}ms")
+                scheduleReconnect("Relay connect timed out after ${connectTimeoutMs}ms, retrying.")
+            }
         }
     }
 
-    private fun scheduleReconnect() {
+    private fun scheduleReconnect(reason: String? = null) {
         synchronized(lock) {
             socket = null
         }
+        timeoutJob?.cancel()
+        timeoutJob = null
         pingJob?.cancel()
         pingJob = null
         if (closedByUs || authFailed) {
             if (closedByUs) _state.value = RelayState.Disconnected
             return
         }
-        _state.value = RelayState.Connecting
+        if (reason != null) _state.value = RelayState.Error(reason)
+        else _state.value = RelayState.Connecting
         val waitMs = backoffBaseMs(failures) + (0L..999L).random()
         failures++
         reconnectJob?.cancel()
@@ -144,8 +185,11 @@ class PiRelayClient(
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            timeoutJob?.cancel()
+            timeoutJob = null
             failures = 0
             _state.value = RelayState.Open
+            log("opened host=${webSocket.request().url.host} port=${webSocket.request().url.port}")
             synchronized(lock) {
                 pendingResume?.let { webSocket.send(resumeFrame(it)) }
             }
@@ -178,10 +222,12 @@ class PiRelayClient(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            scheduleReconnect()
+            scheduleReconnect("Relay connection closed, retrying.")
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            timeoutJob?.cancel()
+            timeoutJob = null
             if (response?.code == 401 && !queryFallback && token.isNotBlank()) {
                 queryFallback = true
                 failures = 0
@@ -198,10 +244,27 @@ class PiRelayClient(
                 synchronized(lock) { socket = null }
                 pingJob?.cancel()
                 pingJob = null
-                _state.value = RelayState.Error(relayAuthFailureMessage(token.isBlank()))
+                val message = relayAuthFailureMessage(token.isBlank())
+                log("auth failed ${webSocket.request().url.host} $message")
+                _state.value = RelayState.Error(message)
                 return
             }
-            scheduleReconnect()
+            val cause = safeFailure(t)
+            val where = webSocket.request().url
+            log("connect failed host=${where.host} port=${where.port} $cause")
+            scheduleReconnect("Relay connect failed ($cause).")
+        }
+    }
+
+    private fun safeFailure(t: Throwable): String {
+        val raw = "${t.javaClass.simpleName}: ${t.message}"
+        return if (token.isNotBlank()) raw.replace(token, "\u2022\u2022\u2022") else raw
+    }
+
+    private fun log(msg: String) {
+        try {
+            Log.d(RELAY_LOG_TAG, msg)
+        } catch (_: RuntimeException) {
         }
     }
 }

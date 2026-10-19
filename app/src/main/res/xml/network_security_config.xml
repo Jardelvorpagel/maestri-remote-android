@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pi relay cleartext exception (device-proven: tailnet ws:// dies without it).
+     Scoped to the relay IP literal only; everything else keeps the default
+     (cleartext denied). Shipping posture remains wss:// via tailscale serve. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">100.95.36.90</domain>
+    </domain-config>
+</network-security-config>

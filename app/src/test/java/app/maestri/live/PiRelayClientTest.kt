@@ -1,5 +1,13 @@
 package app.maestri.live
 
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -138,6 +146,54 @@ class PiRelayClientTest {
         assertEquals(42L, fromString.event.seq)
         val fromDouble = PiRelayParser.parseFrame("""{"seq":43.0,"kind":"notice"}""") as RelayFrame.Event
         assertEquals(43L, fromDouble.event.seq)
+    }
+
+    @Test
+    fun throwingFactorySurfacesErrorNeverStuck() {
+        val throwing = object : OkHttpClient() {
+            override fun newWebSocket(request: Request, listener: WebSocketListener): WebSocket =
+                throw java.net.ConnectException("nope")
+        }
+        val client = PiRelayClient("ws://h:1/stream", "", throwing)
+        client.connect()
+        val state = runBlocking {
+            withTimeout(5000) { client.state.first { it is RelayState.Error } }
+        }
+        assertTrue((state as RelayState.Error).message.contains("ConnectException"))
+        client.disconnect()
+    }
+
+    @Test
+    fun refusedPortSurfacesError() {
+        val client = PiRelayClient("ws://127.0.0.1:9/stream", "")
+        client.connect()
+        val state = runBlocking {
+            withTimeout(8000) { client.state.first { it is RelayState.Error } }
+        }
+        assertTrue(state is RelayState.Error)
+        client.disconnect()
+    }
+
+    @Test
+    fun hangingSocketTripsInjectedTimeout() {
+        val hanging = object : OkHttpClient() {
+            override fun newWebSocket(request: Request, listener: WebSocketListener): WebSocket =
+                object : WebSocket {
+                    override fun request(): Request = request
+                    override fun queueSize(): Long = 0L
+                    override fun send(text: String): Boolean = true
+                    override fun send(bytes: ByteString): Boolean = true
+                    override fun close(code: Int, reason: String?): Boolean = true
+                    override fun cancel() {}
+                }
+        }
+        val client = PiRelayClient("ws://h:1/stream", "", hanging, connectTimeoutMs = 200L)
+        client.connect()
+        val state = runBlocking {
+            withTimeout(5000) { client.state.first { it is RelayState.Error } }
+        }
+        assertTrue((state as RelayState.Error).message.contains("timed out"))
+        client.disconnect()
     }
 
     @Test
