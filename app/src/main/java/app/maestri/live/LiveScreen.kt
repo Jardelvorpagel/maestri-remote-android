@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -80,9 +81,11 @@ private sealed interface DisplayRow {
     data class StatusLine(val event: PiEvent) : DisplayRow
     data class Err(val event: PiEvent) : DisplayRow
     data class Unknown(val event: PiEvent) : DisplayRow
+    data class Pending(val send: LivePendingSend) : DisplayRow
+    data class Approval(val view: LiveApprovalView) : DisplayRow
 }
 
-private fun buildRows(events: List<PiEvent>): List<DisplayRow> {
+private fun buildRows(events: List<PiEvent>, approvals: Map<String, LiveApprovalView> = emptyMap()): List<DisplayRow> {
     val rows = mutableListOf<DisplayRow>()
     val toolIndex = mutableMapOf<String, Int>()
     for (e in events) {
@@ -106,6 +109,13 @@ private fun buildRows(events: List<PiEvent>): List<DisplayRow> {
             LiveKinds.RUN_START, LiveKinds.RUN_END, LiveKinds.NOTICE ->
                 rows.add(DisplayRow.StatusLine(e))
             LiveKinds.ERROR -> rows.add(DisplayRow.Err(e))
+            LiveKinds.SEND_ACK, LiveKinds.APPROVAL_RESOLVED -> Unit
+            LiveKinds.APPROVAL_REQUEST -> {
+                val id = e.tool?.callId?.takeIf { it.isNotBlank() } ?: e.entryId
+                val view = approvals[id]
+                if (view != null) rows.add(DisplayRow.Approval(view))
+                else rows.add(DisplayRow.Unknown(e))
+            }
             else -> rows.add(DisplayRow.Unknown(e))
         }
     }
@@ -131,8 +141,28 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
     val notice by vm.notice.collectAsState()
     val url by vm.url.collectAsState()
     val token by vm.token.collectAsState()
+    val pending by vm.pending.collectAsState()
+    val decided by vm.decisions.collectAsState()
+    val expiredSet by vm.expiredApprovals.collectAsState()
+    val approvalsMap by vm.approvals.collectAsState()
+    val composeState by vm.composeState.collectAsState()
 
-    val rows = remember(events) { buildRows(events) }
+    val approvalViews = remember(events, approvalsMap, decided, expiredSet) {
+        buildApprovalViews(approvalsMap, events, decided, expiredSet)
+    }
+    val approvalById = remember(approvalViews) { approvalViews.associateBy { it.callId } }
+    val rows = remember(events, approvalById) { buildRows(events, approvalById) }
+    val eventApprovalIds = remember(events) {
+        events.filter { it.kind == LiveKinds.APPROVAL_REQUEST }
+            .map { it.tool?.callId?.takeIf { c -> c.isNotBlank() } ?: it.entryId }
+            .toSet()
+    }
+    val orphanApprovals = remember(approvalViews, eventApprovalIds) {
+        approvalViews.filter { it.callId !in eventApprovalIds }
+    }
+    val allRows = remember(rows, orphanApprovals, pending) {
+        rows + orphanApprovals.map { DisplayRow.Approval(it) } + pending.map { DisplayRow.Pending(it) }
+    }
     val listState = rememberLazyListState()
 
     val atBottom by remember {
@@ -149,9 +179,9 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
     }
     vm.setFollowing(atBottom)
     val followingNow by rememberUpdatedState(following)
-    LaunchedEffect(rows.size) {
-        if (rows.isEmpty()) return@LaunchedEffect
-        if (followingNow) listState.scrollToItem(rows.size - 1)
+    LaunchedEffect(allRows.size) {
+        if (allRows.isEmpty()) return@LaunchedEffect
+        if (followingNow) listState.scrollToItem(allRows.size - 1)
     }
 
     Column(
@@ -159,6 +189,7 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
+            .imePadding()
             .background(colors.canvasChrome),
     ) {
         Row(
@@ -219,11 +250,11 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
                     title = "No relay configured",
                     body = "Set the relay URL above — nothing connects until then. Token is optional, only for relays that require one.",
                 )
-                rows.isEmpty() && relayState is RelayState.Open -> LiveEmpty(
+                allRows.isEmpty() && relayState is RelayState.Open -> LiveEmpty(
                     title = "Waiting for events…",
                     body = "The stream is open. New Pi activity lands here.",
                 )
-                rows.isEmpty() -> LiveEmpty(
+                allRows.isEmpty() -> LiveEmpty(
                     title = "Not connected",
                     body = "Tap Connect to open the event stream.",
                 )
@@ -233,22 +264,32 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(rows, key = { rowKey(it) }) { row ->
+                    items(allRows, key = { rowKey(it) }) { row ->
                         when (row) {
                             is DisplayRow.Message -> MessageRow(row.event)
                             is DisplayRow.Tool -> ToolRow(row.call, row.result)
                             is DisplayRow.StatusLine -> StatusLineRow(row.event)
                             is DisplayRow.Err -> ErrorRow(row.event)
                             is DisplayRow.Unknown -> UnknownRow(row.event)
+                            is DisplayRow.Pending -> LivePendingRow(row.send) { vm.retry(row.send.clientMsgId) }
+                            is DisplayRow.Approval -> LiveApprovalCard(
+                                view = row.view,
+                                commandsReady = composeState is LiveComposeState.Ready,
+                                commandsReason = (composeState as? LiveComposeState.Disabled)?.reason,
+                                onApprove = { vm.decide(row.view.callId, approved = true, rememberSession = false) },
+                                onDeny = { vm.decide(row.view.callId, approved = false, rememberSession = false) },
+                                onAlways = { vm.decide(row.view.callId, approved = true, rememberSession = true) },
+                                onExpire = { vm.markApprovalExpired(row.view.callId) },
+                            )
                         }
                     }
                 }
             }
-            if (rows.isNotEmpty() && !following) {
+            if (allRows.isNotEmpty() && !following) {
                 TextButton(
                     onClick = {
                         vm.resumeTail()
-                        scope.launch { listState.animateScrollToItem(rows.size - 1) }
+                        scope.launch { listState.animateScrollToItem(allRows.size - 1) }
                     },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -263,6 +304,8 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
                 }
             }
         }
+
+        LiveComposerBar(vm)
     }
 }
 
@@ -272,6 +315,8 @@ private fun rowKey(row: DisplayRow): String = when (row) {
     is DisplayRow.StatusLine -> "s:${row.event.seq}:${row.event.entryId}"
     is DisplayRow.Err -> "e:${row.event.seq}:${row.event.entryId}"
     is DisplayRow.Unknown -> "u:${row.event.seq}:${row.event.entryId}"
+    is DisplayRow.Pending -> "p:${row.send.clientMsgId}"
+    is DisplayRow.Approval -> "a:${row.view.callId}"
 }
 
 @Composable
