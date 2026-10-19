@@ -65,6 +65,15 @@ class PiRelayClient(
     val attachments: StateFlow<Map<String, Attachment>> = _attachments.asStateFlow()
 
     /**
+     * Retry policy, stated: transport failures (timeout/refused/closed) reschedule
+     * with [backoffBaseMs] (1s doubling to the 30s cap + ≤1s jitter) and this reads
+     * true; 401 and user Stop never schedule (false). The Chat empty-state copies
+     * this into the error body so the retry position is on screen, not in logcat.
+     */
+    private val _autoRetry = MutableStateFlow(false)
+    val autoRetry: StateFlow<Boolean> = _autoRetry.asStateFlow()
+
+    /**
      * Pi's own decision box, mirrored: the latest open prompt, null when closed
      * or never seen. The phone never answers these — no resolver in the API.
      */
@@ -103,6 +112,7 @@ class PiRelayClient(
         pingJob = null
         timeoutJob?.cancel()
         timeoutJob = null
+        _autoRetry.value = false
         synchronized(lock) {
             ackJobs.values.forEach { it.cancel() }
             ackJobs.clear()
@@ -239,6 +249,7 @@ class PiRelayClient(
         else _state.value = RelayState.Connecting
         val waitMs = backoffBaseMs(failures) + (0L..999L).random()
         failures++
+        _autoRetry.value = true
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             delay(waitMs)
@@ -320,6 +331,7 @@ class PiRelayClient(
             timeoutJob?.cancel()
             timeoutJob = null
             failures = 0
+            _autoRetry.value = false
             _state.value = RelayState.Open
             relayLog(RELAY_LOG_TAG, "opened host=${webSocket.request().url.host} port=${webSocket.request().url.port}")
             synchronized(lock) {
@@ -363,6 +375,7 @@ class PiRelayClient(
             if (response?.code == 401 && !queryFallback && token.isNotBlank()) {
                 queryFallback = true
                 failures = 0
+                _autoRetry.value = true
                 reconnectJob?.cancel()
                 reconnectJob = scope.launch {
                     delay(500L)
@@ -372,6 +385,7 @@ class PiRelayClient(
             }
             if (response?.code == 401) {
                 authFailed = true
+                _autoRetry.value = false
                 reconnectJob?.cancel()
                 synchronized(lock) { socket = null }
                 pingJob?.cancel()

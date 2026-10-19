@@ -175,10 +175,13 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
     val approvalsMap by vm.approvals.collectAsState()
     val composeState by vm.composeState.collectAsState()
     val decisionPrompt by vm.decisionPrompt.collectAsState()
+    val autoRetry by vm.autoRetry.collectAsState()
 
     // Auto-connect on entering Chat when a relay URL is already stored: one shot
     // per composition (leaving Chat disposes it, so re-entry retries; Stop sets a
     // disconnected state with autoTried true, so it never loops against the user).
+    // Duplicate firings collapse in LiveViewModel.connect (single-flight: no-op
+    // while Connecting/Open), so the device can never show a double dial again.
     // No stored URL → the config-first empty state below stays, nothing invented.
     var autoTried by remember { mutableStateOf(false) }
     LaunchedEffect(url) {
@@ -259,6 +262,7 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
         }
 
         Box(Modifier.weight(1f)) {
+            val relayError = relayState as? RelayState.Error
             when {
                 url.isBlank() -> LiveEmpty(
                     title = "No relay configured",
@@ -267,6 +271,10 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
                 allRows.isEmpty() && relayState is RelayState.Open -> LiveEmpty(
                     title = "Waiting for events…",
                     body = "The stream is open. New Pi activity lands here.",
+                )
+                allRows.isEmpty() && relayError != null -> LiveEmpty(
+                    title = "Relay error",
+                    body = relayErrorBody(url, relayError.message, autoRetry),
                 )
                 allRows.isEmpty() -> LiveEmpty(
                     title = "Not connected",

@@ -367,6 +367,41 @@ fun relayAuthFailureMessage(tokenBlank: Boolean): String =
     if (tokenBlank) "This relay requires a token (HTTP 401)."
     else "Relay rejected the token (HTTP 401)."
 
+/** `ws(s)://host:port/<path>` → `host:port`; blank when unparseable. */
+fun relayHostPort(url: String): String {
+    var t = url.trim()
+    t = when {
+        t.startsWith("ws://", ignoreCase = true) -> t.substring(5)
+        t.startsWith("wss://", ignoreCase = true) -> t.substring(6)
+        t.startsWith("http://", ignoreCase = true) -> t.substring(7)
+        t.startsWith("https://", ignoreCase = true) -> t.substring(8)
+        else -> return ""
+    }
+    return t.substringBefore('/').substringBefore('?').takeIf { it.isNotBlank() } ?: ""
+}
+
+/**
+ * Chat empty-state body for a relay error: host:port when known, the failure
+ * reason verbatim, then the retry position — scheduled automatic retry vs
+ * tap-to-retry. The reason never lives in logcat alone.
+ */
+fun relayErrorBody(url: String, message: String, autoRetry: Boolean): String {
+    val where = relayHostPort(url)
+    val head = if (where.isNotBlank()) "$where — $message" else message
+    val hint = if (autoRetry) "Automatic retry is scheduled — or tap Connect to retry now."
+    else "Tap Connect to retry."
+    return "$head $hint"
+}
+
+/**
+ * Single-flight connect policy: dial fresh with no client; never interrupt an
+ * attempt already Connecting/Open, and never redial a client still in its
+ * startup window (client present but Disconnected — the client's own replay
+ * briefly overwrites Connecting); only a terminal Error with a client redials.
+ */
+fun shouldRedial(hasClient: Boolean, state: RelayState): Boolean =
+    !hasClient || state is RelayState.Error
+
 /** Transport-boundary log helper. Callers pass metadata only, never the token. */
 internal fun relayLog(tag: String, msg: String) {
     try {

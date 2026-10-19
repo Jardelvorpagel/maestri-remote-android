@@ -145,6 +145,9 @@ class LiveViewModel(
     private val _decisionPrompt = MutableStateFlow<DecisionPrompt?>(null)
     val decisionPrompt: StateFlow<DecisionPrompt?> = _decisionPrompt
 
+    private val _autoRetry = MutableStateFlow(false)
+    val autoRetry: StateFlow<Boolean> = _autoRetry
+
     init {
         refreshComposeState()
     }
@@ -169,10 +172,14 @@ class LiveViewModel(
             _notice.value = "Set the relay URL first — no connection attempted."
             return
         }
+        // Single-flight (device-proven 275ms double-dial): a duplicate effect firing
+        // or an auto+manual race must never interrupt an attempt already in flight.
+        if (!shouldRedial(client != null, _relayState.value)) return
         if (client != null) {
-            // Re-dial path: a dead client (e.g. after an auth failure, which sets no
-            // retry) must not make a later Connect tap a no-op. Tear down first so
-            // the tap always dials; the button only offers Connect when not open.
+            // Re-dial path, Error only: a dead client (e.g. after an auth failure,
+            // which sets no retry) must not make a later Connect tap a no-op. Tear
+            // down first so the tap always dials; the button only offers Connect
+            // when not open, and single-flight above protects in-flight attempts.
             disconnect()
         }
         _notice.value = null
@@ -184,6 +191,7 @@ class LiveViewModel(
             launch { made.commandsSupported.collect { refreshComposeState() } }
             launch { made.approvals.collect { _approvals.value = it } }
             launch { made.decisionPrompt.collect { _decisionPrompt.value = it } }
+            launch { made.autoRetry.collect { _autoRetry.value = it } }
             launch {
                 made.sendOutcomes.collect { map ->
                     map.values.forEach { outcome ->

@@ -71,7 +71,7 @@ class LiveViewModelTest {
     }
 
     @Test
-    fun connectAfterDeadClientRedials() {
+    fun rapidDoubleConnectDialsOnce() {
         val store = InMemoryPiRelayStore()
         store.setUrl("ws://127.0.0.1:9/stream")
         var calls = 0
@@ -84,10 +84,13 @@ class LiveViewModelTest {
             },
             scope = testScope(),
         )
+        // Duplicate effect firing / auto+manual race while the attempt is in flight
+        // must collapse to one dial (device showed two `connecting` lines 275ms apart).
+        vm.connect()
         vm.connect()
         assertEquals(1, calls)
-        // A second Connect (e.g. after an auth failure left a dead client) must dial
-        // again, never no-op on the stale client.
+        // After a real Stop the next Connect redials.
+        vm.disconnect()
         vm.connect()
         assertEquals(2, calls)
         created?.disconnect()
