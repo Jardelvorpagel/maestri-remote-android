@@ -1,6 +1,5 @@
 package app.maestri.live
 
-import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,12 +35,34 @@ class PiRelayClient(
     private val okHttp: OkHttpClient = OkHttpClient(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val connectTimeoutMs: Long = 10_000L,
+    private val ackTimeoutMs: Long = 10_000L,
 ) {
     private val _state = MutableStateFlow<RelayState>(RelayState.Disconnected)
     val state: StateFlow<RelayState> = _state.asStateFlow()
 
     private val _events = MutableStateFlow<List<PiEvent>>(emptyList())
     val events: StateFlow<List<PiEvent>> = _events.asStateFlow()
+
+    /**
+     * v2 command support, tolerant detection: null until known; true on the
+     * first routed `send_ack` or a hello advertising commands; false on an ack
+     * timeout with no outcome while still unknown, a hello disclaiming
+     * commands, or a rejection whose detail signals an unimplemented command.
+     */
+    private val _commandsSupported = MutableStateFlow<Boolean?>(null)
+    val commandsSupported: StateFlow<Boolean?> = _commandsSupported.asStateFlow()
+
+    /** `send_message` outcomes keyed by clientMsgId, including ack timeouts. */
+    private val _sendOutcomes = MutableStateFlow<Map<String, SendOutcome>>(emptyMap())
+    val sendOutcomes: StateFlow<Map<String, SendOutcome>> = _sendOutcomes.asStateFlow()
+
+    /** Tool approvals keyed by callId, request through resolution. */
+    private val _approvals = MutableStateFlow<Map<String, Approval>>(emptyMap())
+    val approvals: StateFlow<Map<String, Approval>> = _approvals.asStateFlow()
+
+    /** Ready attachments keyed by id. */
+    private val _attachments = MutableStateFlow<Map<String, Attachment>>(emptyMap())
+    val attachments: StateFlow<Map<String, Attachment>> = _attachments.asStateFlow()
 
     private val lock = Any()
     private var socket: WebSocket? = null
@@ -54,6 +75,8 @@ class PiRelayClient(
     private var authFailed = false
     private var queryFallback = false
     private var pendingResume: Long? = null
+    private var helloSeen = false
+    private val ackJobs = mutableMapOf<String, Job>()
 
     val configured: Boolean get() = url.isNotBlank()
 
@@ -74,6 +97,12 @@ class PiRelayClient(
         timeoutJob?.cancel()
         timeoutJob = null
         synchronized(lock) {
+            ackJobs.values.forEach { it.cancel() }
+            ackJobs.clear()
+            helloSeen = false
+        }
+        _commandsSupported.value = null
+        synchronized(lock) {
             socket?.close(1000, null)
             socket = null
         }
@@ -81,9 +110,59 @@ class PiRelayClient(
     }
 
     /**
-     * Ask the server to replay from [seq]; sent now when open, otherwise held and
-     * flushed on the next open.
+     * Ask the relay agent to speak: sent only on an open socket after hello.
+     * Blank ids are replaced with a generated `msg-` id so acks still route.
      */
+    fun sendMessage(text: String, attachmentIds: List<String>, clientMsgId: String) {
+        val id = clientMsgId.ifBlank { "msg-" + java.util.UUID.randomUUID().toString() }
+        if (!sendCommand("send_message", id, sendMessageFrame(text, attachmentIds, id))) return
+        armAckTimeout(id)
+    }
+
+    /** Answer one tool approval prompt. Values pass through for the server. */
+    fun sendDecision(callId: String, decision: String, remember: String) {
+        sendCommand("tool_decision", callId, toolDecisionFrame(callId, decision, remember))
+    }
+
+    private fun sendCommand(kind: String, id: String, frame: String): Boolean {
+        synchronized(lock) {
+            if (!helloSeen || _state.value !is RelayState.Open || socket == null) {
+                relayLog(RELAY_LOG_TAG, "command dropped kind=$kind len=${frame.length}")
+                return false
+            }
+            socket?.send(frame)
+        }
+        relayLog(RELAY_LOG_TAG, "command sent kind=$kind id=$id len=${frame.length}")
+        return true
+    }
+
+    private fun armAckTimeout(clientMsgId: String) {
+        synchronized(lock) { ackJobs[clientMsgId]?.cancel() }
+        val job = scope.launch {
+            delay(ackTimeoutMs)
+            var apply = false
+            synchronized(lock) {
+                if (!_sendOutcomes.value.containsKey(clientMsgId) &&
+                    _commandsSupported.value == null
+                ) {
+                    apply = true
+                }
+                ackJobs.remove(clientMsgId)
+            }
+            if (apply) {
+                _commandsSupported.value = false
+                recordOutcome(
+                    SendOutcome(clientMsgId, false, "no ack — relay may not support commands"),
+                )
+                relayLog(RELAY_LOG_TAG, "ack timeout id=$clientMsgId")
+            }
+        }
+        synchronized(lock) { ackJobs[clientMsgId] = job }
+    }
+
+    private fun recordOutcome(outcome: SendOutcome) {
+        _sendOutcomes.value = _sendOutcomes.value + (outcome.clientMsgId to outcome)
+    }
     fun resumeAfter(seq: Long) {
         synchronized(lock) { pendingResume = seq }
         synchronized(lock) {
@@ -107,14 +186,14 @@ class PiRelayClient(
             id = attemptId
         }
         _state.value = RelayState.Connecting
-        log("connecting host=$host port=$port")
+        relayLog(RELAY_LOG_TAG, "connecting host=$host port=$port")
         try {
             synchronized(lock) { socket = okHttp.newWebSocket(request, listener) }
         } catch (e: Exception) {
             timeoutJob?.cancel()
             timeoutJob = null
             val cause = safeFailure(e)
-            log("create failed host=$host port=$port $cause")
+            relayLog(RELAY_LOG_TAG, "create failed host=$host port=$port $cause")
             _state.value = RelayState.Error("Relay connect failed ($cause).")
             return
         }
@@ -130,7 +209,7 @@ class PiRelayClient(
                 }
             }
             if (expired) {
-                log("connect timeout host=$host port=$port after ${connectTimeoutMs}ms")
+                relayLog(RELAY_LOG_TAG, "connect timeout host=$host port=$port after ${connectTimeoutMs}ms")
                 scheduleReconnect("Relay connect timed out after ${connectTimeoutMs}ms, retrying.")
             }
         }
@@ -166,7 +245,11 @@ class PiRelayClient(
             null
         } ?: return
         when (frame) {
-            is RelayFrame.Hello -> Unit
+            is RelayFrame.Hello -> {
+                synchronized(lock) { helloSeen = true }
+                frame.commands?.let { _commandsSupported.value = it }
+                relayLog(RELAY_LOG_TAG, "hello session=${frame.sessionId.take(8)} commands=${frame.commands}")
+            }
             is RelayFrame.Ping -> synchronized(lock) { socket?.send(pongFrame()) }
             is RelayFrame.Pong -> Unit
             is RelayFrame.ResumeGap -> {
@@ -180,7 +263,44 @@ class PiRelayClient(
             is RelayFrame.Event -> {
                 _events.value = insertRelayEvent(_events.value, frame.event)
             }
+            is RelayFrame.SendAckFrame -> onSendAck(frame.ack)
+            is RelayFrame.ApprovalRequest -> {
+                val a = frame.approval
+                if (a.callId.isNotBlank()) {
+                    _approvals.value = _approvals.value + (a.callId to a)
+                    relayLog(RELAY_LOG_TAG, "approval request call=${a.callId.take(16)} tool=${a.tool.take(32)}")
+                }
+            }
+            is RelayFrame.ApprovalResolved -> {
+                val a = frame.approval
+                if (a.callId.isNotBlank()) {
+                    val prev = _approvals.value[a.callId]
+                    _approvals.value = _approvals.value + (a.callId to a.copy(
+                        summary = a.summary.ifBlank { prev?.summary ?: "" },
+                        status = a.status.ifBlank { "resolved" },
+                    ))
+                    relayLog(RELAY_LOG_TAG, "approval resolved call=${a.callId.take(16)} decision=${a.decision}")
+                }
+            }
+            is RelayFrame.AttachmentReady -> {
+                val a = frame.attachment
+                if (a.id.isNotBlank()) {
+                    _attachments.value = _attachments.value + (a.id to a)
+                    relayLog(RELAY_LOG_TAG, "attachment ready id=${a.id.take(16)} bytes=${a.bytes}")
+                }
+            }
         }
+    }
+
+    private fun onSendAck(ack: SendAck) {
+        synchronized(lock) { ackJobs.remove(ack.clientMsgId)?.cancel() }
+        recordOutcome(SendOutcome(ack.clientMsgId, ack.accepted, ack.detail))
+        if (ack.accepted) {
+            _commandsSupported.value = true
+        } else if (looksUnsupported(ack.detail)) {
+            _commandsSupported.value = false
+        }
+        relayLog(RELAY_LOG_TAG, "ack id=${ack.clientMsgId} accepted=${ack.accepted}")
     }
 
     private val listener = object : WebSocketListener() {
@@ -189,7 +309,7 @@ class PiRelayClient(
             timeoutJob = null
             failures = 0
             _state.value = RelayState.Open
-            log("opened host=${webSocket.request().url.host} port=${webSocket.request().url.port}")
+            relayLog(RELAY_LOG_TAG, "opened host=${webSocket.request().url.host} port=${webSocket.request().url.port}")
             synchronized(lock) {
                 pendingResume?.let { webSocket.send(resumeFrame(it)) }
             }
@@ -245,13 +365,13 @@ class PiRelayClient(
                 pingJob?.cancel()
                 pingJob = null
                 val message = relayAuthFailureMessage(token.isBlank())
-                log("auth failed ${webSocket.request().url.host} $message")
+                relayLog(RELAY_LOG_TAG, "auth failed ${webSocket.request().url.host} $message")
                 _state.value = RelayState.Error(message)
                 return
             }
             val cause = safeFailure(t)
             val where = webSocket.request().url
-            log("connect failed host=${where.host} port=${where.port} $cause")
+            relayLog(RELAY_LOG_TAG, "connect failed host=${where.host} port=${where.port} $cause")
             scheduleReconnect("Relay connect failed ($cause).")
         }
     }
@@ -259,12 +379,5 @@ class PiRelayClient(
     private fun safeFailure(t: Throwable): String {
         val raw = "${t.javaClass.simpleName}: ${t.message}"
         return if (token.isNotBlank()) raw.replace(token, "\u2022\u2022\u2022") else raw
-    }
-
-    private fun log(msg: String) {
-        try {
-            Log.d(RELAY_LOG_TAG, msg)
-        } catch (_: RuntimeException) {
-        }
     }
 }

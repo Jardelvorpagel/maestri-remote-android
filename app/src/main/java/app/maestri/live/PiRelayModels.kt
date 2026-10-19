@@ -45,9 +45,14 @@ sealed interface RelayFrame {
         val sessionId: String,
         val replayFrom: Long?,
         val replayTo: Long?,
+        val commands: Boolean? = null,
     ) : RelayFrame
 
     data class Event(val event: PiEvent) : RelayFrame
+    data class SendAckFrame(val ack: SendAck) : RelayFrame
+    data class ApprovalRequest(val approval: Approval) : RelayFrame
+    data class ApprovalResolved(val approval: Approval) : RelayFrame
+    data class AttachmentReady(val attachment: Attachment) : RelayFrame
     data object Ping : RelayFrame
     data object Pong : RelayFrame
     data class ResumeGap(val oldestSeq: Long?) : RelayFrame
@@ -224,7 +229,12 @@ object PiRelayParser {
                 sessionId = root["sessionId"] as? String ?: "",
                 replayFrom = asLong(root["replayFrom"]),
                 replayTo = asLong(root["replayTo"]),
+                commands = asCommandFlag(root["commands"]) ?: asCommandFlag(root["commandsSupported"]),
             )
+            "approval_request" -> parseApproval(root)?.let(RelayFrame::ApprovalRequest)
+            "approval_resolved" -> parseApproval(root)?.let(RelayFrame::ApprovalResolved)
+            "send_ack" -> parseSendAck(root)?.let(RelayFrame::SendAckFrame)
+            "attachment_ready" -> parseAttachment(root)?.let(RelayFrame::AttachmentReady)
             "ping" -> RelayFrame.Ping
             "pong" -> RelayFrame.Pong
             "resume_gap" -> RelayFrame.ResumeGap(oldestSeq = asLong(root["oldestSeq"]))
@@ -263,6 +273,17 @@ object PiRelayParser {
                 )
             },
         )
+    }
+
+    private fun asCommandFlag(v: Any?): Boolean? = when (v) {
+        is Boolean -> v
+        is List<*> -> v.isNotEmpty()
+        is String -> when (v.lowercase()) {
+            "true", "supported", "enabled" -> true
+            "false", "unsupported", "disabled" -> false
+            else -> null
+        }
+        else -> null
     }
 
     private fun asLong(v: Any?): Long? = when (v) {
@@ -343,3 +364,164 @@ fun buildRelayRequest(url: String, token: String, queryFallback: Boolean): Reque
 fun relayAuthFailureMessage(tokenBlank: Boolean): String =
     if (tokenBlank) "This relay requires a token (HTTP 401)."
     else "Relay rejected the token (HTTP 401)."
+
+/** Transport-boundary log helper. Callers pass metadata only, never the token. */
+internal fun relayLog(tag: String, msg: String) {
+    try {
+        android.util.Log.d(tag, msg)
+    } catch (_: RuntimeException) {
+    }
+}
+
+// ------------------------------------------------------- v2 commands + acks
+
+/** Outcome of one `send_message`, keyed by clientMsgId. */
+data class SendOutcome(
+    val clientMsgId: String,
+    val accepted: Boolean,
+    val detail: String = "",
+)
+
+/** Parsed `send_ack` frame. */
+data class SendAck(
+    val clientMsgId: String,
+    val accepted: Boolean,
+    val detail: String = "",
+)
+
+private val REJECTED_STATUSES = setOf("rejected", "error", "denied", "failed", "unsupported")
+private val ACCEPTED_STATUSES = setOf("accepted", "ok", "received", "delivered", "acked")
+
+/** Detail hinting the server does not implement commands (v1 daemon). */
+internal fun looksUnsupported(detail: String): Boolean {
+    val d = detail.lowercase()
+    return d.contains("support") || d.contains("unknown kind") ||
+        d.contains("not implemented") || d.contains("unrecognized")
+}
+
+/**
+ * Tolerant ack rule: a `send_ack` naming our id counts as accepted unless it
+ * carries an explicit rejection (error text, rejected/accepted:false/ok:false
+ * flags, or a rejected status word). Bare acks accept.
+ */
+fun parseSendAck(root: Map<*, *>): SendAck? {
+    val id = (root["clientMsgId"] as? String
+        ?: root["client_msg_id"] as? String
+        ?: return null).ifBlank { return null }
+    val error = root["error"] as? String ?: ""
+    val detailField = root["detail"] as? String ?: ""
+    val message = root["message"] as? String ?: ""
+    val status = (root["status"] as? String ?: "").lowercase()
+    val rejected = error.isNotBlank() ||
+        (root["rejected"] as? Boolean) == true ||
+        (root["accepted"] as? Boolean) == false && root.containsKey("accepted") ||
+        (root["ok"] as? Boolean) == false && root.containsKey("ok") ||
+        status in REJECTED_STATUSES
+    val detail = error.ifBlank { detailField.ifBlank { message.ifBlank { status } } }
+    return SendAck(clientMsgId = id, accepted = !rejected, detail = detail)
+}
+
+/** Route one ack into the outcomes map. */
+fun applySendAck(current: Map<String, SendOutcome>, ack: SendAck): Map<String, SendOutcome> =
+    current + (ack.clientMsgId to SendOutcome(ack.clientMsgId, ack.accepted, ack.detail))
+
+// ------------------------------------------------------- v2 approvals
+
+/** One tool approval, tracked by callId from request through resolution. */
+data class Approval(
+    val callId: String = "",
+    val tool: String = "",
+    val summary: String = "",
+    val argsPreview: String = "",
+    val status: String = "",
+    val decision: String = "",
+)
+
+/** Tolerant approval parse: `tool` may be a name string or a {name} object. */
+fun parseApproval(root: Map<*, *>): Approval? {
+    val callId = (root["callId"] as? String
+        ?: root["call_id"] as? String
+        ?: return null).ifBlank { return null }
+    val toolRaw = root["tool"]
+    val tool = (toolRaw as? String)
+        ?: (toolRaw as? Map<*, *>)?.get("name") as? String
+        ?: ""
+    return Approval(
+        callId = callId,
+        tool = tool,
+        summary = root["summary"] as? String ?: "",
+        argsPreview = ((root["argsPreview"] as? String ?: "")).take(500),
+        status = root["status"] as? String ?: "",
+        decision = root["decision"] as? String ?: "",
+    )
+}
+
+// ------------------------------------------------------- v2 attachments
+
+/** One attachment, from `attachment_ready` or an upload response. */
+data class Attachment(
+    val id: String = "",
+    val name: String = "",
+    val bytes: Long = 0L,
+    val path: String = "",
+)
+
+private fun anyAsLong(v: Any?): Long? = when (v) {
+    is Long -> v
+    is Number -> v.toLong()
+    is String -> v.toLongOrNull()
+    else -> null
+}
+
+/** Tolerant attachment parse; byte counts may arrive as strings. */
+fun parseAttachment(root: Map<*, *>): Attachment? {
+    val id = (root["id"] as? String ?: return null).ifBlank { return null }
+    return Attachment(
+        id = id,
+        name = root["name"] as? String ?: "",
+        bytes = anyAsLong(root["bytes"]) ?: anyAsLong(root["size"]) ?: 0L,
+        path = root["path"] as? String ?: "",
+    )
+}
+
+// ------------------------------------------------------- v2 outbound framing
+
+internal fun jsonEscape(s: String): String = buildString {
+    for (c in s) {
+        when (c) {
+            '"' -> append("\\\"")
+            '\\' -> append("\\\\")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> if (c < ' ') append("\\u%04x".format(c.code)) else append(c)
+        }
+    }
+}
+
+/** `send_message` command frame. */
+fun sendMessageFrame(text: String, attachmentIds: List<String>, clientMsgId: String): String {
+    val ids = attachmentIds.joinToString(",") { "\"${jsonEscape(it)}\"" }
+    return "{\"kind\":\"send_message\",\"text\":\"${jsonEscape(text)}\"," +
+        "\"attachmentIds\":[$ids],\"clientMsgId\":\"${jsonEscape(clientMsgId)}\"}"
+}
+
+/** `tool_decision` command frame; values pass through for the server to judge. */
+fun toolDecisionFrame(callId: String, decision: String, remember: String): String =
+    "{\"kind\":\"tool_decision\",\"callId\":\"${jsonEscape(callId)}\"," +
+        "\"decision\":\"${jsonEscape(decision)}\",\"remember\":\"${jsonEscape(remember)}\"}"
+
+/** `ws(s)://host:port/<path>` → `http(s)://host:port/upload`, query stripped. */
+fun uploadUrlFor(relayUrl: String): String {
+    var t = relayUrl.trim()
+    t = when {
+        t.startsWith("ws://", ignoreCase = true) -> "http://" + t.substring(5)
+        t.startsWith("wss://", ignoreCase = true) -> "https://" + t.substring(6)
+        else -> t
+    }
+    val afterScheme = t.indexOf("://") + 3
+    val pathAt = t.indexOf('/', afterScheme)
+    val queryAt = t.indexOf('?', afterScheme)
+    val end = listOf(pathAt, queryAt).filter { it >= 0 }.minOrNull() ?: t.length
+    return t.substring(0, end) + "/upload"
+}
