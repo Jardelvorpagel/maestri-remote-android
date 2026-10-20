@@ -1,5 +1,6 @@
 package app.maestri.live
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -267,5 +268,174 @@ class PiRelayClientTest {
             "Relay rejected the token (HTTP 401).",
             relayAuthFailureMessage(false),
         )
+    }
+
+    // ------------------------------------------------------- decision mirror
+
+    @Test
+    fun decisionPromptOpenParses() {
+        val frame = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"open","promptKind":"approve","title":"Run ls?","at":"2026-10-19T00:00:00Z"}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertTrue(frame.prompt.isOpen)
+        assertEquals("Run ls?", frame.prompt.label())
+        assertEquals("approve", frame.prompt.promptKind)
+    }
+
+    @Test
+    fun decisionPromptOptionsParseOrdered() {
+        val frame = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"open","promptKind":"pick","options":["Yes","No","Later"]}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertEquals(listOf("Yes", "No", "Later"), frame.prompt.options)
+    }
+
+    @Test
+    fun decisionPromptMissingOrEmptyOptionsMeansNoButtons() {
+        val missing = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"open","promptKind":"approve"}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertEquals(emptyList<String>(), missing.prompt.options)
+        val empty = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"open","options":[]}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertEquals(emptyList<String>(), empty.prompt.options)
+        // Non-list and non-string entries never crash, never surface.
+        val junk = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"open","options":["Ok",42,null,"  ",{"x":1}]}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertEquals(listOf("Ok"), junk.prompt.options)
+        val notList = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"open","options":"yes"}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertEquals(emptyList<String>(), notList.prompt.options)
+    }
+
+    @Test
+    fun decisionPromptClosedParses() {
+        val frame = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"closed","promptKind":"approve"}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertFalse(frame.prompt.isOpen)
+    }
+
+    @Test
+    fun decisionPromptLabelFallsBackToKind() {
+        val frame = PiRelayParser.parseFrame(
+            """{"kind":"decision_prompt","decision":{"phase":"open","promptKind":"deny"}}""",
+        ) as RelayFrame.DecisionPromptFrame
+        assertEquals("deny", frame.prompt.label())
+    }
+
+    @Test
+    fun decisionPromptBadShapesIgnored() {
+        assertNull(PiRelayParser.parseFrame("""{"kind":"decision_prompt"}"""))
+        assertNull(
+            PiRelayParser.parseFrame(
+                """{"kind":"decision_prompt","decision":{"phase":"maybe","promptKind":"x"}}""",
+            ),
+        )
+    }
+
+    @Test
+    fun decisionPromptNeverParsesAsEvent() {
+        assertNull(
+            PiRelayParser.parseEvent(
+                """{"kind":"decision_prompt","seq":1,"decision":{"phase":"open"}}""",
+            ),
+        )
+    }
+
+    // ------------------------------------------------------- connect policy + error copy
+
+    @Test
+    fun shouldRedialIsSingleFlight() {
+        assertTrue(shouldRedial(false, RelayState.Disconnected))
+        assertTrue(shouldRedial(false, RelayState.Connecting))
+        // Client present but Disconnected = dial still in its startup window
+        // (the client's own replay briefly overwrites Connecting): hold fire.
+        assertFalse(shouldRedial(true, RelayState.Disconnected))
+        assertTrue(shouldRedial(true, RelayState.Error("Relay connect failed (x).")))
+        assertFalse(shouldRedial(true, RelayState.Connecting))
+        assertFalse(shouldRedial(true, RelayState.Open))
+    }
+
+    @Test
+    fun relayHostPortStripsToHostPort() {
+        assertEquals("100.95.36.90:7487", relayHostPort("ws://100.95.36.90:7487/stream"))
+        assertEquals("h:1", relayHostPort("wss://h:1/stream?token=t"))
+        assertEquals("h:2", relayHostPort("  https://h:2/a/b  "))
+        assertEquals("", relayHostPort(""))
+        assertEquals("", relayHostPort("garbage"))
+    }
+
+    @Test
+    fun relayErrorBodyExact() {
+        assertEquals(
+            "100.95.36.90:7487 — Relay connect timed out after 10000ms, retrying. " +
+                "Automatic retry is scheduled — or tap Connect to retry now.",
+            relayErrorBody(
+                "ws://100.95.36.90:7487/stream",
+                "Relay connect timed out after 10000ms, retrying.",
+                true,
+            ),
+        )
+        assertEquals(
+            "Relay rejected the token (HTTP 401). Tap Connect to retry.",
+            relayErrorBody("", "Relay rejected the token (HTTP 401).", false),
+        )
+    }
+
+    @Test
+    fun refusedConnectionSchedulesAutoRetry() {
+        val client = PiRelayClient("ws://127.0.0.1:9/stream", "")
+        try {
+            client.connect()
+            runBlocking {
+                withTimeout(15_000) {
+                    while (!client.autoRetry.value) delay(50)
+                }
+            }
+            assertTrue(client.state.value is RelayState.Error)
+            assertTrue(client.autoRetry.value)
+        } finally {
+            client.disconnect()
+        }
+        assertFalse(client.autoRetry.value)
+        assertTrue(client.state.value is RelayState.Disconnected)
+    }
+
+    @Test
+    fun unauthorizedSchedulesPoliteRetryInsteadOfDying() {
+        val server = com.sun.net.httpserver.HttpServer.create(
+            java.net.InetSocketAddress("127.0.0.1", 0),
+            0,
+        )
+        server.createContext("/stream") { exchange ->
+            exchange.sendResponseHeaders(401, -1)
+            exchange.close()
+        }
+        server.start()
+        try {
+            val port = server.address.port
+            val client = PiRelayClient("ws://127.0.0.1:$port/stream", "")
+            try {
+                client.connect()
+                runBlocking {
+                    withTimeout(15_000) {
+                        while (!client.autoRetry.value) delay(50)
+                    }
+                }
+                val state = client.state.value
+                assertTrue(state is RelayState.Error)
+                assertEquals("This relay requires a token (HTTP 401).", (state as RelayState.Error).message)
+                assertTrue(client.autoRetry.value)
+            } finally {
+                client.disconnect()
+            }
+            assertFalse(client.autoRetry.value)
+        } finally {
+            server.stop(0)
+        }
     }
 }

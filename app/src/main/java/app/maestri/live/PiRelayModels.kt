@@ -53,6 +53,7 @@ sealed interface RelayFrame {
     data class ApprovalRequest(val approval: Approval) : RelayFrame
     data class ApprovalResolved(val approval: Approval) : RelayFrame
     data class AttachmentReady(val attachment: Attachment) : RelayFrame
+    data class DecisionPromptFrame(val prompt: DecisionPrompt) : RelayFrame
     data object Ping : RelayFrame
     data object Pong : RelayFrame
     data class ResumeGap(val oldestSeq: Long?) : RelayFrame
@@ -235,6 +236,7 @@ object PiRelayParser {
             "approval_resolved" -> parseApproval(root)?.let(RelayFrame::ApprovalResolved)
             "send_ack" -> parseSendAck(root)?.let(RelayFrame::SendAckFrame)
             "attachment_ready" -> parseAttachment(root)?.let(RelayFrame::AttachmentReady)
+            "decision_prompt" -> parseDecisionPrompt(root)?.let(RelayFrame::DecisionPromptFrame)
             "ping" -> RelayFrame.Ping
             "pong" -> RelayFrame.Pong
             "resume_gap" -> RelayFrame.ResumeGap(oldestSeq = asLong(root["oldestSeq"]))
@@ -246,7 +248,7 @@ object PiRelayParser {
     fun parseEvent(json: String): PiEvent? {
         val root = MiniJson.parse(json) as? Map<*, *> ?: return null
         val kind = root["kind"] as? String ?: return null
-        if (kind == "hello" || kind == "ping" || kind == "pong" || kind == "resume_gap" || kind == "resume") return null
+        if (kind == "hello" || kind == "ping" || kind == "pong" || kind == "resume_gap" || kind == "resume" || kind == "decision_prompt") return null
         return parseEvent(root, kind)
     }
 
@@ -365,6 +367,41 @@ fun relayAuthFailureMessage(tokenBlank: Boolean): String =
     if (tokenBlank) "This relay requires a token (HTTP 401)."
     else "Relay rejected the token (HTTP 401)."
 
+/** `ws(s)://host:port/<path>` → `host:port`; blank when unparseable. */
+fun relayHostPort(url: String): String {
+    var t = url.trim()
+    t = when {
+        t.startsWith("ws://", ignoreCase = true) -> t.substring(5)
+        t.startsWith("wss://", ignoreCase = true) -> t.substring(6)
+        t.startsWith("http://", ignoreCase = true) -> t.substring(7)
+        t.startsWith("https://", ignoreCase = true) -> t.substring(8)
+        else -> return ""
+    }
+    return t.substringBefore('/').substringBefore('?').takeIf { it.isNotBlank() } ?: ""
+}
+
+/**
+ * Chat empty-state body for a relay error: host:port when known, the failure
+ * reason verbatim, then the retry position — scheduled automatic retry vs
+ * tap-to-retry. The reason never lives in logcat alone.
+ */
+fun relayErrorBody(url: String, message: String, autoRetry: Boolean): String {
+    val where = relayHostPort(url)
+    val head = if (where.isNotBlank()) "$where — $message" else message
+    val hint = if (autoRetry) "Automatic retry is scheduled — or tap Connect to retry now."
+    else "Tap Connect to retry."
+    return "$head $hint"
+}
+
+/**
+ * Single-flight connect policy: dial fresh with no client; never interrupt an
+ * attempt already Connecting/Open, and never redial a client still in its
+ * startup window (client present but Disconnected — the client's own replay
+ * briefly overwrites Connecting); only a terminal Error with a client redials.
+ */
+fun shouldRedial(hasClient: Boolean, state: RelayState): Boolean =
+    !hasClient || state is RelayState.Error
+
 /** Transport-boundary log helper. Callers pass metadata only, never the token. */
 internal fun relayLog(tag: String, msg: String) {
     try {
@@ -455,6 +492,50 @@ fun parseApproval(root: Map<*, *>): Approval? {
         reason = root["reason"] as? String ?: "",
         status = root["status"] as? String ?: "",
         decision = root["decision"] as? String ?: "",
+    )
+}
+
+// ------------------------------------------------------- decision mirror
+
+/**
+ * Pi's own decision box, mirrored from the host: `open` shows the banner,
+ * `closed` clears it. `options` (possibly absent on old frames) renders as
+ * plain chat-message shortcuts: tapping one sends its label through the normal
+ * optimistic send path — no approval semantics, no resolver in the API.
+ */
+data class DecisionPrompt(
+    val phase: String = "",
+    val promptKind: String = "",
+    val title: String = "",
+    val at: String = "",
+    val options: List<String> = emptyList(),
+)
+
+val DecisionPrompt.isOpen: Boolean get() = phase == "open"
+
+/** Banner headline: title wins, promptKind is the fallback, never blank. */
+fun DecisionPrompt.label(): String =
+    title.ifBlank { promptKind.ifBlank { "decision" } }
+
+/**
+ * Tolerant `decision_prompt` parse: unknown phases yield null (ignored, the
+ * banner keeps its current state); extra fields are ignored; `options` is
+ * null-safe (absent/empty/non-list all mean no buttons, never a crash).
+ */
+fun parseDecisionPrompt(root: Map<*, *>): DecisionPrompt? {
+    val inner = root["decision"] as? Map<*, *> ?: return null
+    val phase = ((inner["phase"] as? String) ?: "").lowercase()
+    if (phase != "open" && phase != "closed") return null
+    val options = (inner["options"] as? List<*>)
+        ?.mapNotNull { it as? String }
+        ?.filter { it.isNotBlank() }
+        ?: emptyList()
+    return DecisionPrompt(
+        phase = phase,
+        promptKind = inner["promptKind"] as? String ?: "",
+        title = inner["title"] as? String ?: "",
+        at = inner["at"] as? String ?: "",
+        options = options,
     )
 }
 

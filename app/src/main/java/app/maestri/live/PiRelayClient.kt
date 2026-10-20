@@ -18,6 +18,12 @@ import okio.ByteString
 /** Client heartbeat while open; the server pings every 20–30s and we answer pong. */
 private const val CLIENT_PING_MS = 25_000L
 
+/**
+ * 401 cadence: a rejected token retries on this floor, never hammering, never
+ * dying silently. User Stop still kills the loop; manual Connect redials at once.
+ */
+const val AUTH_RETRY_FLOOR_MS = 60_000L
+
 /** Transport-boundary log tag. Attempt lines carry host/port + outcome only, never the token. */
 private const val RELAY_LOG_TAG = "PiRelay"
 
@@ -64,6 +70,24 @@ class PiRelayClient(
     private val _attachments = MutableStateFlow<Map<String, Attachment>>(emptyMap())
     val attachments: StateFlow<Map<String, Attachment>> = _attachments.asStateFlow()
 
+    /**
+     * Retry policy, stated: transport failures (timeout/refused/closed, plus a
+     * synchronous dial throw) reschedule with [backoffBaseMs] (1s doubling to
+     * the 30s cap + ≤1s jitter); 401s reschedule on [AUTH_RETRY_FLOOR_MS] (60s —
+     * polite, and a transient rejection can no longer strand the loop); user
+     * Stop never schedules (false). The Chat error strip copies this into the
+     * body so the retry position is on screen, not in logcat.
+     */
+    private val _autoRetry = MutableStateFlow(false)
+    val autoRetry: StateFlow<Boolean> = _autoRetry.asStateFlow()
+
+    /**
+     * Pi's own decision box, mirrored: the latest open prompt, null when closed
+     * or never seen. The phone never answers these — no resolver in the API.
+     */
+    private val _decisionPrompt = MutableStateFlow<DecisionPrompt?>(null)
+    val decisionPrompt: StateFlow<DecisionPrompt?> = _decisionPrompt.asStateFlow()
+
     private val lock = Any()
     private var socket: WebSocket? = null
     private var reconnectJob: Job? = null
@@ -72,7 +96,6 @@ class PiRelayClient(
     private var attemptId = 0L
     private var failures = 0
     private var closedByUs = false
-    private var authFailed = false
     private var queryFallback = false
     private var pendingResume: Long? = null
     private var helloSeen = false
@@ -84,7 +107,6 @@ class PiRelayClient(
         if (!configured) return
         if (_state.value is RelayState.Open || _state.value is RelayState.Connecting) return
         closedByUs = false
-        authFailed = false
         scope.launch { openSocket() }
     }
 
@@ -96,12 +118,14 @@ class PiRelayClient(
         pingJob = null
         timeoutJob?.cancel()
         timeoutJob = null
+        _autoRetry.value = false
         synchronized(lock) {
             ackJobs.values.forEach { it.cancel() }
             ackJobs.clear()
             helloSeen = false
         }
         _commandsSupported.value = null
+        _decisionPrompt.value = null
         synchronized(lock) {
             socket?.close(1000, null)
             socket = null
@@ -171,7 +195,7 @@ class PiRelayClient(
     }
 
     private fun openSocket() {
-        if (!configured || closedByUs || authFailed) return
+        if (!configured || closedByUs) return
         val request = try {
             buildRelayRequest(url, token, queryFallback)
         } catch (_: Exception) {
@@ -194,7 +218,10 @@ class PiRelayClient(
             timeoutJob = null
             val cause = safeFailure(e)
             relayLog(RELAY_LOG_TAG, "create failed host=$host port=$port $cause")
-            _state.value = RelayState.Error("Relay connect failed ($cause).")
+            // Never die silently here: a synchronous throw (exhausted dispatcher,
+            // socket factory failure) enters the same bounded retry as any transport
+            // failure instead of stranding the UI on Connect with a dead loop.
+            scheduleReconnect("Relay connect failed ($cause).")
             return
         }
         timeoutJob?.cancel()
@@ -215,7 +242,13 @@ class PiRelayClient(
         }
     }
 
-    private fun scheduleReconnect(reason: String? = null) {
+    /**
+     * Bounded retry, stated: transport failures wait [backoffBaseMs] (1s doubling
+     * to the 30s cap + ≤1s jitter); 401s wait [floorMs] ([AUTH_RETRY_FLOOR_MS] —
+     * polite, and a transient 401 can no longer kill the loop until the next
+     * manual tap). Only user Stop ([closedByUs]) schedules nothing.
+     */
+    private fun scheduleReconnect(reason: String? = null, floorMs: Long = 0L) {
         synchronized(lock) {
             socket = null
         }
@@ -223,14 +256,15 @@ class PiRelayClient(
         timeoutJob = null
         pingJob?.cancel()
         pingJob = null
-        if (closedByUs || authFailed) {
-            if (closedByUs) _state.value = RelayState.Disconnected
+        if (closedByUs) {
+            _state.value = RelayState.Disconnected
             return
         }
         if (reason != null) _state.value = RelayState.Error(reason)
         else _state.value = RelayState.Connecting
-        val waitMs = backoffBaseMs(failures) + (0L..999L).random()
+        val waitMs = maxOf(floorMs, backoffBaseMs(failures) + (0L..999L).random())
         failures++
+        _autoRetry.value = true
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             delay(waitMs)
@@ -289,6 +323,10 @@ class PiRelayClient(
                     relayLog(RELAY_LOG_TAG, "attachment ready id=${a.id.take(16)} bytes=${a.bytes}")
                 }
             }
+            is RelayFrame.DecisionPromptFrame -> {
+                _decisionPrompt.value = if (frame.prompt.isOpen) frame.prompt else null
+                relayLog(RELAY_LOG_TAG, "decision prompt phase=${frame.prompt.phase} kind=${frame.prompt.promptKind.take(32)}")
+            }
         }
     }
 
@@ -308,6 +346,7 @@ class PiRelayClient(
             timeoutJob?.cancel()
             timeoutJob = null
             failures = 0
+            _autoRetry.value = false
             _state.value = RelayState.Open
             relayLog(RELAY_LOG_TAG, "opened host=${webSocket.request().url.host} port=${webSocket.request().url.port}")
             synchronized(lock) {
@@ -351,6 +390,7 @@ class PiRelayClient(
             if (response?.code == 401 && !queryFallback && token.isNotBlank()) {
                 queryFallback = true
                 failures = 0
+                _autoRetry.value = true
                 reconnectJob?.cancel()
                 reconnectJob = scope.launch {
                     delay(500L)
@@ -359,14 +399,13 @@ class PiRelayClient(
                 return
             }
             if (response?.code == 401) {
-                authFailed = true
                 reconnectJob?.cancel()
                 synchronized(lock) { socket = null }
                 pingJob?.cancel()
                 pingJob = null
                 val message = relayAuthFailureMessage(token.isBlank())
                 relayLog(RELAY_LOG_TAG, "auth failed ${webSocket.request().url.host} $message")
-                _state.value = RelayState.Error(message)
+                scheduleReconnect(message, floorMs = AUTH_RETRY_FLOOR_MS)
                 return
             }
             val cause = safeFailure(t)

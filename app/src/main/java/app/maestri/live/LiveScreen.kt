@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -41,14 +43,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriRadii
 import app.maestri.ui.Style.Rhythm
@@ -60,20 +62,6 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
-
-@Composable
-fun LiveRoute(
-    onBack: () -> Unit,
-    clientFactory: (url: String, token: String) -> PiRelayClient = { url, token -> PiRelayClient(url, token) },
-) {
-    val appContext = LocalContext.current.applicationContext
-    val store = remember { DataStorePiRelayStore(appContext) }
-    val vm: LiveViewModel = viewModel(
-        key = "live",
-        factory = LiveViewModelFactory(store, clientFactory),
-    )
-    LiveScreen(onBack = onBack, vm = vm)
-}
 
 private sealed interface DisplayRow {
     data class Message(val event: PiEvent) : DisplayRow
@@ -133,6 +121,47 @@ private fun formatTs(ts: String): String =
 @Composable
 fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
     val colors = LocalMaestriColors.current
+    val relayState by vm.relayState.collectAsState()
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding()
+            .background(colors.canvasChrome),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Text(
+                "‹",
+                fontSize = 20.sp,
+                color = colors.secondaryLabel,
+                modifier = Modifier.clickable { onBack() }.padding(end = 12.dp),
+            )
+            Text(
+                "Live",
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            RelayChip(state = relayState)
+        }
+        LiveFeedContent(vm)
+    }
+}
+
+/**
+ * Relay feed body (settings, event list, decision banner, composer) with no
+ * scaffold of its own: hosted by LiveScreen or by a terminal's Chat mode.
+ * ColumnScope for the weight-bearing list box; the rendering lives here once,
+ * never duplicated per host.
+ */
+@Composable
+fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
+    val colors = LocalMaestriColors.current
     val scope = rememberCoroutineScope()
     val relayState by vm.relayState.collectAsState()
     val events by vm.events.collectAsState()
@@ -146,6 +175,23 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
     val expiredSet by vm.expiredApprovals.collectAsState()
     val approvalsMap by vm.approvals.collectAsState()
     val composeState by vm.composeState.collectAsState()
+    val decisionPrompt by vm.decisionPrompt.collectAsState()
+    val autoRetry by vm.autoRetry.collectAsState()
+    val relayError = relayState as? RelayState.Error
+
+    // Auto-connect on entering Chat when a relay URL is already stored: one shot
+    // per composition (leaving Chat disposes it, so re-entry retries; Stop sets a
+    // disconnected state with autoTried true, so it never loops against the user).
+    // Duplicate firings collapse in LiveViewModel.connect (single-flight: no-op
+    // while Connecting/Open), so the device can never show a double dial again.
+    // No stored URL → the config-first empty state below stays, nothing invented.
+    var autoTried by remember { mutableStateOf(false) }
+    LaunchedEffect(url) {
+        if (!autoTried && url.isNotBlank() && vm.relayState.value is RelayState.Disconnected) {
+            autoTried = true
+            vm.connect()
+        }
+    }
 
     val approvalViews = remember(events, approvalsMap, decided, expiredSet) {
         buildApprovalViews(approvalsMap, events, decided, expiredSet)
@@ -184,34 +230,7 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
         if (followingNow) listState.scrollToItem(allRows.size - 1)
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .imePadding()
-            .background(colors.canvasChrome),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-            Text(
-                "‹",
-                fontSize = 20.sp,
-                color = colors.secondaryLabel,
-                modifier = Modifier.clickable { onBack() }.padding(end = 12.dp),
-            )
-            Text(
-                "Live",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            RelayChip(state = relayState)
-        }
-
+    Column(Modifier.fillMaxSize()) {
         RelaySettingsCard(
             url = url,
             token = token,
@@ -221,6 +240,17 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
             onConnect = { vm.connect() },
             onDisconnect = { vm.disconnect() },
         )
+
+        // Persistent outage strip: the empty-state error card below only shows with
+        // zero rows, but outages usually strike with history on screen — then the
+        // only signal was the Connect button. This strip shows iff the relay is in
+        // Error (title + reason + retry position) and hides itself on Open, so a
+        // stale banner after reconnect is structurally impossible. It carries no
+        // buttons, unlike the relay approval cards, and sits above the feed while
+        // the Pi decision mirror sits above the composer.
+        if (relayError != null && allRows.isNotEmpty()) {
+            LiveErrorStrip(message = relayError.message, url = url, autoRetry = autoRetry)
+        }
 
         notice?.let { n ->
             Row(
@@ -253,6 +283,10 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
                 allRows.isEmpty() && relayState is RelayState.Open -> LiveEmpty(
                     title = "Waiting for events…",
                     body = "The stream is open. New Pi activity lands here.",
+                )
+                allRows.isEmpty() && relayError != null -> LiveEmpty(
+                    title = "Relay error",
+                    body = relayErrorBody(url, relayError.message, autoRetry),
                 )
                 allRows.isEmpty() -> LiveEmpty(
                     title = "Not connected",
@@ -305,7 +339,111 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
             }
         }
 
+        decisionPrompt?.takeIf { it.isOpen }?.let {
+            LiveDecisionBanner(
+                prompt = it,
+                sending = pending.any { send -> send.status == LiveSendStatus.SENDING },
+                onOption = { label -> vm.sendOption(label) },
+            )
+        }
         LiveComposerBar(vm)
+    }
+}
+
+@Composable
+private fun LiveErrorStrip(message: String, url: String, autoRetry: Boolean) {
+    val colors = LocalMaestriColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(top = 6.dp)
+            .background(colors.warning.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .border(1.dp, colors.warning.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            "Relay error",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.warning,
+        )
+        Text(
+            relayErrorBody(url, message, autoRetry),
+            fontSize = 12.5.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun LiveDecisionBanner(prompt: DecisionPrompt, sending: Boolean, onOption: (String) -> Unit) {
+    val colors = LocalMaestriColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 6.dp)
+            .background(colors.warning.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+            .border(1.dp, colors.warning.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(7.dp).background(colors.warning, CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Pi aguardando decisão: " + prompt.label(),
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (prompt.options.isEmpty()) {
+                        "Responda no teclado do Pi — o app só espelha."
+                    } else {
+                        "Toque para enviar como mensagem, ou responda no Pi."
+                    },
+                    fontSize = 11.sp,
+                    color = colors.secondaryLabel,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (prompt.options.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                prompt.options.forEach { option ->
+                    TextButton(
+                        onClick = { onOption(option) },
+                        enabled = !sending,
+                        modifier = Modifier
+                            .border(1.dp, colors.warning.copy(alpha = 0.45f), pillShape())
+                            .background(
+                                colors.warning.copy(alpha = if (sending) 0.04f else 0.12f),
+                                pillShape(),
+                            ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            option,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (sending) colors.secondaryLabel else colors.warning,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -442,6 +580,10 @@ private fun RelaySettingsCard(
                     label = { Text("Relay URL", fontSize = 11.sp) },
                     textStyle = monoHud(12),
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        autoCorrect = false,
+                    ),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(6.dp))

@@ -69,4 +69,73 @@ class LiveViewModelTest {
         assertTrue(vm.relayState.value is RelayState.Disconnected)
         vm.disconnect()
     }
+
+    @Test
+    fun rapidDoubleConnectDialsOnce() {
+        val store = InMemoryPiRelayStore()
+        store.setUrl("ws://127.0.0.1:9/stream")
+        var calls = 0
+        var created: PiRelayClient? = null
+        val vm = LiveViewModel(
+            store = store,
+            clientFactory = { url, token ->
+                calls++
+                PiRelayClient(url, token).also { created = it }
+            },
+            scope = testScope(),
+        )
+        // Duplicate effect firing / auto+manual race while the attempt is in flight
+        // must collapse to one dial (device showed two `connecting` lines 275ms apart).
+        vm.connect()
+        vm.connect()
+        assertEquals(1, calls)
+        // After a real Stop the next Connect redials.
+        vm.disconnect()
+        vm.connect()
+        assertEquals(2, calls)
+        created?.disconnect()
+        vm.disconnect()
+    }
+
+    @Test
+    fun sweepStalePendingFailsOnlyOldSendingRows() {
+        val old = LivePendingSend("m1", "hi", emptyList(), LiveSendStatus.SENDING, createdAtMs = 0L)
+        val fresh = LivePendingSend("m2", "hi", emptyList(), LiveSendStatus.SENDING, createdAtMs = 1_999_000L)
+        val failed = LivePendingSend("m3", "hi", emptyList(), LiveSendStatus.FAILED, "x", createdAtMs = 0L)
+        val out = sweepStalePending(listOf(old, fresh, failed), nowMs = 2_000_000L)
+        assertEquals(LiveSendStatus.FAILED, out.first { it.clientMsgId == "m1" }.status)
+        assertEquals("no send_ack from the relay — tap retry", out.first { it.clientMsgId == "m1" }.detail)
+        assertEquals(LiveSendStatus.SENDING, out.first { it.clientMsgId == "m2" }.status)
+        assertEquals(LiveSendStatus.FAILED, out.first { it.clientMsgId == "m3" }.status)
+        assertEquals("x", out.first { it.clientMsgId == "m3" }.detail)
+    }
+
+    @Test
+    fun sendOptionBlankLabelIsNoop() {
+        val store = InMemoryPiRelayStore()
+        store.setUrl("ws://127.0.0.1:9/stream")
+        val vm = LiveViewModel(
+            store = store,
+            clientFactory = { url, token -> PiRelayClient(url, token) },
+            scope = testScope(),
+        )
+        vm.sendOption("   ")
+        assertTrue(vm.pending.value.isEmpty())
+        vm.disconnect()
+    }
+
+    @Test
+    fun sendOptionWhileDisconnectedNoticesInsteadOfQueueing() {
+        val store = InMemoryPiRelayStore()
+        store.setUrl("ws://127.0.0.1:9/stream")
+        val vm = LiveViewModel(
+            store = store,
+            clientFactory = { url, token -> PiRelayClient(url, token) },
+            scope = testScope(),
+        )
+        vm.sendOption("Yes")
+        assertTrue(vm.pending.value.isEmpty())
+        assertEquals("Not connected — connect first, then send.", vm.notice.value)
+        vm.disconnect()
+    }
 }

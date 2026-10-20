@@ -66,7 +66,24 @@ data class LivePendingSend(
     val attachments: List<LivePendingAttachment>,
     val status: LiveSendStatus,
     val detail: String = "",
+    val createdAtMs: Long = 0L,
 )
+
+/**
+ * Watchdog sweep (pure): no SENDING row may outlive [timeoutMs] — any stall the
+ * per-send timeout missed still lands FAILED with a Retry hint instead of
+ * sitting on screen as an unreadable stuck bubble.
+ */
+fun sweepStalePending(
+    current: List<LivePendingSend>,
+    nowMs: Long,
+    timeoutMs: Long = SEND_ACK_TIMEOUT_MS,
+): List<LivePendingSend> =
+    current.map {
+        if (it.status == LiveSendStatus.SENDING && nowMs - it.createdAtMs > timeoutMs) {
+            it.copy(status = LiveSendStatus.FAILED, detail = "no send_ack from the relay — tap retry")
+        } else it
+    }
 
 sealed interface LiveComposeState {
     data class Disabled(val reason: String) : LiveComposeState
@@ -142,6 +159,12 @@ class LiveViewModel(
     private val _approvals = MutableStateFlow<Map<String, Approval>>(emptyMap())
     val approvals: StateFlow<Map<String, Approval>> = _approvals
 
+    private val _decisionPrompt = MutableStateFlow<DecisionPrompt?>(null)
+    val decisionPrompt: StateFlow<DecisionPrompt?> = _decisionPrompt
+
+    private val _autoRetry = MutableStateFlow(false)
+    val autoRetry: StateFlow<Boolean> = _autoRetry
+
     init {
         refreshComposeState()
     }
@@ -166,15 +189,31 @@ class LiveViewModel(
             _notice.value = "Set the relay URL first — no connection attempted."
             return
         }
-        if (client != null) return
+        // Single-flight (device-proven 275ms double-dial): a duplicate effect firing
+        // or an auto+manual race must never interrupt an attempt already in flight.
+        if (!shouldRedial(client != null, _relayState.value)) return
+        if (client != null) {
+            // Re-dial path, Error only: a dead client (e.g. after an auth failure,
+            // which sets no retry) must not make a later Connect tap a no-op. Tear
+            // down first so the tap always dials; the button only offers Connect
+            // when not open, and single-flight above protects in-flight attempts.
+            disconnect()
+        }
         _notice.value = null
         val made = clientFactory(urlValue, store.token.value)
         client = made
         _relayState.value = RelayState.Connecting
         collectJob = (scope ?: viewModelScope).launch {
-            launch { made.state.collect { _relayState.value = it } }
+            launch { made.state.collect {
+                _relayState.value = it
+                // Fresh session, old complaints moot: error-era notices clear the
+                // moment the socket opens (the error strip is state-driven too).
+                if (it is RelayState.Open) _notice.value = null
+            } }
             launch { made.commandsSupported.collect { refreshComposeState() } }
             launch { made.approvals.collect { _approvals.value = it } }
+            launch { made.decisionPrompt.collect { _decisionPrompt.value = it } }
+            launch { made.autoRetry.collect { _autoRetry.value = it } }
             launch {
                 made.sendOutcomes.collect { map ->
                     map.values.forEach { outcome ->
@@ -201,6 +240,17 @@ class LiveViewModel(
                     reconcilePending(list)
                 }
             }
+            // Watchdog ticker: bounds any SENDING stall to timeout + tick even when
+            // no events or acks arrive to trigger the collectors above. Dies with
+            // the session (collectJob scope); the per-send delay stays the fast path.
+            launch {
+                while (true) {
+                    delay(5_000L)
+                    if (_pending.value.any { it.status == LiveSendStatus.SENDING }) {
+                        _pending.value = sweepStalePending(_pending.value, System.currentTimeMillis())
+                    }
+                }
+            }
         }
         if (lastDeliveredSeq >= 0) runCatching { made.resumeAfter(lastDeliveredSeq) }
         made.connect()
@@ -209,6 +259,7 @@ class LiveViewModel(
     fun disconnect() {
         collectJob?.cancel()
         collectJob = null
+        _decisionPrompt.value = null
         runCatching { client?.disconnect() }
         client = null
         if (_relayState.value != RelayState.Disconnected) {
@@ -267,22 +318,50 @@ class LiveViewModel(
         }
         val text = _draft.value.trim()
         if (text.isEmpty() && _staged.value.isEmpty()) return
-        val id = UUID.randomUUID().toString()
         ioScope().launch {
             val attachments = uploadStaged() ?: return@launch
             _staged.value = emptyList()
-            _pending.value = _pending.value + LivePendingSend(id, text, attachments, LiveSendStatus.SENDING)
-            val sent = runCatching {
-                target.sendMessage(text, attachments.mapNotNull { it.attachmentId }, id)
-            }.isSuccess
-            if (!sent) {
-                markFailed(id, "send threw — tap retry")
-                return@launch
-            }
-            delay(SEND_ACK_TIMEOUT_MS)
-            if (_pending.value.any { it.clientMsgId == id && it.status == LiveSendStatus.SENDING }) {
-                markFailed(id, "no send_ack from the relay — tap retry")
-            }
+            enqueueText(text, attachments)
+        }
+    }
+
+    /**
+     * Decision-banner shortcut: sends the tapped option label as a NORMAL chat
+     * message through the same optimistic + ack + retry path as typed sends —
+     * no new API, no approval semantics. While any send is in flight the banner
+     * disables its buttons; the ack reconciles the row like a typed message.
+     */
+    fun sendOption(label: String) {
+        val text = label.trim()
+        if (text.isEmpty()) return
+        val gate = _composeState.value
+        if (gate is LiveComposeState.Disabled) {
+            _notice.value = gate.reason
+            return
+        }
+        val target = client
+        if (target == null || _relayState.value !is RelayState.Open) {
+            _notice.value = "Not connected — connect first, then send."
+            return
+        }
+        ioScope().launch { enqueueText(text, emptyList()) }
+    }
+
+    /** Shared tail of [send] and [sendOption]: optimistic row, dial, 15s ack watchdog. */
+    private suspend fun enqueueText(text: String, attachments: List<LivePendingAttachment>) {
+        val target = client ?: return
+        val id = UUID.randomUUID().toString()
+        _pending.value = _pending.value + LivePendingSend(id, text, attachments, LiveSendStatus.SENDING, createdAtMs = System.currentTimeMillis())
+        val sent = runCatching {
+            target.sendMessage(text, attachments.mapNotNull { it.attachmentId }, id)
+        }.isSuccess
+        if (!sent) {
+            markFailed(id, "send threw — tap retry")
+            return
+        }
+        delay(SEND_ACK_TIMEOUT_MS)
+        if (_pending.value.any { it.clientMsgId == id && it.status == LiveSendStatus.SENDING }) {
+            markFailed(id, "no send_ack from the relay — tap retry")
         }
     }
 
@@ -295,7 +374,7 @@ class LiveViewModel(
         val row = _pending.value.firstOrNull { it.clientMsgId == clientMsgId } ?: return
         if (row.status != LiveSendStatus.FAILED) return
         _pending.value = _pending.value.map {
-            if (it.clientMsgId == clientMsgId) it.copy(status = LiveSendStatus.SENDING, detail = "") else it
+            if (it.clientMsgId == clientMsgId) it.copy(status = LiveSendStatus.SENDING, detail = "", createdAtMs = System.currentTimeMillis()) else it
         }
         ioScope().launch {
             val sent = runCatching {
@@ -393,6 +472,7 @@ class LiveViewModel(
     }
 
     private fun reconcilePending(list: List<PiEvent>) {
+        _pending.value = sweepStalePending(_pending.value, System.currentTimeMillis())
         val awaiting = _pending.value.filter { it.status == LiveSendStatus.SENDING }
         if (awaiting.isEmpty()) return
         val echoed = list.filter { it.kind == LiveKinds.USER_MESSAGE }.mapNotNull { it.text }.toSet()
