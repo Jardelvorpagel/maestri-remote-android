@@ -67,25 +67,35 @@ private fun framesScript(batch: List<ByteArray>): String {
     return js.append("])").toString()
 }
 
+/** One item of the session stream, in the socket's read order: PTY bytes or a host grid. */
+private sealed interface Stream {
+    class Bytes(val data: ByteArray) : Stream
+    class Grid(val cols: Int, val rows: Int) : Stream
+}
+
 /**
- * Frame queue between the socket reader and the page: one batch in flight at a time, the page
+ * Stream queue between the socket reader and the page: one batch in flight at a time, the page
  * acknowledges with `TermBridge.framesConsumed(n)`, so a flood cannot outgrow the JS buffer.
+ * The host grid travels in this same queue because the geometry frame shares the socket with
+ * the bytes: the reset that comes with it can then never land after the snapshot it precedes.
  * Overflow drops the queue and asks for a new snapshot instead of feeding half an ANSI
  * sequence the renderer can never resync from.
  */
 private class Feed(private val main: Handler) {
-    private val pending = ArrayDeque<ByteArray>()
+    private val pending = ArrayDeque<Stream>()
     private var awaiting = 0
     private var posted = false
     private var dropped = false
+    private var gridInFlight = false
 
-    var send: ((List<ByteArray>) -> Unit)? = null
+    var sendFrames: ((List<ByteArray>) -> Boolean)? = null
+    var sendGrid: ((Int, Int) -> Boolean)? = null
     var resync: (() -> Unit)? = null
 
     private val run = object : Runnable {
         override fun run() {
             posted = false
-            if (awaiting > 0) return
+            if (awaiting > 0 || gridInFlight) return
             if (dropped) {
                 dropped = false
                 synchronized(pending) { pending.clear() }
@@ -94,17 +104,44 @@ private class Feed(private val main: Handler) {
             }
             val batch = ArrayList<ByteArray>(BATCH_FRAMES)
             var size = 0
+            var head: Stream.Grid? = null
             synchronized(pending) {
-                while (pending.isNotEmpty() && batch.size < BATCH_FRAMES) {
-                    val next = pending.first()
-                    if (batch.isNotEmpty() && size + next.size > BATCH_BYTES) break
-                    size += next.size
-                    batch.add(pending.removeFirst())
+                while (pending.isNotEmpty()) {
+                    when (val next = pending.first()) {
+                        is Stream.Grid -> {
+                            head = next
+                            pending.removeFirst()
+                            return@synchronized
+                        }
+
+                        is Stream.Bytes -> {
+                            if (batch.size >= BATCH_FRAMES) return@synchronized
+                            if (batch.isNotEmpty() && size + next.data.size > BATCH_BYTES) {
+                                return@synchronized
+                            }
+                            size += next.data.size
+                            batch.add(next.data)
+                            pending.removeFirst()
+                        }
+                    }
                 }
             }
-            if (batch.isEmpty()) return
-            awaiting = batch.size
-            send?.invoke(batch) ?: requeue(batch)
+            val grid = head
+            if (batch.isNotEmpty()) {
+                if (grid != null) synchronized(pending) { pending.addFirst(grid) }
+                awaiting = batch.size
+                if (sendFrames?.invoke(batch) != true) {
+                    awaiting = 0
+                    requeueFrames(batch)
+                }
+                return
+            }
+            val next = grid ?: return
+            gridInFlight = true
+            if (sendGrid?.invoke(next.cols, next.rows) != true) {
+                gridInFlight = false
+                synchronized(pending) { pending.addFirst(next) }
+            }
         }
     }
 
@@ -114,9 +151,9 @@ private class Feed(private val main: Handler) {
         main.post(run)
     }
 
-    fun offer(bytes: ByteArray) {
+    fun offerFrame(bytes: ByteArray) {
         synchronized(pending) {
-            pending.addLast(bytes)
+            pending.addLast(Stream.Bytes(bytes))
             if (pending.size + awaiting > PENDING_CAP) {
                 pending.clear()
                 dropped = true
@@ -124,22 +161,37 @@ private class Feed(private val main: Handler) {
         }
     }
 
+    fun offerGrid(cols: Int, rows: Int) {
+        synchronized(pending) { pending.addLast(Stream.Grid(cols, rows)) }
+    }
+
     fun consumed(count: Int, ready: Boolean) {
         awaiting = (awaiting - count).coerceAtLeast(0)
         schedule(ready)
     }
 
-    fun requeue(batch: List<ByteArray>) {
-        synchronized(pending) {
-            for (i in batch.indices.reversed()) pending.addFirst(batch[i])
-        }
-        awaiting = 0
+    fun gridApplied(ready: Boolean) {
+        gridInFlight = false
+        schedule(ready)
     }
 
-    fun reset() {
-        synchronized(pending) { pending.clear() }
+    /** Clears the queue, reporting whether anything was lost and needs a fresh snapshot. */
+    fun reset(): Boolean {
+        var lost = false
+        synchronized(pending) {
+            lost = pending.isNotEmpty()
+            pending.clear()
+        }
         awaiting = 0
+        gridInFlight = false
         dropped = false
+        return lost
+    }
+
+    private fun requeueFrames(batch: List<ByteArray>) {
+        synchronized(pending) {
+            for (i in batch.indices.reversed()) pending.addFirst(Stream.Bytes(batch[i]))
+        }
     }
 }
 
@@ -153,8 +205,8 @@ private class Feed(private val main: Handler) {
  * WebView destroyed with the composition so a recreated screen cannot be fed by a stale page.
  *
  * [rendererGen] counts page boots: after a cold reload only `rendererReady` can raise it, and
- * every page-facing effect is keyed on it, so a reloaded renderer gets its init, its host
- * grid and its status again instead of sitting at the defaults forever.
+ * every page-facing effect is keyed on it, so a reloaded renderer gets its init and its status
+ * again instead of sitting at the defaults forever.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -171,20 +223,27 @@ fun TerminalWebView(
     val feed = remember(main) { Feed(main) }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var rendererGen by remember { mutableStateOf(0) }
-    var hostSynced by remember { mutableStateOf(true) }
-    var hostGen by remember { mutableStateOf(0) }
     val streamState by session.terminalStream.state.collectAsState()
-    val geometry by session.terminalStream.geometry.collectAsState()
 
-    fun ready(): Boolean = rendererGen > 0 && hostSynced && webView?.parent != null
+    fun ready(): Boolean = rendererGen > 0 && webView?.parent != null
     fun pump() = feed.schedule(ready())
 
-    feed.send = { batch ->
+    feed.sendFrames = { batch ->
         val wv = webView
-        if (!hostSynced || rendererGen == 0 || wv == null || wv.parent == null) {
-            feed.requeue(batch)
+        if (wv == null || wv.parent == null) {
+            false
         } else {
             wv.evaluateJavascript(framesScript(batch), null)
+            true
+        }
+    }
+    feed.sendGrid = { cols, rows ->
+        val wv = webView
+        if (wv == null || wv.parent == null) {
+            false
+        } else {
+            wv.evaluateJavascript("window.__set_host($cols,$rows,$canResize)", null)
+            true
         }
     }
     feed.resync = { if (enabled) session.terminalStream.reopen() }
@@ -215,18 +274,14 @@ fun TerminalWebView(
             fun rendererReady() {
                 main.post {
                     rendererGen += 1
-                    hostSynced = false
-                    feed.reset()
+                    if (feed.reset() && enabled) session.terminalStream.reopen()
                     pump()
                 }
             }
 
             @JavascriptInterface
             fun hostApplied() {
-                main.post {
-                    hostSynced = true
-                    pump()
-                }
+                main.post { feed.gridApplied(ready()) }
             }
 
             @JavascriptInterface
@@ -236,17 +291,26 @@ fun TerminalWebView(
         }
     }
 
-    val sink: (ByteArray) -> Unit = remember(feed) {
+    val frameSink: (ByteArray) -> Unit = remember(feed) {
         { bytes ->
-            feed.offer(bytes)
+            feed.offerFrame(bytes)
+            main.post { pump() }
+        }
+    }
+
+    val gridSink: (Int, Int) -> Unit = remember(feed) {
+        { cols, rows ->
+            feed.offerGrid(cols, rows)
             main.post { pump() }
         }
     }
 
     DisposableEffect(terminalId) {
-        session.terminalStream.frameSink = sink
+        session.terminalStream.frameSink = frameSink
+        session.terminalStream.gridSink = gridSink
         onDispose {
-            if (session.terminalStream.frameSink === sink) session.terminalStream.frameSink = null
+            if (session.terminalStream.frameSink === frameSink) session.terminalStream.frameSink = null
+            if (session.terminalStream.gridSink === gridSink) session.terminalStream.gridSink = null
             feed.reset()
             webView = null
         }
@@ -273,26 +337,6 @@ fun TerminalWebView(
                 "theme:{background:\"$bg\",foreground:\"$fg\"}})",
             null,
         )
-    }
-
-    LaunchedEffect(rendererGen, geometry, canResize) {
-        if (rendererGen == 0) return@LaunchedEffect
-        // Frames wait for the page to apply the host grid: a snapshot must never land in the
-        // buffer before the reset that accompanies every geometry frame.
-        hostSynced = false
-        val gen = hostGen + 1
-        hostGen = gen
-        val g = geometry
-        webView?.evaluateJavascript(
-            "window.__set_host(${g?.cols ?: -1},${g?.rows ?: -1},$canResize)",
-            null,
-        )
-        main.postDelayed({
-            if (hostGen == gen && !hostSynced) {
-                hostSynced = true
-                pump()
-            }
-        }, 400)
     }
 
     LaunchedEffect(rendererGen, streamState) {

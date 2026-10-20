@@ -269,25 +269,29 @@
   };
 
   window.__set_host = function (cols, rows, canRefit) {
-    if (!term) boot();
-    CAN_REFIT = !!canRefit;
-    var known = cols > 0 && rows > 0;
-    if (known) {
-      HOST = { cols: cols, rows: rows };
-      // The protocol guarantees a geometry frame is always followed by a new screen: drop
-      // what is on screen so a reconnect cannot stack a snapshot on top of the old buffer.
-      term.reset();
+    try {
+      if (!term) boot();
+      CAN_REFIT = !!canRefit;
+      var known = cols > 0 && rows > 0;
+      if (known) {
+        HOST = { cols: cols, rows: rows };
+        // The protocol guarantees a geometry frame is always followed by a new screen: drop
+        // what is on screen so a reconnect cannot stack a snapshot on top of the old buffer.
+        term.reset();
+      }
+      KNOWN = true;
+      if (MODE === "fit" && CAN_REFIT) {
+        // Host clamped or ignored our grid (20..250 x 5..120): adopt what it actually runs
+        // instead of deduping ourselves into a permanent desync.
+        if (known && lastSent && !same(lastSent, cols, rows)) mirrorHost();
+        else fitBox(true);
+      } else {
+        mirrorHost();
+      }
+    } finally {
+      // The stream queue waits on this ack: a thrown error must not freeze the face.
+      if (window.TermBridge && window.TermBridge.hostApplied) window.TermBridge.hostApplied();
     }
-    KNOWN = true;
-    if (MODE === "fit" && CAN_REFIT) {
-      // Host clamped or ignored our grid (20..250 x 5..120): adopt what it actually runs
-      // instead of deduping ourselves into a permanent desync.
-      if (known && lastSent && !same(lastSent, cols, rows)) mirrorHost();
-      else fitBox(true);
-    } else {
-      mirrorHost();
-    }
-    if (window.TermBridge && window.TermBridge.hostApplied) window.TermBridge.hostApplied();
   };
 
   window.__set_status = function (state) {

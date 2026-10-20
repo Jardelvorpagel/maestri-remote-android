@@ -56,6 +56,13 @@ class TerminalStreamSocket(
     @Volatile
     var frameSink: ((ByteArray) -> Unit)? = null
 
+    /**
+     * The renderer's grid tap: fires in the same read order as [frameSink], so the page can
+     * queue a geometry change and the frames that follow it as one ordered stream.
+     */
+    @Volatile
+    var gridSink: ((Int, Int) -> Unit)? = null
+
     fun open(targetUrl: String, ownerId: String? = null) {
         closedByUs = false
         url = targetUrl
@@ -141,6 +148,7 @@ class TerminalStreamSocket(
                                     msg.optInt("rows", 24),
                                 )
                                 _geometry.value = g
+                                gridSink?.invoke(g.cols, g.rows)
                             }
 
                             "pong" -> Unit
