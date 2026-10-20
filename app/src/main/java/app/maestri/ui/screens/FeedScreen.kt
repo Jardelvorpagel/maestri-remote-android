@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -1018,24 +1019,28 @@ fun PendingPromptCard(   // public: also used by TerminalScreen and ChatScreens
 ) {
     var busy by remember { mutableStateOf(false) }
     var fail by remember { mutableStateOf<String?>(null) }
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1518)),
-        onClick = { onOpen(t.id, t.name) },
-        modifier = Modifier.fillMaxWidth(),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(LocalMaestriColors.current.warning.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+            .border(1.dp, LocalMaestriColors.current.warning.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .clickable { onOpen(t.id, t.name) }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("S/n · ", color = LocalMaestriColors.current.warning, fontWeight = FontWeight.Bold)
-                Text(
-                    t.name + (t.accountName?.let { " · $it" } ?: ""),
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(7.dp).background(LocalMaestriColors.current.warning, CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                t.name + (t.accountName?.let { " · $it" } ?: ""),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.5.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+        }
             PromptQuestion(prompt)
-            Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     enabled = !busy,
@@ -1083,5 +1088,4 @@ fun PendingPromptCard(   // public: also used by TerminalScreen and ChatScreens
                 Text(it, color = LocalMaestriColors.current.warning, fontSize = 12.sp)
             }
         }
-    }
 }

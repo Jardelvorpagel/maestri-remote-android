@@ -114,9 +114,7 @@ import java.io.File
 import java.util.UUID
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.monoHud
-import app.maestri.ui.Style.warmRing
 import app.maestri.ui.Style.vendorColor
-import app.maestri.ui.Style.softHalo
 import app.maestri.ui.Style.Palette
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.geometry.Offset
@@ -2448,17 +2446,10 @@ private fun ComposerPill(
             }
         }
 
-        // design-v2 05 .composer: radius 26, margins 2/16/14, padding 8, gap 8,
-        // NearBlack @ .66 glass + warm ring + softHalo (no backdrop blur — Compose 1.7)
-        Surface(
-            color = Palette.NearBlack.copy(alpha = 0.66f),
-            shape = RoundedCornerShape(26.dp),
-            modifier = Modifier
-                .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 14.dp)
-                .warmRing(chrome.hairline, radius = 26.dp)
-                .softHalo(radius = 26.dp),
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (staged.isNotEmpty()) {
                     StagedSlots(staged = staged, onRemove = onRemoveStaged)
                     Spacer(Modifier.height(6.dp))
@@ -2483,7 +2474,10 @@ private fun ComposerPill(
                     }
                     Spacer(Modifier.height(6.dp))
                 }
-                Row(verticalAlignment = Alignment.Bottom) {
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     val addSrc = remember { MutableInteractionSource() }
                     val addPressed by addSrc.collectIsPressedAsState()
                     val addPress by animateFloatAsState(
@@ -2491,12 +2485,15 @@ private fun ComposerPill(
                         animationSpec = tween(Motion.Fast, easing = Motion.Ease),
                         label = "add-press",
                     )
-                    TextButton(
-                        onClick = onOpenAttachMenu,
+                    Box(
                         modifier = Modifier
-                            .heightIn(min = Rhythm.TouchTarget.dp)
-                            .graphicsLayer { scaleX = addPress; scaleY = addPress },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(6.dp),
+                            .size(44.dp)
+                            .graphicsLayer { scaleX = addPress; scaleY = addPress }
+                            .clip(CircleShape)
+                            .background(chrome.canvasSurface)
+                            .border(1.dp, chrome.hairline, CircleShape)
+                            .clickable(onClick = onOpenAttachMenu),
+                        contentAlignment = Alignment.Center,
                     ) { IconOnly(Icons.Filled.Add, contentDescription = S.attach, size = 18.dp) }
                     // ＠ pill: a literal "@" typed into the input opens the mention selector
                     val atSrc = remember { MutableInteractionSource() }
@@ -2506,12 +2503,15 @@ private fun ComposerPill(
                         animationSpec = tween(Motion.Fast, easing = Motion.Ease),
                         label = "at-press",
                     )
-                    TextButton(
-                        onClick = { onTextChange(text + "@") },
+                    Box(
                         modifier = Modifier
-                            .heightIn(min = Rhythm.TouchTarget.dp)
-                            .graphicsLayer { scaleX = atPress; scaleY = atPress },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(6.dp),
+                            .size(44.dp)
+                            .graphicsLayer { scaleX = atPress; scaleY = atPress }
+                            .clip(CircleShape)
+                            .background(chrome.canvasSurface)
+                            .border(1.dp, chrome.hairline, CircleShape)
+                            .clickable(onClick = { onTextChange(text + "@") }),
+                        contentAlignment = Alignment.Center,
                     ) {
                         Text("@", fontSize = 15.sp, fontFamily = FontFamily.Monospace)
                     }
@@ -2528,7 +2528,9 @@ private fun ComposerPill(
                             onValueChange = onTextChange,
                             modifier = Modifier
                                 .weight(1f)
-                                .heightIn(min = 40.dp), // artifact .in min-height 40
+                                .heightIn(min = 40.dp)
+                                .border(1.dp, chrome.hairline, RoundedCornerShape(24.dp))
+                                .padding(horizontal = 12.dp),
                             textStyle = androidx.compose.ui.text.TextStyle(
                                 fontSize = 13.5.sp,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -2567,8 +2569,8 @@ private fun ComposerPill(
                                 focusedContainerColor = Color.Transparent,
                                 unfocusedContainerColor = Color.Transparent,
                                 disabledContainerColor = Color.Transparent,
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
+                                focusedBorderColor = chrome.hairline,
+                                unfocusedBorderColor = chrome.hairline,
                                 disabledBorderColor = Color.Transparent,
                             ),
                             modifier = Modifier
@@ -2581,50 +2583,21 @@ private fun ComposerPill(
                             ),
                         )
                     }
-                    val sendSource = remember { MutableInteractionSource() }
-                    val sendPressed by sendSource.collectIsPressedAsState()
-                    val sendPress by animateFloatAsState(
-                        targetValue = if (sendPressed) Motion.PressScale else 1f,
-                        animationSpec = tween(Motion.Fast, easing = Motion.Ease),
-                        label = "send-press",
-                    )
                     val sendEnabled = flight == null && (text.isNotBlank() || staged.isNotEmpty())
-                    Box(
-                        modifier = Modifier
-                            .padding(start = 6.dp)
-                            .size(44.dp)
-                            .graphicsLayer { scaleX = sendPress; scaleY = sendPress }
-                            .shadow(
-                                elevation = 8.dp,
-                                shape = CircleShape,
-                                ambientColor = Palette.Terracotta.copy(alpha = 0.30f),
-                                spotColor = Palette.Terracotta.copy(alpha = 0.30f),
-                            )
-                            .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(
-                                    0f to Palette.TerracottaLight,
-                                    1f to Palette.Terracotta,
-                                    start = Offset(0f, 0f),
-                                    end = Offset(1f, 1f),
-                                ),
-                            )
-                            .combinedClickable(enabled = sendEnabled, onClick = onSend)
-                            .alpha(if (sendEnabled) 1f else 0.4f),
-                        contentAlignment = Alignment.Center,
+                    Button(
+                        onClick = onSend,
+                        enabled = sendEnabled,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = chrome.accent,
+                            contentColor = chrome.onAccent,
+                            disabledContainerColor = chrome.cardSunken,
+                            disabledContentColor = chrome.secondaryLabel,
+                        ),
                     ) {
-                        Text(
-                            when (flight?.stage) {
-                                SendFlight.Stage.UPLOADING, SendFlight.Stage.SENDING, SendFlight.Stage.CORRELATING -> "↑"
-                                else -> "↑"
-                            },
-                            fontSize = 17.sp,
-                            color = Color(0xFFFAF9F5),
-                        )
+                        Text(S.send, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
-        }
 
     }
 }
