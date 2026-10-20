@@ -381,6 +381,13 @@ private fun RelaySettingsCard(
 ) {
     val colors = LocalMaestriColors.current
     val open = state is RelayState.Open || state is RelayState.Connecting
+    var collapsed by remember(open) { mutableStateOf(open) }
+    val dot = when (state) {
+        RelayState.Disconnected -> colors.secondaryLabel
+        RelayState.Connecting -> colors.warning
+        RelayState.Open -> colors.positive
+        is RelayState.Error -> colors.errorText
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -390,6 +397,43 @@ private fun RelaySettingsCard(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        if (collapsed) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).background(dot, CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    url.ifBlank { "Relay" },
+                    style = monoHud(11, color = MaterialTheme.colorScheme.onSurface),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).clickable { collapsed = false },
+                )
+                TextButton(onClick = { if (open) onDisconnect() else onConnect() }) {
+                    Text(
+                        if (open) "Stop" else "Connect",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (open) colors.errorText else colors.accent,
+                    )
+                }
+                TextButton(onClick = { collapsed = false }) {
+                    Text("Show", fontSize = 12.sp, color = colors.secondaryLabel)
+                }
+            }
+            return@Column
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(7.dp).background(dot, CircleShape))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Relay",
+                style = monoHud(11, color = colors.secondaryLabel),
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { collapsed = true }) {
+                Text("Hide", fontSize = 12.sp, color = colors.secondaryLabel)
+            }
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 OutlinedTextField(
