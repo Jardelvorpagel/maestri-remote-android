@@ -57,9 +57,6 @@ dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    // todo #62: ConnectBot termlib (Compose terminal renderer, Apache-2.0) — the Live
-    // viewport renders the remote PTY byte stream with the real libvterm engine.
-    implementation("org.connectbot:termlib:0.3.13")
     // Pi relay transport tests only: JUnit4 for the JVM unit-test source set.
     testImplementation("junit:junit:4.13.2")
 }

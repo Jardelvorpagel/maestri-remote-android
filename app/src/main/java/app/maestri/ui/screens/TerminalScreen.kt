@@ -27,7 +27,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -45,13 +44,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -64,10 +61,7 @@ import app.maestri.wire.SocketState
 import app.maestri.wire.TerminalCard
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
-import org.connectbot.terminal.TerminalEmulator
-import org.connectbot.terminal.TerminalEmulatorFactory
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalConfiguration
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.controlShape
@@ -83,14 +77,6 @@ import app.maestri.ui.settings.TerminalViewModeStore
 import app.maestri.wire.ChatApi
 import app.maestri.ui.Style.TerminalThemes
 import app.maestri.ui.Style.BackLabel
-
-/** Tokyo Night 16 ANSI slots for the termlib renderer (palette accepted in #61, verbatim). */
-private val TERMLIB_TOKYO_NIGHT = intArrayOf(
-    0xFF1A1B26.toInt(), 0xFFF7768E.toInt(), 0xFF9ECE6A.toInt(), 0xFFE0AF68.toInt(),
-    0xFF7AA2F7.toInt(), 0xFFBB9AF7.toInt(), 0xFF7DCFFF.toInt(), 0xFFA9B1D6.toInt(),
-    0xFF565F89.toInt(), 0xFFF7768E.toInt(), 0xFF9ECE6A.toInt(), 0xFFE0AF68.toInt(),
-    0xFF7AA2F7.toInt(), 0xFFBB9AF7.toInt(), 0xFF7DCFFF.toInt(), 0xFFC0CAF5.toInt(),
-)
 
 /**
  * Terminal detail: preview (live snapshot) OR the live stream, prompt composer,
@@ -146,60 +132,20 @@ fun TerminalScreen(
     val feedState by session.feed.state.collectAsState()
     val feedError by session.feed.lastError.collectAsState()
 
-    val streamState by session.terminalStream.state.collectAsState()
-    val streamError by session.terminalStream.error.collectAsState()
     val streamGeometry by session.terminalStream.geometry.collectAsState()
-    val streamCursor by session.terminalStream.cursor.collectAsState()
 
-    var live by remember { mutableStateOf(false) }
+    // The xterm WebView is the terminal face: open on the live stream, not on the
+    // preview snapshot.
+    var live by remember { mutableStateOf(true) }
     var notice by remember { mutableStateOf<String?>(null) }
     var promptText by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
-    var showResize by remember { mutableStateOf(false) }
     var seededFallback by remember { mutableStateOf(false) }
-    // L3 compact refit (defect 2): phone-fit cols reported by the live viewport feed
-    // the resize-dialog prefill and the forcedSize auto-grid below.
-    var fitCols by remember(terminalId) { mutableStateOf<Int?>(null) }
-    // Capabilities up here: the termlib binding below reads canResize at creation.
+    // Capabilities up here: the renderer and the header both read them.
     val caps = session.serverInfo
     val canStream = caps?.has("terminalStreaming") == true
     val canResize = caps?.has("terminalResize") == true
     val isOwner = caps?.role == "owner"
-    // todo #62: one termlib emulator per terminal (libvterm grid, recreated on switch).
-    // Host bytes reach it through the socket (TerminalStreamSocket.termlib, attached
-    // below); the component sizes its grid from forcedSize and reports back through
-    // onResize, which refits the host PTY. lastSentGrid dedupes the host's own echo
-    // (dialog applies stamp it too) so the resize converges instead of ping-ponging.
-    var lastSentGrid by remember(terminalId) { mutableStateOf<Pair<Int, Int>?>(null) }
-    val canResizeNow by rememberUpdatedState(canResize)
-    val streamNow = session.terminalStream
-    val termlibEmulator: TerminalEmulator = remember(terminalId) {
-        TerminalEmulatorFactory.create(
-            initialRows = 24,
-            initialCols = 80,
-            defaultForeground = TerminalThemes.TokyoNight.foreground,
-            defaultBackground = TerminalThemes.TokyoNight.background,
-            // The component runs keyboardEnabled=false, so this only fires for stray
-            // hardware keys; route them down the UTF-8 input path like the composer.
-            onKeyboardInput = { bytes -> streamNow.sendInput(String(bytes, Charsets.UTF_8)) },
-            onResize = { dims ->
-                if (!canResizeNow) return@create
-                val grid = dims.columns to dims.rows
-                if (lastSentGrid == grid) return@create
-                lastSentGrid = grid
-                streamNow.sendResize(dims.columns, dims.rows)
-            },
-        ).also { em ->
-            em.applyColorScheme(
-                TERMLIB_TOKYO_NIGHT,
-                TerminalThemes.TokyoNight.foreground.toArgb(),
-                TerminalThemes.TokyoNight.background.toArgb(),
-            )
-        }
-    }
-    LaunchedEffect(terminalId, termlibEmulator) {
-        session.terminalStream.termlib = termlibEmulator
-    }
 
     val locked = LocalAppLocked.current
 
@@ -228,34 +174,16 @@ fun TerminalScreen(
         }
     }
 
+    // The xterm face owns opening the stream (its byte tap is attached before open);
+    // this effect only tears the socket down when the face is not on screen.
     LaunchedEffect(live, terminalId, canStream, locked, inChat) {
-        // held while locked: no PTY stream starts under the cover; re-lock changes
-        // nothing about a stream opened before the lock (the close-on-leave branch
-        // below stays the only teardown)
-        // Chat mode closes the stream too: the grid is detached cleanly (close()
-        // only tears down the socket) while the remembered termlib emulator keeps
-        // every cell, so flipping back re-attaches without a blank frame.
-        if (live && canStream && !locked && !inChat) {
-            // attach before open on EVERY reopen: close() must not detach the
-            // screen-owned renderer, and nothing else may rely on a stale one
-            session.terminalStream.termlib = termlibEmulator
-            session.openTerminalStream(terminalId)
-        } else if (!live || inChat) session.terminalStream.close()
+        if (!(live && canStream && !locked && !inChat)) session.terminalStream.close(terminalId)
     }
-
-    // Defect 2 (termlib era): the refit trigger moved into the emulator — the
-    // component resizes its grid from forcedSize and reports through onResize above,
-    // which sends the matching host resize. screenCompact still reads the full window
-    // width so it can never disagree with the header's BoxWithConstraints.
-    val screenCompact = LocalConfiguration.current.screenWidthDp < 480
 
     DisposableEffect(Unit) {
         onDispose {
             if (session.serverInfo?.has("presence") == true) session.feed.sendPresence(null)
-            session.terminalStream.close()
-            // the screen owns the renderer: detach symmetric with the attach above,
-            // so no dangling emulator outlives the composition in the shared socket
-            session.terminalStream.termlib = null
+            session.terminalStream.close(terminalId)
         }
     }
 
@@ -317,6 +245,9 @@ fun TerminalScreen(
             ?.firstOrNull { it.terminal.id == terminalId }?.prompt
 
     val imeUp = WindowInsets.isImeVisible
+    // Typing needs the grid, not the chrome: the IME leaves ~140dp here, so the header
+    // steps aside while the keyboard is up (system back closes the IME first).
+    val chromeTight = imeUp && live && !inChat && !fullscreen
     // todo #57: edge-to-edge + adjustResize delivers the IME as an inset — the window does
     // NOT shrink (reno_kb2 proves it: the viewport extends under Gboard) — so the screen
     // consumes it here. One shared fix lifting the Live input + rail AND the agent prompt
@@ -412,7 +343,7 @@ fun TerminalScreen(
                 }
             }
         }
-        BoxWithConstraints {
+        if (!chromeTight) BoxWithConstraints {
             val compact = maxWidth < 480.dp
             if (!compact) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -455,7 +386,7 @@ fun TerminalScreen(
         // relay feed (settings, event list, decision banner, composer) with its own
         // scroller. The terminal grid is uncomposed in Chat and its stream closed
         // above; the remembered emulator retains the grid for a blank-free return.
-        if (!fullscreen) {
+        if (!fullscreen && !imeUp) {
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(
                 selected = !inChat,
@@ -474,7 +405,7 @@ fun TerminalScreen(
         if (inChat) {
             LiveFeedContent(liveVm)
         } else {
-        if (showTypeScale && !fullscreen) {
+        if (showTypeScale && !fullscreen && !imeUp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "Terminal font · ${MaestriType.MonoName} · $fontSp",
@@ -496,7 +427,7 @@ fun TerminalScreen(
             Spacer(Modifier.height(10.dp))
         }
 
-        if (pendingPrompt != null && !fullscreen) {
+        if (pendingPrompt != null && !fullscreen && !imeUp) {
             Spacer(Modifier.height(10.dp))
             PendingPromptCard(card ?: TerminalCard(
                 id = terminalId, nodeId = "", name = terminalName, agentType = "", icon = null,
@@ -531,39 +462,32 @@ fun TerminalScreen(
         }
 
         if (live && canStream) {
-            LiveTerminalView(
-                state = streamState,
-                error = streamError,
-                cursor = streamCursor,
-                geometry = streamGeometry,
-                canResize = canResize,
-                isOwner = isOwner,
+            if (!canResize) {
+                streamGeometry?.let { g ->
+                    Text(
+                        "pty ${g.cols} cols — terminal resize is unavailable on this host, so " +
+                            "line tails past the screen edge are unreachable",
+                        color = LocalMaestriColors.current.warning,
+                        fontSize = 11.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+            }
+            TerminalWebView(
+                session = session,
+                terminalId = terminalId,
                 fontSizeSp = fontSp,
-                fullscreen = fullscreen,
+                canResize = canResize,
+                enabled = !locked && !inChat,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            )
+            Spacer(Modifier.height(6.dp))
+            TerminalKeyRail(
+                onSend = { session.terminalStream.sendInput(it) },
                 onChat = if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
                     ({ enterChatMode() })
                 } else null,
-                onInput = { s -> session.terminalStream.sendInput(s) },
-                onResizeRequest = { showResize = true },
-                compact = screenCompact,
-                onViewportFit = { c, _ -> fitCols = c },
-                termlib = termlibEmulator,
-                modifier = if (fullscreen) Modifier.weight(1f) else Modifier,
             )
-            if (showResize) {
-                ResizeDialog(
-                    // Compact prefills the measured phone-fit cols (defect 2: OK refits);
-                    // tablet keeps the current-geometry prefill byte-identically.
-                    cols = if (screenCompact) fitCols ?: (streamGeometry?.cols ?: 80) else streamGeometry?.cols ?: 80,
-                    rows = streamGeometry?.rows ?: 24,
-                    onDismiss = { showResize = false },
-                    onApply = { c, r ->
-                        showResize = false
-                        lastSentGrid = c to r
-                        session.terminalStream.sendResize(c, r)
-                    },
-                )
-            }
         } else {
             PreviewPanel(card)
         }
@@ -656,44 +580,4 @@ private fun PromptComposer(
             Text(if (sending) "…" else "Send")
         }
     }
-}
-
-@Composable
-private fun ResizeDialog(
-    cols: Int,
-    rows: Int,
-    onDismiss: () -> Unit,
-    onApply: (cols: Int, rows: Int) -> Unit,
-) {
-    var c by remember { mutableStateOf(cols.toString()) }
-    var r by remember { mutableStateOf(rows.toString()) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Resize PTY") },
-        text = {
-            Column {
-                Text("Cols 20–250 · Rows 5–120", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = c,
-                    onValueChange = { c = it.filter { ch -> ch.isDigit() }.take(3) },
-                    label = { Text("cols") },
-                    singleLine = true,
-                )
-                Spacer(Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = r,
-                    onValueChange = { r = it.filter { ch -> ch.isDigit() }.take(3) },
-                    label = { Text("rows") },
-                    singleLine = true,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onApply((c.toIntOrNull() ?: 80), (r.toIntOrNull() ?: 24)) }) {
-                Text("OK")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }

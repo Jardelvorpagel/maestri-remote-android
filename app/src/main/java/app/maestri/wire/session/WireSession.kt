@@ -271,7 +271,9 @@ class WireSession(context: Context) {
     }
 
     fun openTerminalStream(terminalId: String) {
-        terminalStream.open(terminalStreamUrlFor(terminalId))
+        val target = terminalStreamUrlFor(terminalId)
+        if (target.isBlank()) return
+        terminalStream.open(target, terminalId)
     }
 
     /** `wss /api/agent-usage/stream?token=…` — corpus §5ter, pushes on connect (no request frame). */

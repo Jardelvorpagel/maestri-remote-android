@@ -1,0 +1,330 @@
+<!doctype html>
+<!--
+  Terminal face renderer: xterm.js on a local asset, fed by the app's TerminalStreamSocket
+  through TermBridge (raw PTY bytes as base64, ordered and coalesced on the Kotlin side).
+  No network, no dev server, no token: the page only ever sees frame bytes and the terminal
+  id, so a compromised page cannot leak a credential it never receives.
+
+  Geometry: the box is the authority. The page boots fitted — one resize to the measured
+  grid after the host has said it supports resizing — so nothing is ever clipped or left
+  empty on a phone. "ajustar" toggles to "grade do host" for a 1:1 look at the real layout,
+  which sends nothing. A host without terminalResize keeps its grid verbatim and the app
+  shows the col-cap notice.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<link rel="stylesheet" href="vendor/xterm.css">
+<style>
+  :root {
+    --bg: #1a1b26; --ink: #a9b1d6; --dim: #565f89;
+    --live: #9ece6a; --warn: #e0af68; --err: #f7768e; --accent: #7aa2f7;
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); overflow: hidden; }
+  /* WebView on Android reports vh/percentage heights as 0; a fixed shell still measures. */
+  #shell {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #hud {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
+    padding: 5px 8px 3px; font: 11px/1.4 monospace; color: var(--dim);
+  }
+  #dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: 0 0 auto; }
+  #dot.live { background: var(--live); }
+  #dot.connecting { background: var(--warn); }
+  #dot.closed { background: var(--err); }
+  #id { color: var(--ink); letter-spacing: .04em; }
+  #state { flex: 1 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .btn {
+    flex: 0 0 auto; background: transparent; border: 1px solid #2f3549; color: var(--dim);
+    border-radius: 6px; font: 11px monospace; padding: 2px 7px;
+  }
+  .btn.on { border-color: var(--accent); color: var(--accent); }
+  #term { position: relative; flex: 1 1 auto; min-height: 0; margin: 0 6px 6px; overflow: hidden; touch-action: none; }
+  #copied {
+    position: absolute; right: 14px; bottom: 10px; color: var(--ink); background: #24283bcc;
+    font: 12px monospace; padding: 4px 10px; border-radius: 8px; opacity: 0;
+    transition: opacity .25s; pointer-events: none; z-index: 5;
+  }
+</style>
+</head>
+<body>
+<div id="shell">
+<div id="hud">
+  <span id="dot"></span>
+  <span id="id">terminal</span>
+  <span id="state">conectando…</span>
+  <button id="fit" class="btn on" type="button">ajustar</button>
+  <button id="copy" class="btn" type="button">copiar</button>
+</div>
+<div id="term"></div>
+<div id="copied">copiado</div>
+</div>
+<script src="vendor/xterm.js"></script>
+<script src="vendor/xterm-fit.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var THEME = {
+    background: "#1a1b26", foreground: "#a9b1d6",
+    cursor: "#a9b1d6", cursorAccent: "#1a1b26",
+    black: "#1a1b26", red: "#f7768e", green: "#9ece6a", yellow: "#e0af68",
+    blue: "#7aa2f7", magenta: "#bb9af7", cyan: "#7dcfff", white: "#a9b1d6",
+    brightBlack: "#565f89", brightRed: "#f7768e", brightGreen: "#9ece6a",
+    brightYellow: "#e0af68", brightBlue: "#7aa2f7", brightMagenta: "#bb9af7",
+    brightCyan: "#7dcfff", brightWhite: "#c0caf5"
+  };
+
+  var term = null, fit = null, ready = false;
+  // MODE "fit" (default): the box is the authority and the PTY is refit to it.
+  // MODE "host": 1:1 mirror of the host grid, nothing is ever sent.
+  var MODE = "fit", HOST = null, CAN_REFIT = true, KNOWN = false, lastSent = null;
+  var fitTimer = null;
+
+  function el(id) { return document.getElementById(id); }
+  function sane(c, r) { return c >= 20 && c <= 250 && r >= 5 && r <= 120; }
+  function same(g, c, r) { return !!g && g.cols === c && g.rows === r; }
+
+  function sendResize(cols, rows) {
+    if (!window.TermBridge) return;
+    // KNOWN means __set_host already told us whether this host can resize at all.
+    if (!KNOWN || !CAN_REFIT || !sane(cols, rows) || same(lastSent, cols, rows)) return;
+    window.TermBridge.sendResize(cols, rows);
+    lastSent = { cols: cols, rows: rows };
+  }
+
+  // Cross-check only: the fit addon measures with the real renderer, so its proposal is the
+  // authority. Glyph width is derived from rendered rows and exists only when there is text —
+  // null means "nothing to cross-check", never "abort the fit" (an empty terminal still fits).
+  function measure() {
+    if (!term || !term.cols || !term.rows) return null;
+    var box = el("term").getBoundingClientRect();
+    // 120 CSS px is ~8 rows: the IME leaves little, but a box that small is still a terminal.
+    if (!(box.width >= 240 && box.height >= 120)) return null;
+    var rows = el("term").querySelector(".xterm-rows");
+    if (!rows || !rows.children.length) return null;
+    var cellW = 0, cellH = 0;
+    for (var i = 0; i < rows.children.length && i < 12; i++) {
+      var div = rows.children[i];
+      var text = div.textContent || "";
+      var h = div.getBoundingClientRect().height;
+      if (h > 0 && !cellH) cellH = h;
+      // ASCII only: a CJK/emoji cell is two advances wide and would inflate the average.
+      if (text.trim().length < 10 || /[^\x20-\x7e]/.test(text)) continue;
+      var rg = document.createRange();
+      rg.selectNodeContents(div);
+      var w = rg.getBoundingClientRect().width;
+      if (w > 0) {
+        var c = w / text.length;
+        if (c > 0 && (cellW === 0 || c < cellW)) cellW = c;
+      }
+    }
+    if (!(cellW > 0 && cellH > 0)) return null;
+    return { box: box, cellW: cellW, cellH: cellH };
+  }
+
+  // Fit to the box; the glyph cross-check can only veto, never block a fit that has no text.
+  function fitBox(send) {
+    if (!term || !fit || !ready) return;
+    var box = el("term").getBoundingClientRect();
+    if (!(box.width >= 240 && box.height >= 120)) return;
+    var d = fit.proposeDimensions();
+    if (!d || !d.cols || !d.rows || !sane(d.cols, d.rows)) return;
+    var m = measure();
+    if (m && (d.cols * m.cellW > m.box.width + 0.5 || d.rows * m.cellH > m.box.height + 0.5)) return;
+    term.resize(d.cols, d.rows);
+    if (send) sendResize(d.cols, d.rows);
+  }
+
+  function mirrorHost() {
+    if (!term || !HOST) return;
+    term.resize(HOST.cols, HOST.rows);
+  }
+
+  function applyMode(send) {
+    if (MODE === "host" || !CAN_REFIT) mirrorHost();
+    else fitBox(send);
+  }
+
+  function setMode(next) {
+    MODE = next;
+    el("fit").textContent = MODE === "fit" ? "ajustar" : "grade do host";
+    el("fit").classList.toggle("on", MODE === "fit");
+    applyMode(true);
+  }
+
+  // Layout churn (IME animation, rotation) produces a burst of box sizes; only the settled
+  // one is worth a resize frame.
+  function scheduleFit() {
+    if (MODE !== "fit" || !CAN_REFIT || !KNOWN) return;
+    clearTimeout(fitTimer);
+    fitTimer = setTimeout(function () {
+      var atTail = !term || term.buffer.active.viewportY >= term.buffer.active.baseY;
+      fitBox(true);
+      // Never steal the viewport from someone reading history.
+      if (atTail && term) term.scrollToBottom();
+    }, 120);
+  }
+
+  // A frame is not a layout signal: under continuous streaming a debounced fit would never
+  // run. Only a genuinely new box size gets an unsent local fit.
+  var boxSig = "";
+  function fitIfBoxChanged() {
+    if (MODE !== "fit" || !CAN_REFIT || !KNOWN || !term) return;
+    var b = el("term").getBoundingClientRect();
+    if (b.width < 240 || b.height < 120) return;
+    var sig = Math.round(b.width) + "x" + Math.round(b.height);
+    if (sig === boxSig) return;
+    boxSig = sig;
+    fitBox(false);
+  }
+
+  function boot() {
+    term = new window.Terminal({
+      scrollback: 5000,
+      fontSize: 13,
+      fontFamily: "monospace",
+      theme: Object.assign({}, THEME),
+      allowProposedApi: true
+    });
+    fit = new window.FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(el("term"));
+
+    term.onData(function (data) {
+      if (window.TermBridge) window.TermBridge.sendInput(data);
+    });
+
+    el("fit").addEventListener("click", function () {
+      setMode(MODE === "fit" ? "host" : "fit");
+    });
+    el("copy").addEventListener("click", function () { window.__copyScreen(); });
+
+    // xterm's screen layer sits over the scrollable viewport, so a drag never reaches it;
+    // move the viewport's own scrollTop (the scrollbar path xterm already syncs).
+    var touchY = null, acc = 0;
+    function lineH() {
+      var row = el("term").querySelector(".xterm-rows>div");
+      return row ? row.getBoundingClientRect().height : 16;
+    }
+    el("term").addEventListener("touchstart", function (e) {
+      touchY = e.touches.length === 1 ? e.touches[0].clientY : null;
+      acc = 0;
+    }, { passive: true, capture: true });
+    el("term").addEventListener("touchmove", function (e) {
+      if (touchY === null || e.touches.length !== 1) return;
+      var y = e.touches[0].clientY;
+      acc += y - touchY;
+      touchY = y;
+      var lh = lineH(), n = Math.trunc(acc / lh);
+      if (!n) return;
+      acc -= n * lh;
+      var vp = el("term").querySelector(".xterm-viewport");
+      if (vp) vp.scrollTop -= n * lh;
+      e.preventDefault();
+    }, { passive: false, capture: true });
+    el("term").addEventListener("touchend", function () { touchY = null; acc = 0; }, { passive: true, capture: true });
+
+    new ResizeObserver(scheduleFit).observe(el("term"));
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", scheduleFit);
+    window.addEventListener("resize", scheduleFit);
+
+    ready = true;
+    if (window.TermBridge && window.TermBridge.rendererReady) window.TermBridge.rendererReady();
+  }
+
+  window.__pushFrames = function (b64frames) {
+    if (!term) return;
+    var chunks = [];
+    for (var i = 0; i < b64frames.length; i++) {
+      var bin = window.atob(b64frames[i]);
+      var u8 = new Uint8Array(bin.length);
+      for (var j = 0; j < bin.length; j++) u8[j] = bin.charCodeAt(j);
+      chunks.push(u8);
+    }
+    var total = chunks.length;
+    if (!total) return;
+    // One write per batch, acknowledged to Kotlin: the next batch only leaves after the
+    // renderer consumed this one, so a flood cannot pile up inside the JS buffer.
+    var merged = new Uint8Array(chunks.reduce(function (n, c) { return n + c.length; }, 0));
+    var at = 0;
+    for (var k = 0; k < total; k++) { merged.set(chunks[k], at); at += chunks[k].length; }
+    term.write(merged, function () {
+      if (window.TermBridge && window.TermBridge.framesConsumed) {
+        window.TermBridge.framesConsumed(total);
+      }
+      fitIfBoxChanged();
+    });
+  };
+
+  window.__init = function (cfg) {
+    if (!term) boot();
+    if (cfg.id) el("id").textContent = String(cfg.id).slice(0, 8).toUpperCase();
+    if (cfg.fontSize) term.options.fontSize = cfg.fontSize;
+    if (cfg.theme) term.options.theme = Object.assign({}, THEME, cfg.theme);
+    scheduleFit();
+  };
+
+  window.__set_host = function (cols, rows, canRefit) {
+    if (!term) boot();
+    CAN_REFIT = !!canRefit;
+    var known = cols > 0 && rows > 0;
+    if (known) {
+      HOST = { cols: cols, rows: rows };
+      // The protocol guarantees a geometry frame is always followed by a new screen: drop
+      // what is on screen so a reconnect cannot stack a snapshot on top of the old buffer.
+      term.reset();
+    }
+    KNOWN = true;
+    if (MODE === "fit" && CAN_REFIT) {
+      // Host clamped or ignored our grid (20..250 x 5..120): adopt what it actually runs
+      // instead of deduping ourselves into a permanent desync.
+      if (known && lastSent && !same(lastSent, cols, rows)) mirrorHost();
+      else fitBox(true);
+    } else {
+      mirrorHost();
+    }
+    if (window.TermBridge && window.TermBridge.hostApplied) window.TermBridge.hostApplied();
+  };
+
+  window.__set_status = function (state) {
+    // A reconnect restores whatever grid the host had; forget what we sent so the next live
+    // geometry re-sends the box grid instead of being deduped away.
+    if (state !== "live") lastSent = null;
+    var text = { live: "ao vivo", connecting: "conectando…", closed: "encerrado", idle: "parado" };
+    el("dot").className = state;
+    el("state").textContent = text[state] || state;
+  };
+
+  window.__copyScreen = function () {
+    if (!term) return;
+    var text = term.getSelection();
+    if (!text) {
+      var buf = term.buffer.active, lines = [];
+      for (var y = 0; y < term.rows; y++) {
+        var line = buf.getLine(buf.viewportY + y);
+        lines.push(line ? line.translateToString(true) : "");
+      }
+      text = lines.join("\n");
+    }
+    if (text && window.TermBridge) window.TermBridge.copy(text);
+  };
+
+  window.__showCopied = function () {
+    var chip = el("copied");
+    chip.style.opacity = 1;
+    setTimeout(function () { chip.style.opacity = 0; }, 900);
+  };
+
+  if (document.readyState === "loading") {
+    window.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

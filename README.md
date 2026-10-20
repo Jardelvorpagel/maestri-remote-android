@@ -29,10 +29,11 @@ sanctioned second client.
 - **Live terminal** (stretch, done): `WS /api/terminals/{id}/stream` — first message is
   `{type:geometry}` → emulator reset; binary frames are raw PTY bytes; input via
   `{"type":"input"}` text frames + `{"type":"inputBytes"}` for control bytes; resize
-  frames in 20…250 × 5…120. The mini-emulator (`MiniTerm.kt`) is a small ANSI-lite
-  interpreter (cursor movement, erase, newline handling; SGR sequences are consumed, not
-  rendered — styling is out of MVP scope). Plain-text renderer with 2× scrollback
-  and quick keys (↵ ⌃C ⌃D ↑ ↓ ⇥ ⎋). Degrades to preview text if the stream can't connect.
+  frames in 20…250 × 5…120. The face itself is xterm.js in a WebView
+  (`app/src/main/assets/terminal/`, vendored, offline, no CDN) fed byte-for-byte through
+  `TerminalStreamSocket.frameSink`; the page never sees the token. It boots fitted to the
+  box (one resize, only when the host supports `terminalResize`), `ajustar` toggles a 1:1
+  mirror of the host grid, and the key rail sends the control bytes a phone keyboard cannot.
 
 ## Architecture
 
@@ -50,9 +51,8 @@ app/
 │   │                              companion funs probeInfo() + pair()
 │   ├── FeedSocket.kt            ← live feed: seed/apply mutations, (epoch, sequence)
 │   │                              dedupe, epoch-change resync hook, ping, backoff
-│   ├── TerminalStreamSocket.kt  ← geometry + ANSI binary frames → StateFlows,
-│   │                              input/inputBytes/resize writers
-│   ├── MiniTerm.kt              ← ANSI-lite screen emulator (plain text)
+│   ├── TerminalStreamSocket.kt  ← geometry + raw PTY bytes → frameSink, input/resize
+│   │                              writers, owner-scoped close
 │   └── session/WireSession.kt   ← pairing state + sockets lifecycle (clientProvider
 │                                  lambda so sockets pin the certificate lazily,
 │                                  after pairing is known)
@@ -60,7 +60,7 @@ app/
 └── ui/
     ├── IconGlyph.kt             ← SF-Symbol names → neutral glyph (emoji pass)
     └── screens/ PairingScreen · WorkspacesScreen · FeedScreen · TerminalScreen ·
-                  LiveTerminalView
+                  TerminalWebView (xterm.js bridge) · TerminalKeyRail
 ```
 
 ## Protocol decisions (per contract)

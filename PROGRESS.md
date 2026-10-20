@@ -63,3 +63,4 @@ Deliberately out of scope for the B1+B2 corrective wave; recorded so they are no
 - **PairingScreen** got the same `statusBarsPadding()` as the other four screens.
 - `assembleDebug` green. No tablet install from this lane (the gate does that), no writes to any
   production workspace, and no commits to `main`.
+- 2026-10-20 — Terminal face promoted to the xterm.js WebView (`assets/terminal/` + `TerminalWebView.kt`), `LiveTerminalView`/`MiniTerm`/termlib removed, socket byte tap (`frameSink`) with owner-scoped lifecycle, page boot gated on the first real layout size, geometry resets the page buffer.

@@ -1,6 +1,5 @@
 package app.maestri.wire
 
-import android.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -14,10 +13,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
-import org.connectbot.terminal.TerminalEmulator
 import org.json.JSONObject
-import java.nio.ByteBuffer
-import java.nio.charset.CodingErrorAction
 
 /**
  * Live terminal stream: `WS /api/terminals/{id}/stream?token=…`
@@ -37,15 +33,9 @@ class TerminalStreamSocket(
 ) {
     private val socketClientProvider: () -> OkHttpClient = clientProvider
     private val socketClient: OkHttpClient get() = socketClientProvider()
-    /** Rendered screen text (plain, from the emulator grid). */
-    private val _screenText = MutableStateFlow("")
-    val screenText: StateFlow<String> = _screenText
 
     private val _geometry = MutableStateFlow<Geometry?>(null)
     val geometry: StateFlow<Geometry?> = _geometry
-
-    private val _cursor = MutableStateFlow<Pair<Int, Int>?>(null)
-    val cursor: StateFlow<Pair<Int, Int>?> = _cursor
 
     private val _state = MutableStateFlow(SocketState.IDLE)
     val state: StateFlow<SocketState> = _state
@@ -57,44 +47,49 @@ class TerminalStreamSocket(
     private var backoffAttempts = 0
     private var closedByUs = false
     private var url: String? = null
+    private var owner: String? = null
     private var pingJob: Job? = null
-    private var term: MiniTerm? = null
-    /** Termlib renderer (todo #62): the screen owns one emulator per terminal and
-     *  attaches it here; host bytes flow verbatim into `writeInput` (mutex-guarded
-     *  inside the lib, so the socket thread can write directly). The socket never
-     *  detaches it — the screen owns the renderer's lifecycle: attach on every
-     *  stream open, detach on screen dispose. */
-    var termlib: TerminalEmulator? = null
+    /**
+     * The renderer's byte tap: the xterm page attaches one on the main thread and gets
+     * every binary PTY frame verbatim, in order, before any other consumer would.
+     */
+    @Volatile
+    var frameSink: ((ByteArray) -> Unit)? = null
 
-    /** Tolerant UTF-8 decode: PTY output is usually UTF-8; malformed bytes → U+FFFD.
-     *  QA-round-1 fix: this used to be a SHARED stateful CharsetDecoder field — two live
-     *  reader threads (the stranded-socket class: an overwritten ws + its reconnect)
-     *  corrupt the decoder's position state and kill the process with
-     *  CoderMalfunctionError. Now every frame decodes with a FRESH decoder; the field
-     *  is gone. Allocation per binary frame is acceptable (the termlib path already
-     *  byte-copies per frame). */
-
-    fun open(targetUrl: String) {
+    fun open(targetUrl: String, ownerId: String? = null) {
         closedByUs = false
         url = targetUrl
+        owner = ownerId
         backoffAttempts = 0
-        _screenText.value = ""
         connect()
     }
 
-    fun close() {
+    /** Reconnect in place (same URL): used when a dropped frame needs a fresh screen. */
+    fun reopen() {
+        closedByUs = false
+        backoffAttempts = 0
+        connect()
+    }
+
+    /**
+     * Tears the stream down. With an [ownerId] the call is ignored unless that terminal is
+     * still the current owner, so a screen leaving the composition cannot close the socket
+     * a newer screen has already opened.
+     */
+    fun close(ownerId: String? = null) {
+        if (ownerId != null && owner != ownerId) return
         closedByUs = true
+        owner = null
         pingJob?.cancel()
+        val socket = ws
+        ws = null
         try {
-            ws?.close(1000, "bye")
+            socket?.close(1000, "bye")
+            socket?.cancel()
         } catch (e: Exception) {
         }
-        ws = null
         _state.value = SocketState.IDLE
-        _screenText.value = ""
         _geometry.value = null
-        _cursor.value = null
-        term = null
     }
 
     // Ownership guard (QA round-2 teardown fix): every callback must belong to the CURRENT
@@ -108,6 +103,14 @@ class TerminalStreamSocket(
     private fun connect() {
         if (closedByUs) return
         val target = url ?: return
+        // A second connect must not leave the previous socket alive: its callbacks would
+        // never match `ws` and the connection would leak until the host timed it out.
+        val previous = ws
+        ws = null
+        try {
+            previous?.cancel()
+        } catch (e: Exception) {
+        }
         _state.value = SocketState.CONNECTING
         ws = socketClient.newWebSocket(
             Request.Builder().url(target).build(),
@@ -137,10 +140,7 @@ class TerminalStreamSocket(
                                     msg.optInt("cols", 80),
                                     msg.optInt("rows", 24),
                                 )
-                                android.util.Log.d("QATerm", "geometry cols=${msg.optInt("cols")} rows=${msg.optInt("rows")} -> clamped ${g.cols}x${g.rows}")
                                 _geometry.value = g
-                                term = MiniTerm(g.cols, g.rows)
-                                _cursor.value = 0 to 0
                             }
 
                             "pong" -> Unit
@@ -153,23 +153,13 @@ class TerminalStreamSocket(
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     if (webSocket !== ws) return
-                    android.util.Log.d("QATerm", "binary frame ${bytes.size} bytes")
-                    termlib?.writeInput(bytes.toByteArray())
-                    val decoded = Charsets.UTF_8.newDecoder()
-                        .onMalformedInput(CodingErrorAction.REPLACE)
-                        .onUnmappableCharacter(CodingErrorAction.REPLACE)
-                        .decode(ByteBuffer.wrap(bytes.toByteArray())).toString()
-                    val t = term ?: return
-                    t.feed(decoded)
-                    _screenText.value = t.render()
-                    _cursor.value = t.cursor()
+                    frameSink?.invoke(bytes.toByteArray())
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     if (webSocket !== ws) return
                     _state.value = SocketState.CLOSED
                     _error.value = t.message ?: "stream failed"
-                    android.util.Log.d("QATerm", "stream onFailure: ${t.message}")
                     ws = null
                     scheduleReconnect()
                 }
@@ -202,21 +192,12 @@ class TerminalStreamSocket(
 
     /** UTF-8 text input (capability terminalInputText). */
     fun sendInput(text: String) {
-        android.util.Log.d("QATerm", "send input: $text")
         ws?.send(JSONObject().put("type", "input").put("data", text).toString())
-    }
-
-    /** Raw bytes input (capability terminalInputBytes). */
-    fun sendInputBytes(bytes: ByteArray) {
-        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-        android.util.Log.d("QATerm", "send inputBytes: ${bytes.joinToString(",")}")
-        ws?.send(JSONObject().put("type", "inputBytes").put("data", b64).toString())
     }
 
     /** Resize the host PTY — clamped server and client-side to 20..250 × 5..120. */
     fun sendResize(cols: Int, rows: Int) {
         val g = Geometry.clamp(cols, rows)
-        android.util.Log.d("QATerm", "send resize: asked ${cols}x$rows -> sent ${g.cols}x${g.rows}")
         ws?.send(
             JSONObject()
                 .put("type", "resize")
