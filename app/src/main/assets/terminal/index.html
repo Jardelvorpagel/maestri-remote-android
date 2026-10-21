@@ -247,6 +247,7 @@
   // slices and each slice is usually shorter than one line, so the residue has to
   // survive between pushes or the terminal never moves.
   var scrollRemainder = 0;
+  var wheelRows = 0;
   window.__scrollCalls = 0;
   window.__terminalMouseMode = function () {
     try { return term ? term.modes.mouseTrackingMode : "no-term"; } catch (e) { return "err:" + e; }
@@ -268,11 +269,21 @@
     // produce, which is why it behaves exactly like the browser mirror.
     var mouseMode = term.modes && term.modes.mouseTrackingMode;
     if (mouseMode && mouseMode !== "none") {
-      // SGR: 64 = wheel up, 65 = wheel down. A finger dragged DOWN pulls the content
-      // down, which is the same as a wheel UP: it walks back through the history.
-      var button = n > 0 ? 64 : 65;
+      // SGR: 64 = wheel up (older content), 65 = wheel down. A finger dragged DOWN
+      // pulls the content down, which is the same as a wheel UP: it walks back
+      // through the history.
+      //
+      // The host multiplies every wheel event by 5 rows (pi's
+      // ALT_WHEEL_SCROLL_MULTIPLIER with wheelScrollLines=1), so one event per FIVE
+      // finger rows is what makes the content move 1:1 with the finger. Emitting one
+      // event per finger row would scroll five times too fast.
+      wheelRows += n;
+      var events = Math.trunc(wheelRows / 5);
+      if (!events) return;
+      wheelRows -= events * 5;
+      var button = events > 0 ? 64 : 65;
       window.__wheelSends = (window.__wheelSends || 0) + 1;
-      for (var i = 0; i < Math.abs(n); i++) {
+      for (var i = 0; i < Math.abs(events); i++) {
         window.TermBridge.sendInput("\u001b[<" + button + ";10;10M");
       }
       return;
