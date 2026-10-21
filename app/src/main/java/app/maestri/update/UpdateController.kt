@@ -30,6 +30,23 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
+ * Runs [block] until it returns a value, up to [attempts] times, waiting [delayMs]
+ * between the attempts. A null from the block means "this attempt failed".
+ */
+internal suspend fun <T : Any> retrying(
+    attempts: Int,
+    delayMs: Long,
+    block: suspend () -> T?,
+): T? {
+    repeat(attempts) { attempt ->
+        val value = block()
+        if (value != null) return value
+        if (attempt < attempts - 1) delay(delayMs)
+    }
+    return null
+}
+
+/**
  * The update feature: finds a newer published build, tells the user about it, and hands
  * the APK to the system installer.
  *
@@ -101,7 +118,7 @@ class UpdateController(
             return
         }
         scope.launch {
-            val info = client.latest()
+            val info = latestRelease()
             if (info == null) {
                 Log.d(TAG, "check: no manifest (offline or nothing published yet)")
                 return@launch
@@ -145,11 +162,21 @@ class UpdateController(
     fun installFromNotification() {
         Log.d(TAG, "install: asked by the notification")
         scope.launch {
-            val info = _release.value ?: client.latest()?.also { _release.value = it } ?: return@launch
+            val info = _release.value ?: latestRelease()?.also { _release.value = it } ?: return@launch
             if (!isNewer(info.versionCode, BuildConfig.VERSION_CODE)) return@launch
             install(info)
         }
     }
+
+    /**
+     * The published manifest, with a short retry.
+     *
+     * A cold start can lose the first DNS answer ("Unable to resolve host"), and the
+     * watch only checks every [CHECK_INTERVAL_MS] — without the retry the user would
+     * wait half an hour for the update notice.
+     */
+    private suspend fun latestRelease(): ReleaseInfo? =
+        retrying(attempts = CHECK_ATTEMPTS, delayMs = CHECK_RETRY_MS) { client.latest() }
 
     private suspend fun install(info: ReleaseInfo) {
         val cached = apkFile(info)
@@ -294,6 +321,8 @@ class UpdateController(
 
         const val CHANNEL = "updates"
         const val CHECK_INTERVAL_MS = 30 * 60 * 1000L
+        private const val CHECK_ATTEMPTS = 3
+        private const val CHECK_RETRY_MS = 1_500L
         private const val TAG = "QAUpdate"
         private const val NOTIFICATION_ID = 900
         private const val PREFS = "remote.update"
