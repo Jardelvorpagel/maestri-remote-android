@@ -48,6 +48,7 @@ class TerminalStreamSocket(
 
     @Volatile
     private var ws: WebSocket? = null
+    @Volatile
     private var reconnectJob: Job? = null
     private var backoffAttempts = 0
     private var closedByUs = false

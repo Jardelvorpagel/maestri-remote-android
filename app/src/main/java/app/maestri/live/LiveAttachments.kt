@@ -35,7 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.maestri.remote.DocumentPicker
+import app.maestri.ui.HostRequests
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.monoHud
 import app.maestri.ui.Style.pillShape
@@ -141,13 +141,13 @@ fun LiveAttachButton(enabled: Boolean, onPicked: (List<Uri>) -> Unit) {
             .background(colors.canvasSurface, pillShape())
             .border(1.dp, colors.hairline, pillShape())
             .clickable(enabled = enabled) {
-                val picker = context as? DocumentPicker
-                if (picker == null) {
-                    android.util.Log.d("QAFeed", "attach: no document picker host")
+                val host = context as? HostRequests
+                if (host == null) {
+                    android.util.Log.d("QAFeed", "attach: no host for the document picker")
                     return@clickable
                 }
                 runCatching {
-                    picker.pickDocuments { uris -> if (uris.isNotEmpty()) onPicked(uris) }
+                    host.pickDocuments { uris -> if (uris.isNotEmpty()) onPicked(uris) }
                 }.onFailure {
                     android.util.Log.d("QAFeed", "attach launch failed: ${it.javaClass.simpleName}: ${it.message}", it)
                 }

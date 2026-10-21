@@ -45,8 +45,10 @@ class NetworkRecovery(
             registered = true
             Log.d("QAStream", "network recovery: registered")
         } catch (e: Exception) {
-            // Already registered is not a failure: it means the callback is live.
-            if (e !is IllegalArgumentException) {
+            if (e is IllegalArgumentException) {
+                // Already registered: the callback is live, and stop() must still unregister it.
+                registered = true
+            } else {
                 Log.d("QAStream", "network recovery: register failed ${e.javaClass.simpleName}: ${e.message}")
             }
         }

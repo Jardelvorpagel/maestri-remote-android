@@ -112,6 +112,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import app.maestri.ui.HostRequests
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.monoHud
 import app.maestri.ui.Style.vendorColor
@@ -2355,20 +2356,21 @@ private fun ComposerPill(
 ) {
     val context = LocalContext.current
 
-    val filePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let { holder.stageLocalFiles(listOf(it)) }
-        onDismissMenu()
+    val host = context as? HostRequests
+    val filePicker = {
+        host?.pickDocuments { uris ->
+            if (uris.isNotEmpty()) holder.stageLocalFiles(uris)
+            onDismissMenu()
+        }
     }
 
-    val cameraLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val f = cameraDest
-        setCameraDest(null)
-        if (result.resultCode == android.app.Activity.RESULT_OK && f != null && f.exists()) {
-            holder.stageLocalFiles(listOf(Uri.fromFile(f)), mapOf(Uri.fromFile(f) to f.name))
+    val cameraLauncher = { intent: android.content.Intent ->
+        host?.launchForResult(intent) { resultCode, _ ->
+            val f = cameraDest
+            setCameraDest(null)
+            if (resultCode == android.app.Activity.RESULT_OK && f != null && f.exists()) {
+                holder.stageLocalFiles(listOf(Uri.fromFile(f)), mapOf(Uri.fromFile(f) to f.name))
+            }
         }
     }
 
@@ -2396,7 +2398,7 @@ private fun ComposerPill(
         }
         val (f, intent) = dest
         setCameraDest(f)
-        val launched = runCatching { cameraLauncher.launch(intent) }.isSuccess
+        val launched = runCatching { cameraLauncher(intent) }.isSuccess
         if (!launched) {
             setCameraDest(null)
             holder.note(S.attachmentCantBePreparedDraftPreserved)
@@ -2422,7 +2424,7 @@ private fun ComposerPill(
                 Column(Modifier.padding(4.dp)) {
                     Row(Modifier.fillMaxWidth()) {
                         TextButton(
-                            onClick = { filePicker.launch(arrayOf("*/*")) },
+                            onClick = { filePicker() },
                             modifier = Modifier.weight(1f),
                         ) { Text(S.attach, fontSize = 12.sp, maxLines = 1) }
                         TextButton(onClick = { launchCamera() }, modifier = Modifier.weight(1f)) {

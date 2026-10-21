@@ -72,6 +72,7 @@ class FeedSocket(
     @Volatile
     private var ws: WebSocket? = null
     private var connectJob: Job? = null
+    @Volatile
     private var reconnectJob: Job? = null
     private var pingJob: Job? = null
     private var backoffAttempts = 0
@@ -160,10 +161,17 @@ class FeedSocket(
     private fun connect() {
         if (closedByUs) return
         val target = url ?: return
-        // A pending backoff must not fire after this connect: it would open a second
-        // socket and leave the previous one alive.
+        // A pending backoff must not fire after this connect, and the socket this one
+        // replaces must be closed: two live sockets on the same room fight over presence.
         reconnectJob?.cancel()
         reconnectJob = null
+        connectJob?.cancel()
+        val previous = ws
+        ws = null
+        try {
+            previous?.cancel()
+        } catch (e: Exception) {
+        }
         _state.value = SocketState.CONNECTING
         connectJob = scope.launch {
             try {

@@ -79,7 +79,6 @@ import app.maestri.live.LiveViewModelFactory
 import app.maestri.live.MAX_ATTACH_BYTES
 import app.maestri.live.MAX_STAGED_FILES
 import app.maestri.live.PiRelayUpload
-import app.maestri.live.UploadRejected
 import app.maestri.live.formatAttachmentSize
 import app.maestri.live.stagePickedUris
 import app.maestri.ui.settings.TerminalFontStore
@@ -294,15 +293,15 @@ fun TerminalScreen(
         scope.launch {
             uploading = true
             val uploaded = try {
+                if (session.terminalStream.state.value != SocketState.OPEN) {
+                    notice = "Terminal stream is not live — nothing sent, files kept."
+                    return@launch
+                }
                 uploadStaged(files)
             } finally {
                 uploading = false
             }
             if (uploaded == null) return@launch
-            if (session.terminalStream.state.value != SocketState.OPEN) {
-                notice = "Terminal stream is not live — nothing sent, files kept."
-                return@launch
-            }
             val line = buildString {
                 if (text.isNotBlank()) {
                     append(text)
@@ -315,7 +314,7 @@ fun TerminalScreen(
             session.terminalStream.sendInput(line + "\r")
             // Only the text that was actually sent leaves the field: whatever the user
             // typed while the upload was running stays.
-            if (termInput == text) termInput = ""
+            if (termInput.trimEnd() == text) termInput = ""
             stagedFiles = emptyList()
         }
     }
@@ -667,7 +666,8 @@ private fun String.isSafeHostPath(): Boolean =
 
 /**
  * Keeps a value safe to type into the pty: the line the user sends goes straight to the
- * host's shell, so nothing in it may carry control characters.
+ * host's shell, so nothing in it may carry control characters. Letters of any alphabet are
+ * kept; everything else becomes an underscore.
  */
 private fun ptySafe(value: String): String {
     val cleaned = value.map { c -> if (c.isLetterOrDigit() || c == '.' || c == '_' || c == '-') c else '_' }
@@ -730,7 +730,7 @@ private fun TerminalStagedChips(files: List<LiveStagedFile>, onRemove: (String) 
                 Text(
                     when {
                         file.uploading -> "…"
-                        file.attachmentId != null -> "✓"
+                        file.uploadedPath != null -> "✓"
                         else -> "×"
                     },
                     fontFamily = MaestriType.Mono,

@@ -48,6 +48,7 @@ import app.maestri.ui.screens.routinesDestination
 import app.maestri.ui.screens.usageDestination
 import app.maestri.ui.chatDestinations
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -71,38 +72,70 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withTimeoutOrNull
+import app.maestri.ui.HostRequests
 import app.maestri.ui.Style.LocalMaestriColors
 
-class MainActivity : FragmentActivity(), DocumentPicker {
+class MainActivity : FragmentActivity(), HostRequests {
 
     private companion object {
-        const val REQUEST_PICK_DOCUMENTS = 0x5101
+        const val REQUEST_CODE_BASE = 0x5100
+        const val REQUEST_NOTIFICATION_PERMISSION = 0x5201
     }
 
-    private var pendingDocumentPick: ((List<Uri>) -> Unit)? = null
+    private var nextRequestCode = REQUEST_CODE_BASE
+    private val pendingResults = mutableMapOf<Int, (Int, Intent?) -> Unit>()
+    private var pendingPermission: ((Boolean) -> Unit)? = null
 
     override fun pickDocuments(onPicked: (List<Uri>) -> Unit) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
-        pendingDocumentPick = onPicked
-        ActivityCompat.startActivityForResult(this, intent, REQUEST_PICK_DOCUMENTS, null)
+        launchForResult(intent) { resultCode, data ->
+            if (resultCode != RESULT_OK) return@launchForResult
+            val clip = data?.clipData
+            val uris = when {
+                clip != null -> (0 until clip.itemCount).map { clip.getItemAt(it).uri }
+                data?.data != null -> listOf(data.data!!)
+                else -> emptyList()
+            }
+            onPicked(uris)
+        }
+    }
+
+    override fun launchForResult(intent: Intent, onResult: (resultCode: Int, data: Intent?) -> Unit) {
+        val requestCode = nextRequestCode
+        nextRequestCode = if (nextRequestCode >= REQUEST_CODE_BASE + 0xF0) REQUEST_CODE_BASE else nextRequestCode + 1
+        pendingResults[requestCode] = onResult
+        ActivityCompat.startActivityForResult(this, intent, requestCode, null)
+    }
+
+    override fun requestNotificationPermission(onResult: (Boolean) -> Unit) {
+        pendingPermission = onResult
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+            REQUEST_NOTIFICATION_PERMISSION,
+        )
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_PICK_DOCUMENTS) return
-        val callback = pendingDocumentPick
-        pendingDocumentPick = null
-        if (resultCode != RESULT_OK) return
-        val clip = data?.clipData
-        val uris = when {
-            clip != null -> (0 until clip.itemCount).map { clip.getItemAt(it).uri }
-            data?.data != null -> listOf(data.data!!)
-            else -> emptyList()
-        }
-        callback?.invoke(uris)
+        val callback = pendingResults.remove(requestCode) ?: return
+        callback(resultCode, data)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_NOTIFICATION_PERMISSION) return
+        val callback = pendingPermission
+        pendingPermission = null
+        callback?.invoke(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -199,14 +232,14 @@ fun Root(session: WireSession, appLock: AppLockStore, updates: UpdateController)
             val router = remember {
                 NotificationsRouter(session, activityContext.applicationContext, appForeground)
             }
-            val permissionLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestPermission(),
-            ) { granted -> router.onPermissionResult(granted) }
+            val permissionHost = activityContext as? HostRequests
             LaunchedEffect(Unit) {
                 launch {
                     router.permissionNudge.collect { // ask ONCE, at the first natural moment
                         if (!router.permissionAsked()) {
-                            permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            permissionHost?.requestNotificationPermission { granted ->
+                                router.onPermissionResult(granted)
+                            }
                         }
                     }
                 }
