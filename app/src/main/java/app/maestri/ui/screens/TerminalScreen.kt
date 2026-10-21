@@ -53,6 +53,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.net.Uri
 import app.maestri.wire.FeedItem
 import app.maestri.wire.FeedSnapshot
 import app.maestri.wire.SocketState
@@ -66,9 +67,18 @@ import app.maestri.ui.Style.pillShape
 import app.maestri.ui.settings.LocalAppLocked
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.maestri.live.DataStorePiRelayStore
+import app.maestri.live.LiveAttachButton
 import app.maestri.live.LiveFeedContent
+import app.maestri.live.LiveStagedChips
+import app.maestri.live.LiveStagedFile
 import app.maestri.live.LiveViewModel
 import app.maestri.live.LiveViewModelFactory
+import app.maestri.live.MAX_ATTACH_BYTES
+import app.maestri.live.MAX_STAGED_FILES
+import app.maestri.live.PiRelayUpload
+import app.maestri.live.UploadRejected
+import app.maestri.live.formatAttachmentSize
+import app.maestri.live.stagePickedUris
 import app.maestri.ui.settings.TerminalFontStore
 import app.maestri.ui.settings.TerminalScrollSpeedStore
 import app.maestri.ui.settings.TerminalViewModeStore
@@ -141,6 +151,10 @@ fun TerminalScreen(
     var notice by remember { mutableStateOf<String?>(null) }
     // The wide input line under the pty: same raw byte path as the key rail.
     var termInput by remember { mutableStateOf("") }
+    // Files staged for the next send: they travel to the host first, so the terminal line
+    // can hand the agent a path that really exists there.
+    var stagedFiles by remember { mutableStateOf<List<LiveStagedFile>>(emptyList()) }
+    var uploading by remember { mutableStateOf(false) }
     var seededFallback by remember { mutableStateOf(false) }
     // Capabilities up here: the renderer and the header both read them.
     val caps = session.serverInfo
@@ -191,14 +205,92 @@ fun TerminalScreen(
 
     // ---------------------------------------------------------------- actions
 
+    fun markStaged(key: String, transform: (LiveStagedFile) -> LiveStagedFile) {
+        stagedFiles = stagedFiles.map { if (it.key == key) transform(it) else it }
+    }
+
+    /**
+     * Uploads the staged files to the relay and returns what the host stored them as.
+     * The relay answers `{id,name,bytes,path}` — a real path on the machine that runs the
+     * agent, which is what the terminal line hands over. Nothing is sent when an upload
+     * fails: the files stay staged so the user can retry.
+     */
+    suspend fun uploadStaged(files: List<LiveStagedFile>): List<app.maestri.live.Attachment>? {
+        val relayUrl = relayStore.url.value
+        if (relayUrl.isBlank()) {
+            notice = "Not paired to a relay — nothing sent."
+            return null
+        }
+        val relayToken = relayStore.token.value
+        val uploader = PiRelayUpload()
+        val out = mutableListOf<app.maestri.live.Attachment>()
+        for (f in files) {
+            markStaged(f.key) { it.copy(uploading = true) }
+            val outcome = runCatching { uploader.upload(relayUrl, relayToken, f.name, f.bytes) }
+            val attachment = outcome.getOrNull()
+            markStaged(f.key) { it.copy(uploading = false, attachmentId = attachment?.id) }
+            if (outcome.isFailure || attachment == null || attachment.path.isBlank()) {
+                val cause = outcome.exceptionOrNull() as? UploadRejected
+                notice = "Upload failed for ${f.name}: " +
+                    (cause?.message ?: "no path on the host") +
+                    " — files kept, nothing sent."
+                return null
+            }
+            out += attachment
+        }
+        return out
+    }
+
+    /** Stages the picked files for the next send, with the chat face's caps and messages. */
+    fun stageAttachments(uris: List<Uri>) {
+        val (picked, unreadable) = stagePickedUris(ctx.applicationContext, uris)
+        val over = picked.filter { it.sizeBytes > MAX_ATTACH_BYTES }
+        val fitting = picked.filter { it.sizeBytes <= MAX_ATTACH_BYTES }
+        val room = (MAX_STAGED_FILES - stagedFiles.size).coerceAtLeast(0)
+        stagedFiles = stagedFiles + fitting.take(room)
+        val bits = mutableListOf<String>()
+        if (unreadable.isNotEmpty()) {
+            bits += "couldn't read: " + unreadable.take(3).joinToString(", ")
+        }
+        if (over.isNotEmpty()) {
+            bits += "over 8 MB: " + over.map { it.name }.take(3).joinToString(", ")
+        }
+        if (fitting.size > room) bits += "room for 8 max"
+        if (bits.isNotEmpty()) notice = "Not attached — " + bits.joinToString("; ") + "."
+    }
+
     /** Empties the wide input line into the pty. Send SUBMITS: the text plus the Enter byte
      *  ("\r") the rail's Enter key sends, so one tap on the phone runs the command. */
     fun sendTyped() {
         // trimEnd, not trim: leading spaces are real shell indentation.
         val text = termInput.trimEnd()
-        if (text.isBlank()) return
-        session.terminalStream.sendInput(text + "\r")
-        termInput = ""
+        val files = stagedFiles
+        if (text.isBlank() && files.isEmpty()) return
+        if (files.isEmpty()) {
+            session.terminalStream.sendInput(text + "\r")
+            termInput = ""
+            return
+        }
+        // Attachments go to the host FIRST: the pty can only be handed a path that exists
+        // there, so the upload has to finish before the line is typed.
+        scope.launch {
+            uploading = true
+            val uploaded = uploadStaged(files)
+            uploading = false
+            if (uploaded == null) return@launch
+            val line = buildString {
+                if (text.isNotBlank()) {
+                    append(text)
+                    append(' ')
+                }
+                uploaded.forEach {
+                    append("[attachment: ${it.name} (${formatAttachmentSize(it.bytes)}) path=${it.path}] ")
+                }
+            }.trimEnd()
+            session.terminalStream.sendInput(line + "\r")
+            termInput = ""
+            stagedFiles = emptyList()
+        }
     }
 
     fun approveReject(yes: Boolean) {
@@ -506,10 +598,19 @@ fun TerminalScreen(
             } else null,
         )
         Spacer(Modifier.height(8.dp))
+        if (stagedFiles.isNotEmpty() && !fullscreen && !imeUp) {
+            LiveStagedChips(
+                files = stagedFiles,
+                onRemove = { key -> stagedFiles = stagedFiles.filter { it.key != key } },
+            )
+        }
         TerminalInputLine(
             value = termInput,
             onChange = { termInput = it },
             onSend = ::sendTyped,
+            onAttach = ::stageAttachments,
+            canSend = (termInput.isNotBlank() || stagedFiles.isNotEmpty()) && !uploading,
+            busy = uploading,
         )
 
         // todo #58: the agent prompt composer now lives on the Chat face only
@@ -539,6 +640,9 @@ private fun TerminalInputLine(
     value: String,
     onChange: (String) -> Unit,
     onSend: () -> Unit,
+    onAttach: (List<Uri>) -> Unit,
+    canSend: Boolean,
+    busy: Boolean,
 ) {
     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         // Single-line with the IME Send action driving the SAME guarded path as the Send
@@ -551,11 +655,14 @@ private fun TerminalInputLine(
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(
-                onSend = { if (value.isNotBlank()) onSend() },
+                onSend = { if (canSend) onSend() },
             ),
         )
-        Button(onClick = { if (value.isNotBlank()) onSend() }, enabled = value.isNotBlank()) {
-            Text("Send")
+        // Attach: the file travels to the host on the next Send, and the terminal line
+        // hands the agent the path the host stored it under.
+        LiveAttachButton(enabled = !busy) { uris -> onAttach(uris) }
+        Button(onClick = { if (canSend) onSend() }, enabled = canSend) {
+            Text(if (busy) "…" else "Send")
         }
     }
 }
