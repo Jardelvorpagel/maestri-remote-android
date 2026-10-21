@@ -23,8 +23,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
@@ -64,7 +62,6 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriType
-import app.maestri.ui.Style.controlShape
 import app.maestri.ui.Style.pillShape
 import app.maestri.ui.settings.LocalAppLocked
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -75,11 +72,11 @@ import app.maestri.live.LiveViewModelFactory
 import app.maestri.ui.settings.TerminalFontStore
 import app.maestri.ui.settings.TerminalViewModeStore
 import app.maestri.wire.ChatApi
-import app.maestri.ui.Style.TerminalThemes
 import app.maestri.ui.Style.BackLabel
 
 /**
- * Terminal detail: preview (live snapshot) OR the live stream, prompt composer,
+ * Terminal detail: the terminal face IS the xterm live stream (key rail + wide input
+ * line), with the Pi relay chat as a sibling view mode (Terminal | Chat), and
  * approve/reject for pendingPrompt items.
  *
  * Contract wiring:
@@ -87,7 +84,7 @@ import app.maestri.ui.Style.BackLabel
  *  - feed-socket presence of the open node (capability "presence")
  *  - live stream resets its emulator on every geometry frame
  *  - resize requests are clamped to 20..250 cols × 5..120 rows
- *  - prompt/approve/reject clear attention on the host; 409s surface as inline notices
+ *  - approve/reject clear attention on the host; 409s surface as inline notices
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -134,12 +131,9 @@ fun TerminalScreen(
 
     val streamGeometry by session.terminalStream.geometry.collectAsState()
 
-    // The xterm WebView is the terminal face: open on the live stream, not on the
-    // preview snapshot.
-    var live by remember { mutableStateOf(true) }
     var notice by remember { mutableStateOf<String?>(null) }
-    var promptText by remember { mutableStateOf("") }
-    var sending by remember { mutableStateOf(false) }
+    // The wide input line under the pty: same raw byte path as the key rail.
+    var termInput by remember { mutableStateOf("") }
     var seededFallback by remember { mutableStateOf(false) }
     // Capabilities up here: the renderer and the header both read them.
     val caps = session.serverInfo
@@ -175,9 +169,10 @@ fun TerminalScreen(
     }
 
     // The xterm face owns opening the stream (its byte tap is attached before open);
-    // this effect only tears the socket down when the face is not on screen.
-    LaunchedEffect(live, terminalId, canStream, locked, inChat) {
-        if (!(live && canStream && !locked && !inChat)) session.terminalStream.close(terminalId)
+    // this effect only tears the socket down when the face is not on screen: the stream
+    // stays open while the Terminal face is visible (and the host supports it) and unlocked.
+    LaunchedEffect(terminalId, canStream, locked, inChat) {
+        if (!(canStream && !locked && !inChat)) session.terminalStream.close(terminalId)
     }
 
     DisposableEffect(Unit) {
@@ -189,22 +184,14 @@ fun TerminalScreen(
 
     // ---------------------------------------------------------------- actions
 
-    fun sendPrompt() {
-        val text = promptText.trim()
+    /** Empties the wide input line into the pty. Send SUBMITS: the text plus the Enter byte
+     *  ("\r") the rail's Enter key sends, so one tap on the phone runs the command. */
+    fun sendTyped() {
+        // trimEnd, not trim: leading spaces are real shell indentation.
+        val text = termInput.trimEnd()
         if (text.isBlank()) return
-        sending = true
-        scope.launch {
-            try {
-                session.prompt(terminalId, text)
-                promptText = ""
-            } catch (e: app.maestri.wire.ApiException) {
-                notice = "prompt refused (HTTP ${e.status}${e.code?.let { " · $it" } ?: ""}): ${e.message}"
-            } catch (e: Exception) {
-                notice = "prompt failed: ${e.message}"
-            } finally {
-                sending = false
-            }
-        }
+        session.terminalStream.sendInput(text + "\r")
+        termInput = ""
     }
 
     fun approveReject(yes: Boolean) {
@@ -247,11 +234,11 @@ fun TerminalScreen(
     val imeUp = WindowInsets.isImeVisible
     // Typing needs the grid, not the chrome: the IME leaves ~140dp here, so the header
     // steps aside while the keyboard is up (system back closes the IME first).
-    val chromeTight = imeUp && live && !inChat && !fullscreen
+    val chromeTight = imeUp && !inChat && !fullscreen
     // todo #57: edge-to-edge + adjustResize delivers the IME as an inset — the window does
     // NOT shrink (reno_kb2 proves it: the viewport extends under Gboard) — so the screen
-    // consumes it here. One shared fix lifting the Live input + rail AND the agent prompt
-    // composer (both faces) above the keyboard. Closed keyboard → zero inset → identical.
+    // consumes it here. One shared fix lifting the terminal input line + rail AND the agent
+    // prompt composer (Chat face) above the keyboard. Closed keyboard → zero inset → identical.
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp).imePadding()) {
         // Header: responsive below a 480dp breakpoint (todo #42, Reno 411dp case).
         // The tablet path is the ARRANGEMENT-IDENTICAL row it has always been; the
@@ -309,7 +296,7 @@ fun TerminalScreen(
             }
         }
         val fullscreenBtn: @Composable () -> Unit = {
-            if (live && canStream) {
+            if (canStream) {
                 TextButton(onClick = { fullscreen = !fullscreen }) {
                     Text(if (fullscreen) "\u2921" else "\u2922", fontSize = 18.sp)
                 }
@@ -443,69 +430,57 @@ fun TerminalScreen(
             Text(it, color = LocalMaestriColors.current.warning, fontSize = 12.sp)
         }
 
-        if (!fullscreen && !imeUp) {
-        Spacer(Modifier.height(10.dp))
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            SegmentedButton(
-                selected = !live,
-                onClick = { live = false },
-                shape = SegmentedButtonDefaults.itemShape(0, 2),
-            ) { Text("Preview") }
-            SegmentedButton(
-                selected = live,
-                onClick = { if (canStream) live = true },
-                shape = SegmentedButtonDefaults.itemShape(1, 2),
-                enabled = canStream,
-            ) { Text(if (canStream) "Live" else "Live (cap off)") }
-        }
-        Spacer(Modifier.height(10.dp))
-        }
-
-        if (live && canStream) {
-            if (!canResize) {
-                streamGeometry?.let { g ->
-                    Text(
-                        "pty ${g.cols} cols — terminal resize is unavailable on this host, so " +
-                            "line tails past the screen edge are unreachable",
-                        color = LocalMaestriColors.current.warning,
-                        fontSize = 11.sp,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                }
-            }
-            TerminalWebView(
-                session = session,
-                terminalId = terminalId,
-                fontSizeSp = fontSp,
-                canResize = canResize,
-                enabled = !locked && !inChat,
-                modifier = Modifier.fillMaxWidth().weight(1f),
+        if (!canStream) {
+            Text(
+                "this host has no terminal streaming capability — the pty face stays blank",
+                color = LocalMaestriColors.current.warning,
+                fontSize = 11.sp,
             )
             Spacer(Modifier.height(6.dp))
-            TerminalKeyRail(
-                onSend = { session.terminalStream.sendInput(it) },
-                onChat = if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
-                    ({ enterChatMode() })
-                } else null,
-            )
-        } else {
-            PreviewPanel(card)
         }
 
-        // todo #58: the agent prompt composer belongs to the Preview face — Live already
-        // has the terminal composer + rail, and stacking both stranded "Prompt to the
-        // agent…" under the rail with a focus ring (reno_termbox). Pre-#42 rendered it on
-        // both faces (a922c8a:356 gated fullscreen-only, 361cbef:282 unconditional) — that
-        // both-faces state IS the reported duplicate, so history keeps no other owner.
-        if (!live && !fullscreen) {
-            Spacer(Modifier.height(12.dp))
-            PromptComposer(
-                value = promptText,
-                onChange = { promptText = it },
-                onSend = ::sendPrompt,
-                sending = sending,
-            )
+        if (!canResize) {
+            streamGeometry?.let { g ->
+                Text(
+                    "pty ${g.cols} cols — terminal resize is unavailable on this host, so " +
+                        "line tails past the screen edge are unreachable",
+                    color = LocalMaestriColors.current.warning,
+                    fontSize = 11.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+            }
         }
+        TerminalWebView(
+            session = session,
+            terminalId = terminalId,
+            fontSizeSp = fontSp,
+            canResize = canResize,
+            // canStream also gates the dial: the face stays composed (and explains itself
+            // above) but never opens a stream this host cannot serve.
+            enabled = canStream && !locked && !inChat,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+        )
+        Spacer(Modifier.height(6.dp))
+        TerminalKeyRail(
+            onSend = { session.terminalStream.sendInput(it) },
+            onChat = if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
+                ({ enterChatMode() })
+            } else null,
+        )
+        Spacer(Modifier.height(8.dp))
+        TerminalInputLine(
+            value = termInput,
+            onChange = { termInput = it },
+            onSend = ::sendTyped,
+        )
+
+        // todo #58: the agent prompt composer now lives on the Chat face only
+        // (LiveComposerBar, LiveComposer.kt:35, rendered by LiveFeedContent,
+        // LiveScreen.kt:349). It was retired here together with the Preview face it had
+        // been moved onto: stacking it under the rail stranded "Prompt to the agent…"
+        // with a focus ring (reno_termbox). Pre-#42 rendered it on both faces
+        // (a922c8a:356 gated fullscreen-only, 361cbef:282 unconditional) — that
+        // both-faces state IS the reported duplicate, so history keeps no other owner.
         }
     }
 }
@@ -522,62 +497,27 @@ private fun attentionDot(t: TerminalCard?, pending: Boolean): Color = when {
 }
 
 @Composable
-private fun PreviewPanel(card: TerminalCard?) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(LocalMaestriColors.current.canvasSurface, controlShape())
-            .padding(10.dp)
-    ) {
-        Text("Preview", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(6.dp))
-        if (card == null) {
-            Text(
-                "no snapshot yet — waiting for the live feed…",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                card.preview.takeLast(12).forEachIndexed { idx, line ->
-                    Text(
-                        line,
-                        fontFamily = MaestriType.Mono,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = TerminalThemes.previewForeground(),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PromptComposer(
+private fun TerminalInputLine(
     value: String,
     onChange: (String) -> Unit,
     onSend: () -> Unit,
-    sending: Boolean,
 ) {
     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        // todo #42 round 2: the composer is the prompt line — single-line with the IME
-        // Send action driving the SAME guarded path as the Send button (hardware Enter
-        // must submit; multi-line entry no longer reachable by keyboard, by design).
+        // Single-line with the IME Send action driving the SAME guarded path as the Send
+        // button (hardware Enter must submit — todo #42 round 2 convention).
         OutlinedTextField(
             value = value,
             onValueChange = onChange,
-            placeholder = { Text("Prompt to the agent…") },
+            placeholder = { Text("Type to the terminal…") },
             modifier = Modifier.weight(1f),
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(
-                onSend = { if (!sending && value.isNotBlank()) onSend() },
+                onSend = { if (value.isNotBlank()) onSend() },
             ),
         )
-        Button(onClick = { if (!sending && value.isNotBlank()) onSend() }, enabled = !sending && value.isNotBlank()) {
-            Text(if (sending) "…" else "Send")
+        Button(onClick = { if (value.isNotBlank()) onSend() }, enabled = value.isNotBlank()) {
+            Text("Send")
         }
     }
 }

@@ -203,8 +203,14 @@
     });
     el("copy").addEventListener("click", function () { window.__copyScreen(); });
 
-    // xterm's screen layer sits over the scrollable viewport, so a drag never reaches it;
-    // move the viewport's own scrollTop (the scrollbar path xterm already syncs).
+    // A drag must move the BUFFER, not the DOM scrollTop. xterm renders from
+    // buffer.ydisp and re-syncs scrollTop from it (syncScrollArea), so writing
+    // scrollTop directly is snapped back and a full-screen drag moved one line.
+    // term.scrollLines(amount, suppress, 1) is the path xterm itself uses to move
+    // the buffer: ydisp moves, the rows re-render, and the scrollbar follows.
+    // The host TUI keeps mouse reporting on, which switches off xterm's own touch
+    // gesture handling, so this handler stays; the browser cannot do it either
+    // (the touch lands on .xterm-screen, a sibling of the scrolling .xterm-viewport).
     var touchY = null, acc = 0;
     function lineH() {
       var row = el("term").querySelector(".xterm-rows>div");
@@ -222,8 +228,8 @@
       var lh = lineH(), n = Math.trunc(acc / lh);
       if (!n) return;
       acc -= n * lh;
-      var vp = el("term").querySelector(".xterm-viewport");
-      if (vp) vp.scrollTop -= n * lh;
+      // Finger down = older lines (ydisp shrinks), finger up = back to the tail.
+      term.scrollLines(-n, false, 1);
       e.preventDefault();
     }, { passive: false, capture: true });
     el("term").addEventListener("touchend", function () { touchY = null; acc = 0; }, { passive: true, capture: true });
