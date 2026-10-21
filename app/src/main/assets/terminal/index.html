@@ -247,8 +247,13 @@
   // slices and each slice is usually shorter than one line, so the residue has to
   // survive between pushes or the terminal never moves.
   var scrollRemainder = 0;
+  window.__scrollCalls = 0;
+  window.__terminalMouseMode = function () {
+    try { return term ? term.modes.mouseTrackingMode : "no-term"; } catch (e) { return "err:" + e; }
+  };
   window.__scrollTerminal = function (deltaDevicePx) {
     if (!term || !deltaDevicePx) return;
+    window.__scrollCalls++;
     var row = el("term").querySelector(".xterm-rows>div");
     var lh = row ? row.getBoundingClientRect().height : 16;
     var dpr = window.devicePixelRatio || 1;
@@ -256,6 +261,23 @@
     var n = Math.trunc(css / lh);
     if (!n) { scrollRemainder = css; return; }
     scrollRemainder = css - n * lh;
+    // A program that turned mouse reporting on (a full-screen TUI) keeps its own
+    // history and scrolls it with the MOUSE WHEEL: xterm turns the wheel into SGR
+    // mouse bytes on the wire and the TUI scrolls itself. A phone has no wheel, so
+    // the finger drag has to become one -- byte for byte what a mouse wheel would
+    // produce, which is why it behaves exactly like the browser mirror.
+    var mouseMode = term.modes && term.modes.mouseTrackingMode;
+    if (mouseMode && mouseMode !== "none") {
+      // SGR: 64 = wheel up, 65 = wheel down. A finger dragged DOWN pulls the content
+      // down, which is the same as a wheel UP: it walks back through the history.
+      var button = n > 0 ? 64 : 65;
+      window.__wheelSends = (window.__wheelSends || 0) + 1;
+      for (var i = 0; i < Math.abs(n); i++) {
+        window.TermBridge.sendInput("\u001b[<" + button + ";10;10M");
+      }
+      return;
+    }
+    // No mouse reporting: the terminal's own scrollback is the thing to move.
     term.scrollLines(-n, false, 1);
   };
 
