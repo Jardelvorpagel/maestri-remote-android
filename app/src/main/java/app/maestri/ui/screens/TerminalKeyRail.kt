@@ -59,6 +59,12 @@ fun TerminalKeyRail(onSend: (String) -> Unit, onChat: (() -> Unit)?) {
             QuickKey("\u2193", "Arrow down", TerminalThemes.TokyoNight.blue) { onSend("\u001B[B") }
             QuickKey("\u2190", "Arrow left", TerminalThemes.TokyoNight.blue) { onSend("\u001B[D") }
             QuickKey("\u2192", "Arrow right", TerminalThemes.TokyoNight.blue) { onSend("\u001B[C") }
+            // Pi's legacy key parser only recognises ctrl+arrows in the SS3 form
+            // (ESC O a), and rejects ctrl+shift outright, so the plain CSI ctrl+up
+            // never reaches the agent's prompt history.
+            QuickKey("\u2303\u2191", "Control Up — previous prompt", TerminalThemes.TokyoNight.blue) { onSend("\u001bOa") }
+            QuickKey("\u2303\u2193", "Control Down — next prompt", TerminalThemes.TokyoNight.blue) { onSend("\u001bOb") }
+            QuickKey("\u2303End", "Control End — jump to the latest message", TerminalThemes.TokyoNight.blue) { onSend("\u001b[8^") }
             onChat?.let {
                 QuickKey("Chat \u21E2", "Switch to chat mode", TerminalThemes.TokyoNight.green, onClick = it)
             }
