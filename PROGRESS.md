@@ -64,3 +64,4 @@ Deliberately out of scope for the B1+B2 corrective wave; recorded so they are no
 - `assembleDebug` green. No tablet install from this lane (the gate does that), no writes to any
   production workspace, and no commits to `main`.
 - 2026-10-20 — Terminal face promoted to the xterm.js WebView (`assets/terminal/` + `TerminalWebView.kt`), `LiveTerminalView`/`MiniTerm`/termlib removed, socket byte tap (`frameSink`) with owner-scoped lifecycle, page boot gated on the first real layout size, geometry resets the page buffer.
+- 2026-10-22 — Release pipeline CI-only: `version.properties` + `release.yml` (push main → APK assinado + `latest.json` em GitHub Release); `build.gradle.kts` lê versão com fallback local e expõe BuildConfig; sem tocar em update/, manifest, res ou telas.

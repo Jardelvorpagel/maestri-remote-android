@@ -134,3 +134,11 @@ canvas state, so the full snapshot is the sole source of truth).
   gated, consumes position changes when active so card taps stay clean).
 - **Integration**: tapping a terminal node navigates into the EXISTING terminal detail
   route (seen-marking, preview/live) — no stubs. No new dependencies (Compose + org.json).
+
+## Release cycle
+- Push na `main` dispara `.github/workflows/release.yml`: versiona (`versionCode` =
+  `git rev-list --count`, `versionName` = `0.2.1-<sha>`), assina com a keystore dos
+  secrets e publica tag `v<versionName>` com o APK + `latest.json`.
+- O cliente descobre versão nova em
+  `https://github.com/Jardelvorpagel/maestri-remote-android/releases/latest/download/latest.json`
+  e só atualiza se `versionCode > BuildConfig.VERSION_CODE`, verificando o `sha256`.

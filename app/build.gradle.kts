@@ -3,22 +3,48 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+import java.util.Properties
+
 android {
     namespace = "app.maestri.remote"
     compileSdk = 37
+
+    // version.properties is rewritten by CI before release builds; when absent
+    // (fresh checkout without the file) local builds fall back without breaking.
+    val versionPropsFile = rootProject.file("version.properties")
+    val versionProps = Properties()
+    if (versionPropsFile.exists()) versionPropsFile.inputStream().use { versionProps.load(it) }
+    val appVersionCode = (versionProps.getProperty("versionCode") ?: "1").toInt()
+    val appVersionName = versionProps.getProperty("versionName") ?: "0.0.0-local"
 
     defaultConfig {
         applicationId = "app.maestri.remote"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
+    }
+
+    signingConfigs {
+        create("release") {
+            // Populated from env only on CI; local release builds keep debug signing.
+            val ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (!ksPath.isNullOrBlank()) {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (!System.getenv("ANDROID_KEYSTORE_PATH").isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
@@ -27,6 +53,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
