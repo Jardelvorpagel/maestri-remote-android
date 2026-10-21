@@ -72,6 +72,8 @@ import app.maestri.ui.Style.warmRing
 import app.maestri.wire.WorkspaceMeta
 import app.maestri.wire.session.WireSession
 import app.maestri.ui.FloorsStrings
+import app.maestri.update.UpdateBanner
+import app.maestri.update.UpdateController
 
 /**
  * Workspace list — design-v2 "modern" parity (spec frame 01): ring-depth cards
@@ -87,6 +89,7 @@ import app.maestri.ui.FloorsStrings
 @Composable
 fun WorkspacesScreen(
     session: WireSession,
+    updates: UpdateController? = null,
     onOpenWorkspace: (wsId: String, wsName: String) -> Unit,
     onOpenFloors: (wsId: String, wsName: String) -> Unit = { _, _ -> },
     onOpenSettings: (() -> Unit)? = null,
@@ -190,6 +193,11 @@ fun WorkspacesScreen(
                         )
                     }
                     Spacer(Modifier.height(12.dp))
+
+                    if (updates != null) {
+                        UpdateBanner(updates)
+                        Spacer(Modifier.height(12.dp))
+                    }
 
                     if (loading && list.isEmpty()) {
                         Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {

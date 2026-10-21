@@ -2,7 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The update check asks the system whether there is a network at all; without it
+         ConnectivityManager throws instead of answering. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The update feature hands the downloaded APK to the SYSTEM installer; the app
+         itself never installs anything (the user confirms in the system dialog). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".MaestriApp"

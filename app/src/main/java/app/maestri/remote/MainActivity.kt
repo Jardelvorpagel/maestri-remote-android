@@ -62,6 +62,7 @@ import app.maestri.ui.notificationsDestination
 import app.maestri.ui.screens.WorkspacesScreen
 import app.maestri.wire.DeepLinkBus
 import app.maestri.wire.session.WireSession
+import app.maestri.update.UpdateController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -77,10 +78,14 @@ class MainActivity : FragmentActivity() {
         // P4-A: a notification tap that COLD-STARTS the app lands its deep link here.
         intent?.getStringExtra(NotificationsRouter.EXTRA_DEEPLINK)?.let { DeepLinkBus.routes.tryEmit(it) }
         val session = (application as MaestriApp).session
+        val updates = (application as MaestriApp).updates
+        if (intent?.getBooleanExtra(UpdateController.EXTRA_INSTALL, false) == true) {
+            updates.installFromNotification()
+        }
         setContent {
             MaestriTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Root(session, appLock())
+                    Root(session, appLock(), updates)
                 }
             }
         }
@@ -88,8 +93,13 @@ class MainActivity : FragmentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         // P4-A: a notification tap that WARMS an existing task lands its deep link here.
         intent.getStringExtra(NotificationsRouter.EXTRA_DEEPLINK)?.let { DeepLinkBus.routes.tryEmit(it) }
+        // The update notification's action opens the installer for the pending build.
+        if (intent.getBooleanExtra(UpdateController.EXTRA_INSTALL, false)) {
+            (application as MaestriApp).updates.installFromNotification()
+        }
     }
     // P6 app-lock lifecycle (spec 4.1/4.2): stamp leave (rotations skipped), re-arm on
     // entry; the gate sits on the NavHost branch ONLY — pairing never gated (W-1 ruling).
@@ -118,7 +128,7 @@ class MainActivity : FragmentActivity() {
 }
 
 @Composable
-fun Root(session: WireSession, appLock: AppLockStore) {
+fun Root(session: WireSession, appLock: AppLockStore, updates: UpdateController) {
     val paired by session.pairing.collectAsState()
     var authNotice by remember { mutableStateOf<String?>(null) }
     var pairMode by rememberSaveable(stateSaver = PairingMode.saver) { mutableStateOf<PairingMode?>(null) }
@@ -173,6 +183,10 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                     }
                 }
             }
+            // Update check: once at start, then every 30 min while the app is open.
+            LaunchedEffect(updates) {
+                updates.start()
+            }
             DisposableEffect(Unit) {
                 val observer = LifecycleEventObserver { _, event ->
                     appForeground.value = event == Lifecycle.Event.ON_RESUME
@@ -221,6 +235,7 @@ fun Root(session: WireSession, appLock: AppLockStore) {
                     Box(Modifier.fillMaxSize()) {
                         WorkspacesScreen(
                             session = session,
+                            updates = updates,
                             onOpenWorkspace = { wsId, wsName -> nav.navigate("feed/$wsId/${enc(wsName)}") },
                             onOpenFloors = { wsId, wsName -> nav.navigate(FloorsNav.link(wsId, wsName)) },
                             onOpenSettings = { nav.navigate("settings") },
