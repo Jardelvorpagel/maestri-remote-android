@@ -4,8 +4,6 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.maestri.remote.DocumentPicker
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.monoHud
 import app.maestri.ui.Style.pillShape
@@ -133,9 +132,7 @@ fun stagePickedUris(context: Context, uris: List<Uri>): Pair<List<LiveStagedFile
 
 @Composable
 fun LiveAttachButton(enabled: Boolean, onPicked: (List<Uri>) -> Unit) {
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris -> if (uris.isNotEmpty()) onPicked(uris) }
+    val context = LocalContext.current
     val colors = LocalMaestriColors.current
     Box(
         modifier = Modifier
@@ -143,7 +140,18 @@ fun LiveAttachButton(enabled: Boolean, onPicked: (List<Uri>) -> Unit) {
             .clip(pillShape())
             .background(colors.canvasSurface, pillShape())
             .border(1.dp, colors.hairline, pillShape())
-            .clickable(enabled = enabled) { runCatching { launcher.launch(arrayOf("*/*")) } },
+            .clickable(enabled = enabled) {
+                val picker = context as? DocumentPicker
+                if (picker == null) {
+                    android.util.Log.d("QAFeed", "attach: no document picker host")
+                    return@clickable
+                }
+                runCatching {
+                    picker.pickDocuments { uris -> if (uris.isNotEmpty()) onPicked(uris) }
+                }.onFailure {
+                    android.util.Log.d("QAFeed", "attach launch failed: ${it.javaClass.simpleName}: ${it.message}", it)
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Text("+", fontSize = 20.sp, color = colors.secondaryLabel)

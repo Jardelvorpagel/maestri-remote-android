@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.ComponentActivity
+import androidx.core.app.ActivityCompat
 import androidx.fragment.app.FragmentActivity
 import app.maestri.ui.settings.AppLockGate
 import app.maestri.ui.settings.AppLockStore
@@ -47,6 +48,7 @@ import app.maestri.ui.screens.routinesDestination
 import app.maestri.ui.screens.usageDestination
 import app.maestri.ui.chatDestinations
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.DisposableEffect
@@ -71,7 +73,38 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withTimeoutOrNull
 import app.maestri.ui.Style.LocalMaestriColors
 
-class MainActivity : FragmentActivity() {
+class MainActivity : FragmentActivity(), DocumentPicker {
+
+    private companion object {
+        const val REQUEST_PICK_DOCUMENTS = 0x5101
+    }
+
+    private var pendingDocumentPick: ((List<Uri>) -> Unit)? = null
+
+    override fun pickDocuments(onPicked: (List<Uri>) -> Unit) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        pendingDocumentPick = onPicked
+        ActivityCompat.startActivityForResult(this, intent, REQUEST_PICK_DOCUMENTS, null)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_PICK_DOCUMENTS) return
+        val callback = pendingDocumentPick
+        pendingDocumentPick = null
+        if (resultCode != RESULT_OK) return
+        val clip = data?.clipData
+        val uris = when {
+            clip != null -> (0 until clip.itemCount).map { clip.getItemAt(it).uri }
+            data?.data != null -> listOf(data.data!!)
+            else -> emptyList()
+        }
+        callback?.invoke(uris)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

@@ -50,6 +50,7 @@ data class LiveStagedFile(
     val bytes: ByteArray,
     val uploading: Boolean = false,
     val attachmentId: String? = null,
+    val uploadedPath: String? = null,
 )
 
 data class LivePendingAttachment(

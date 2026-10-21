@@ -69,8 +69,10 @@ class FeedSocket(
     @Volatile
     var selfLabel: String = "You"
 
+    @Volatile
     private var ws: WebSocket? = null
     private var connectJob: Job? = null
+    private var reconnectJob: Job? = null
     private var pingJob: Job? = null
     private var backoffAttempts = 0
     private var closedByUs = false
@@ -89,7 +91,7 @@ class FeedSocket(
      * socket would drop a live feed for nothing.
      */
     private val networkRecovery = NetworkRecovery(context, scope) {
-        if (_state.value == SocketState.CLOSED) {
+        if (_state.value == SocketState.CLOSED || _state.value == SocketState.CONNECTING) {
             backoffAttempts = 0
             connect()
         }
@@ -158,6 +160,10 @@ class FeedSocket(
     private fun connect() {
         if (closedByUs) return
         val target = url ?: return
+        // A pending backoff must not fire after this connect: it would open a second
+        // socket and leave the previous one alive.
+        reconnectJob?.cancel()
+        reconnectJob = null
         _state.value = SocketState.CONNECTING
         connectJob = scope.launch {
             try {
@@ -178,7 +184,8 @@ class FeedSocket(
         if (closedByUs) return
         val attempt = backoffAttempts++
         val delayMs = (1000L shl attempt.coerceAtMost(4)).coerceAtMost(30_000L)
-        scope.launch {
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
             delay(delayMs)
             if (!closedByUs) connect()
         }
@@ -232,6 +239,7 @@ class FeedSocket(
 
     inner class Listener : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (webSocket !== ws) return
             backoffAttempts = 0
             _state.value = SocketState.OPEN
             _lastError.value = null
@@ -240,6 +248,7 @@ class FeedSocket(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            if (webSocket !== ws) return
             try {
                 val msg = JSONObject(text)
                 when (msg.optString("type")) {
@@ -279,6 +288,7 @@ class FeedSocket(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (webSocket !== ws) return
             _state.value = SocketState.CLOSED
             _lastError.value = t.message ?: "socket failed"
             android.util.Log.d("QAFeed", "feed onFailure: ${t.message}")
@@ -287,6 +297,7 @@ class FeedSocket(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (webSocket !== ws) return
             if (!closedByUs) {
                 _state.value = SocketState.CLOSED
                 ws = null

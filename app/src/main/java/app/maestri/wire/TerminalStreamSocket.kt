@@ -46,7 +46,9 @@ class TerminalStreamSocket(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
+    @Volatile
     private var ws: WebSocket? = null
+    private var reconnectJob: Job? = null
     private var backoffAttempts = 0
     private var closedByUs = false
     private var url: String? = null
@@ -72,7 +74,7 @@ class TerminalStreamSocket(
      * socket would drop a live stream for nothing.
      */
     private val networkRecovery = NetworkRecovery(context, scope) {
-        if (_state.value == SocketState.CLOSED) {
+        if (_state.value == SocketState.CLOSED || _state.value == SocketState.CONNECTING) {
             backoffAttempts = 0
             connect()
         }
@@ -136,8 +138,12 @@ class TerminalStreamSocket(
             previous?.cancel()
         } catch (e: Exception) {
         }
+        // A pending backoff must not fire after this connect: it would cancel the socket
+        // that just came up and re-handshake the stream.
+        reconnectJob?.cancel()
+        reconnectJob = null
         _state.value = SocketState.CONNECTING
-        Log.d("QAStream", "connect url=${target.take(48)} attempts=$backoffAttempts")
+        Log.d("QAStream", "connect path=${target.substringBefore('?').take(48)} attempts=$backoffAttempts")
         ws = socketClient.newWebSocket(
             Request.Builder().url(target).build(),
             object : WebSocketListener() {
@@ -211,7 +217,8 @@ class TerminalStreamSocket(
         if (closedByUs) return
         val attempt = backoffAttempts++
         val delayMs = (1000L shl attempt.coerceAtMost(4)).coerceAtMost(30_000L)
-        scope.launch {
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
             delay(delayMs)
             if (!closedByUs) connect()
         }

@@ -1,6 +1,9 @@
 package app.maestri.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
@@ -69,7 +73,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.maestri.live.DataStorePiRelayStore
 import app.maestri.live.LiveAttachButton
 import app.maestri.live.LiveFeedContent
-import app.maestri.live.LiveStagedChips
 import app.maestri.live.LiveStagedFile
 import app.maestri.live.LiveViewModel
 import app.maestri.live.LiveViewModelFactory
@@ -152,7 +155,7 @@ fun TerminalScreen(
     // The wide input line under the pty: same raw byte path as the key rail.
     var termInput by remember { mutableStateOf("") }
     // Files staged for the next send: they travel to the host first, so the terminal line
-    // can hand the agent a path that really exists there.
+    // can hand the agent an id the host really knows.
     var stagedFiles by remember { mutableStateOf<List<LiveStagedFile>>(emptyList()) }
     var uploading by remember { mutableStateOf(false) }
     var seededFallback by remember { mutableStateOf(false) }
@@ -210,12 +213,13 @@ fun TerminalScreen(
     }
 
     /**
-     * Uploads the staged files to the relay and returns what the host stored them as.
-     * The relay answers `{id,name,bytes,path}` — a real path on the machine that runs the
-     * agent, which is what the terminal line hands over. Nothing is sent when an upload
-     * fails: the files stay staged so the user can retry.
+     * Uploads the staged files to the host's relay and returns the path it stored them
+     * under. The relay answers `{id,name,bytes,path}` — a real path on the machine that
+     * runs the agent — so the terminal line hands over something the agent can open.
+     *
+     * Nothing is sent when an upload fails: the files stay staged so the user can retry.
      */
-    suspend fun uploadStaged(files: List<LiveStagedFile>): List<app.maestri.live.Attachment>? {
+    suspend fun uploadStaged(files: List<LiveStagedFile>): List<StagedUpload>? {
         val relayUrl = relayStore.url.value
         if (relayUrl.isBlank()) {
             notice = "Not paired to a relay — nothing sent."
@@ -223,20 +227,26 @@ fun TerminalScreen(
         }
         val relayToken = relayStore.token.value
         val uploader = PiRelayUpload()
-        val out = mutableListOf<app.maestri.live.Attachment>()
+        val out = mutableListOf<StagedUpload>()
         for (f in files) {
+            val existing = f.uploadedPath
+            if (existing != null) {
+                out += StagedUpload(ptySafe(f.name), f.sizeBytes, existing)
+                continue
+            }
             markStaged(f.key) { it.copy(uploading = true) }
-            val outcome = runCatching { uploader.upload(relayUrl, relayToken, f.name, f.bytes) }
-            val attachment = outcome.getOrNull()
-            markStaged(f.key) { it.copy(uploading = false, attachmentId = attachment?.id) }
-            if (outcome.isFailure || attachment == null || attachment.path.isBlank()) {
-                val cause = outcome.exceptionOrNull() as? UploadRejected
+            val outcome = runCatching {
+                uploader.upload(relayUrl, relayToken, ptySafe(f.name), f.bytes)
+            }
+            val path = outcome.getOrNull()?.path?.takeIf { it.isSafeHostPath() }
+            markStaged(f.key) { it.copy(uploading = false, uploadedPath = path) }
+            if (outcome.isFailure || path == null) {
                 notice = "Upload failed for ${f.name}: " +
-                    (cause?.message ?: "no path on the host") +
+                    (outcome.exceptionOrNull()?.message ?: "no usable path on the host") +
                     " — files kept, nothing sent."
                 return null
             }
-            out += attachment
+            out += StagedUpload(ptySafe(f.name), f.sizeBytes, path)
         }
         return out
     }
@@ -262,6 +272,7 @@ fun TerminalScreen(
     /** Empties the wide input line into the pty. Send SUBMITS: the text plus the Enter byte
      *  ("\r") the rail's Enter key sends, so one tap on the phone runs the command. */
     fun sendTyped() {
+        if (uploading) return
         // trimEnd, not trim: leading spaces are real shell indentation.
         val text = termInput.trimEnd()
         val files = stagedFiles
@@ -271,24 +282,33 @@ fun TerminalScreen(
             termInput = ""
             return
         }
-        // Attachments go to the host FIRST: the pty can only be handed a path that exists
-        // there, so the upload has to finish before the line is typed.
+        // Attachments go to the host FIRST: the pty can only be handed an id the host
+        // already knows, so the upload has to finish before the line is typed.
         scope.launch {
             uploading = true
-            val uploaded = uploadStaged(files)
-            uploading = false
+            val uploaded = try {
+                uploadStaged(files)
+            } finally {
+                uploading = false
+            }
             if (uploaded == null) return@launch
+            if (session.terminalStream.state.value != SocketState.OPEN) {
+                notice = "Terminal stream is not live — nothing sent, files kept."
+                return@launch
+            }
             val line = buildString {
                 if (text.isNotBlank()) {
                     append(text)
                     append(' ')
                 }
                 uploaded.forEach {
-                    append("[attachment: ${it.name} (${formatAttachmentSize(it.bytes)}) path=${it.path}] ")
+                    append("[attachment: ${it.name} (${formatAttachmentSize(it.sizeBytes)}) path=${it.path}] ")
                 }
             }.trimEnd()
             session.terminalStream.sendInput(line + "\r")
-            termInput = ""
+            // Only the text that was actually sent leaves the field: whatever the user
+            // typed while the upload was running stays.
+            if (termInput == text) termInput = ""
             stagedFiles = emptyList()
         }
     }
@@ -599,7 +619,7 @@ fun TerminalScreen(
         )
         Spacer(Modifier.height(8.dp))
         if (stagedFiles.isNotEmpty() && !fullscreen && !imeUp) {
-            LiveStagedChips(
+            TerminalStagedChips(
                 files = stagedFiles,
                 onRemove = { key -> stagedFiles = stagedFiles.filter { it.key != key } },
             )
@@ -626,6 +646,31 @@ fun TerminalScreen(
 
 // --------------------------------------------------------------------------- views
 
+/** A file that reached the host: the path the host stored it under. */
+private data class StagedUpload(
+    val name: String,
+    val sizeBytes: Long,
+    val path: String,
+)
+
+private fun String.isSafeHostPath(): Boolean =
+    isNotBlank() && startsWith("/") && length < 512 && all { c ->
+        c.isLetterOrDigit() || c in "./_-"
+    }
+
+/**
+ * Keeps a value safe to type into the pty: the line the user sends goes straight to the
+ * host's shell, so nothing in it may carry control characters.
+ */
+private fun ptySafe(value: String): String {
+    val cleaned = value.map { c -> if (c.isLetterOrDigit() || c == '.' || c == '_' || c == '-') c else '_' }
+        .joinToString("")
+        .take(64)
+    return cleaned.ifBlank { "file" }
+}
+
+
+
 @Composable
 private fun attentionDot(t: TerminalCard?, pending: Boolean): Color = when {
     t == null -> Color.Gray
@@ -633,6 +678,62 @@ private fun attentionDot(t: TerminalCard?, pending: Boolean): Color = when {
     t.isActive == true -> MaterialTheme.colorScheme.primary
     t.isLive -> LocalMaestriColors.current.warning
     else -> Color.Gray
+}
+
+/**
+ * The terminal's own attachment chips: the chat face's version draws an inline image
+ * preview, and a couple of those push the input line off the screen on a 411dp phone, so
+ * this one lists the files and nothing else.
+ */
+@Composable
+private fun TerminalStagedChips(files: List<LiveStagedFile>, onRemove: (String) -> Unit) {
+    val colors = LocalMaestriColors.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(max = 132.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        files.forEach { file ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(colors.cardSunken, pillShape())
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    file.name,
+                    fontFamily = MaestriType.Mono,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    formatAttachmentSize(file.sizeBytes),
+                    fontFamily = MaestriType.Mono,
+                    fontSize = 10.sp,
+                    color = colors.secondaryLabel,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    when {
+                        file.uploading -> "…"
+                        file.attachmentId != null -> "✓"
+                        else -> "×"
+                    },
+                    fontFamily = MaestriType.Mono,
+                    fontSize = 12.sp,
+                    color = colors.secondaryLabel,
+                    modifier = Modifier.clickable { onRemove(file.key) },
+                )
+            }
+        }
+    }
 }
 
 @Composable

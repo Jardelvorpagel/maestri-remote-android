@@ -22,6 +22,7 @@ class NetworkRecovery(
     private val scope: CoroutineScope,
     private val onAvailable: () -> Unit,
 ) {
+    @Volatile
     private var registered = false
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
@@ -31,6 +32,7 @@ class NetworkRecovery(
         }
     }
 
+    @Synchronized
     fun start() {
         if (registered) return
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -43,10 +45,14 @@ class NetworkRecovery(
             registered = true
             Log.d("QAStream", "network recovery: registered")
         } catch (e: Exception) {
-            Log.d("QAStream", "network recovery: register failed ${e.javaClass.simpleName}: ${e.message}")
+            // Already registered is not a failure: it means the callback is live.
+            if (e !is IllegalArgumentException) {
+                Log.d("QAStream", "network recovery: register failed ${e.javaClass.simpleName}: ${e.message}")
+            }
         }
     }
 
+    @Synchronized
     fun stop() {
         if (!registered) return
         registered = false

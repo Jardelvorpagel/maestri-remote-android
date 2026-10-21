@@ -28,7 +28,12 @@ class PiRelayUpload(
     ): Attachment = withContext(Dispatchers.IO) {
         val url = uploadUrlFor(relayUrl)
         relayLog("PiRelayUpload", "uploading name=$filename bytes=${bytes.size} url=$url")
-        val response = okHttp.newCall(uploadRequest(url, token, filename, bytes)).execute()
+        val response = try {
+            okHttp.newCall(uploadRequest(url, token, filename, bytes)).execute()
+        } catch (e: Exception) {
+            relayLog("PiRelayUpload", "upload failed name=$filename ${e.javaClass.simpleName}: ${e.message}")
+            throw UploadRejected("${e.javaClass.simpleName}: ${e.message}", null)
+        }
         response.use {
             val bodyText = it.body?.string()
             if (!it.isSuccessful) throw parseUploadRejection(it.code, bodyText)
