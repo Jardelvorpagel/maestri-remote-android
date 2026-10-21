@@ -1,5 +1,6 @@
 package app.maestri.wire
 
+import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -32,6 +33,7 @@ enum class SocketState { IDLE, CONNECTING, OPEN, CLOSED }
 class FeedSocket(
     clientProvider: () -> OkHttpClient,
     private val scope: CoroutineScope,
+    context: Context,
 ) {
     private val socketClientProvider: () -> OkHttpClient = clientProvider
     private val socketClient: OkHttpClient get() = socketClientProvider()
@@ -81,6 +83,18 @@ class FeedSocket(
     @Volatile
     private var pendingPresence: JSONObject? = null
 
+    /**
+     * The network came back: reconnect NOW instead of waiting out the backoff. The state
+     * guard matters — the callback also fires when it registers, and replacing a healthy
+     * socket would drop a live feed for nothing.
+     */
+    private val networkRecovery = NetworkRecovery(context, scope) {
+        if (_state.value == SocketState.CLOSED) {
+            backoffAttempts = 0
+            connect()
+        }
+    }
+
     /** The URL to connect to (contains ws id, optional floor, token). */
     @Volatile
     private var url: String? = null
@@ -95,6 +109,7 @@ class FeedSocket(
         appliedEpoch = null
         appliedSequences.clear()
         _snapshot.value = null
+        networkRecovery.start()
         connect()
     }
 
@@ -108,6 +123,7 @@ class FeedSocket(
             _snapshot.value = null
             _state.value = SocketState.CONNECTING
             ws?.close(1000, "retarget")
+            networkRecovery.start()
             connect()
         }
     }
@@ -136,6 +152,7 @@ class FeedSocket(
         _state.value = SocketState.IDLE
         _selfPresence.value = null
         _peers.value = emptyList()
+        networkRecovery.stop()
     }
 
     private fun connect() {

@@ -1,5 +1,7 @@
 package app.maestri.wire
 
+import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -30,6 +32,7 @@ import org.json.JSONObject
 class TerminalStreamSocket(
     clientProvider: () -> OkHttpClient,
     private val scope: CoroutineScope,
+    context: Context,
 ) {
     private val socketClientProvider: () -> OkHttpClient = clientProvider
     private val socketClient: OkHttpClient get() = socketClientProvider()
@@ -63,11 +66,24 @@ class TerminalStreamSocket(
     @Volatile
     var gridSink: ((Int, Int) -> Unit)? = null
 
+    /**
+     * The network came back: reconnect NOW instead of waiting out the backoff. The state
+     * guard matters — the callback also fires when it registers, and replacing a healthy
+     * socket would drop a live stream for nothing.
+     */
+    private val networkRecovery = NetworkRecovery(context, scope) {
+        if (_state.value == SocketState.CLOSED) {
+            backoffAttempts = 0
+            connect()
+        }
+    }
+
     fun open(targetUrl: String, ownerId: String? = null) {
         closedByUs = false
         url = targetUrl
         owner = ownerId
         backoffAttempts = 0
+        networkRecovery.start()
         connect()
     }
 
@@ -75,6 +91,7 @@ class TerminalStreamSocket(
     fun reopen() {
         closedByUs = false
         backoffAttempts = 0
+        networkRecovery.start()
         connect()
     }
 
@@ -97,6 +114,7 @@ class TerminalStreamSocket(
         }
         _state.value = SocketState.IDLE
         _geometry.value = null
+        networkRecovery.stop()
     }
 
     // Ownership guard (QA round-2 teardown fix): every callback must belong to the CURRENT
@@ -119,11 +137,13 @@ class TerminalStreamSocket(
         } catch (e: Exception) {
         }
         _state.value = SocketState.CONNECTING
+        Log.d("QAStream", "connect url=${target.take(48)} attempts=$backoffAttempts")
         ws = socketClient.newWebSocket(
             Request.Builder().url(target).build(),
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     if (webSocket !== ws) return
+                    Log.d("QAStream", "open")
                     backoffAttempts = 0
                     _state.value = SocketState.OPEN
                     _error.value = null
@@ -168,6 +188,7 @@ class TerminalStreamSocket(
                     if (webSocket !== ws) return
                     _state.value = SocketState.CLOSED
                     _error.value = t.message ?: "stream failed"
+                    Log.d("QAStream", "onFailure ${t.javaClass.simpleName}: ${t.message}")
                     ws = null
                     scheduleReconnect()
                 }

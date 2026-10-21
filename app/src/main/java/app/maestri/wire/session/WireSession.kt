@@ -28,6 +28,8 @@ import org.json.JSONObject
  */
 class WireSession(context: Context) {
 
+    private val appContext = context.applicationContext
+
     val store = PairingStore(context)
     val client = WireClient()
 
@@ -54,12 +56,14 @@ class WireSession(context: Context) {
             _pairing.value?.let { p -> client.pinnedForSocket(p.serverKeyHashB64) } ?: okhttp3.OkHttpClient()
         },
         scope = scope,
+        context = appContext,
     )
     val terminalStream = TerminalStreamSocket(
         clientProvider = {
             _pairing.value?.let { p -> client.pinnedForSocket(p.serverKeyHashB64) } ?: okhttp3.OkHttpClient()
         },
         scope = scope,
+        context = appContext,
     )
     val agentUsage = AgentUsageSocket(
         clientProvider = {
