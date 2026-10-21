@@ -211,28 +211,22 @@
     // The host TUI keeps mouse reporting on, which switches off xterm's own touch
     // gesture handling, so this handler stays; the browser cannot do it either
     // (the touch lands on .xterm-screen, a sibling of the scrolling .xterm-viewport).
-    var touchY = null, acc = 0;
-    function lineH() {
-      var row = el("term").querySelector(".xterm-rows>div");
-      return row ? row.getBoundingClientRect().height : 16;
-    }
+    var touchY = null;
     el("term").addEventListener("touchstart", function (e) {
       touchY = e.touches.length === 1 ? e.touches[0].clientY : null;
-      acc = 0;
     }, { passive: true, capture: true });
+    // The page does NOT scroll on touch. Scrolling the terminal buffer from inside a
+    // touchmove handler truncates Chromium's touch stream: on the OPPO 68 MotionEvents
+    // reach the WebView, but only 2 reach the page once the handler scrolls, so a drag
+    // moves the terminal by a single line. The page only refuses the browser's own
+    // scrolling; the drag itself is driven from the Android side, which sees the whole
+    // stream, through window.__scrollTerminal() below.
     el("term").addEventListener("touchmove", function (e) {
       if (touchY === null || e.touches.length !== 1) return;
-      var y = e.touches[0].clientY;
-      acc += y - touchY;
-      touchY = y;
-      var lh = lineH(), n = Math.trunc(acc / lh);
-      if (!n) return;
-      acc -= n * lh;
-      // Finger down = older lines (ydisp shrinks), finger up = back to the tail.
-      term.scrollLines(-n, false, 1);
+      touchY = e.touches[0].clientY;
       e.preventDefault();
     }, { passive: false, capture: true });
-    el("term").addEventListener("touchend", function () { touchY = null; acc = 0; }, { passive: true, capture: true });
+    el("term").addEventListener("touchend", function () { touchY = null; }, { passive: true, capture: true });
 
     new ResizeObserver(scheduleFit).observe(el("term"));
     if (window.visualViewport) window.visualViewport.addEventListener("resize", scheduleFit);
@@ -241,6 +235,29 @@
     ready = true;
     if (window.TermBridge && window.TermBridge.rendererReady) window.TermBridge.rendererReady();
   }
+
+  // Called by the Android side with the finger's travel in device px (positive = the
+  // finger moved DOWN = going back through history). It moves the BUFFER, not the DOM
+  // scroll: term.scrollLines(amount, suppress, 1) is the path xterm itself uses
+  // (viewport.onRequestScrollLines -> scrollLines(amount, suppress, 1)), so ydisp
+  // moves, the rows re-render, and the scrollbar follows. A negative amount walks
+  // towards older content, which is what a downward drag means.
+  //
+  // The sub-line remainder is kept HERE: the Android side pushes the drag in small
+  // slices and each slice is usually shorter than one line, so the residue has to
+  // survive between pushes or the terminal never moves.
+  var scrollRemainder = 0;
+  window.__scrollTerminal = function (deltaDevicePx) {
+    if (!term || !deltaDevicePx) return;
+    var row = el("term").querySelector(".xterm-rows>div");
+    var lh = row ? row.getBoundingClientRect().height : 16;
+    var dpr = window.devicePixelRatio || 1;
+    var css = deltaDevicePx / dpr + scrollRemainder;
+    var n = Math.trunc(css / lh);
+    if (!n) { scrollRemainder = css; return; }
+    scrollRemainder = css - n * lh;
+    term.scrollLines(-n, false, 1);
+  };
 
   window.__pushFrames = function (b64frames) {
     if (!term) return;

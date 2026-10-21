@@ -42,6 +42,9 @@ private const val PENDING_CAP = 512
 private const val BATCH_FRAMES = 32
 private const val BATCH_BYTES = 128 * 1024
 
+/** Minimum gap between two scroll pushes into the page, in ms. */
+private const val SCROLL_THROTTLE_MS = 32L
+
 /** WebView that reports the first non-empty layout, so the page never boots into a 0x0 viewport. */
 private class SizedWebView(context: Context) : WebView(context) {
     var onSized: (() -> Unit)? = null
@@ -224,7 +227,19 @@ fun TerminalWebView(
     var webView by remember { mutableStateOf<WebView?>(null) }
     var rendererGen by remember { mutableStateOf(0) }
     val streamState by session.terminalStream.state.collectAsState()
+    // Drag state for the terminal scroll. Scrolling the terminal buffer from inside the
+    // page's touchmove handler truncates Chromium's touch stream (measured on the OPPO:
+    // 68 MotionEvents reach the WebView, 2 reach the page once the handler scrolls), so
+    // the drag is accumulated here, where the whole stream arrives, and pushed into the
+    // page outside the touch event dispatch.
+    var lastTouchY by remember { mutableStateOf(0f) }
+    var pendingScroll by remember { mutableStateOf(0f) }
+    var lastScrollAt by remember { mutableStateOf(0L) }
 
+    fun scrollByInPage(deltaPx: Float) {
+        val wv = webView ?: return
+        wv.evaluateJavascript("window.__scrollTerminal(${deltaPx})", null)
+    }
     fun ready(): Boolean = rendererGen > 0 && webView?.parent != null
     fun pump() = feed.schedule(ready())
 
@@ -379,6 +394,30 @@ fun TerminalWebView(
                     WebView.setWebContentsDebuggingEnabled(true)
                 }
                 addJavascriptInterface(bridge, "TermBridge")
+                setOnTouchListener { _, e ->
+                    when (e.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN,
+                        android.view.MotionEvent.ACTION_POINTER_DOWN -> {
+                            lastTouchY = e.y
+                            pendingScroll = 0f
+                        }
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            val dy = e.y - lastTouchY
+                            lastTouchY = e.y
+                            pendingScroll += dy
+                            val now = android.os.SystemClock.uptimeMillis()
+                            if (now - lastScrollAt >= SCROLL_THROTTLE_MS && pendingScroll != 0f) {
+                                val delta = pendingScroll
+                                pendingScroll = 0f
+                                lastScrollAt = now
+                                scrollByInPage(delta)
+                            }
+                        }
+                        android.view.MotionEvent.ACTION_UP,
+                        android.view.MotionEvent.ACTION_CANCEL -> pendingScroll = 0f
+                    }
+                    false
+                }
                 onSized = { post { loadUrl(TERMINAL_PAGE) } }
             }
         },
