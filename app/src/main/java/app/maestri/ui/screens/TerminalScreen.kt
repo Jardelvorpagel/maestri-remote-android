@@ -241,9 +241,16 @@ fun TerminalScreen(
             val path = outcome.getOrNull()?.path?.takeIf { it.isSafeHostPath() }
             markStaged(f.key) { it.copy(uploading = false, uploadedPath = path) }
             if (outcome.isFailure || path == null) {
+                val cause = outcome.exceptionOrNull()
                 notice = "Upload failed for ${f.name}: " +
-                    (outcome.exceptionOrNull()?.message ?: "no usable path on the host") +
-                    " — files kept, nothing sent."
+                    (cause?.message ?: "no usable path on the host") +
+                    if (cause is java.net.SocketTimeoutException) {
+                        " — the host relay is not reachable from this device; the phone " +
+                            "needs tailnet access to the relay port."
+                    } else {
+                        ""
+                    } +
+                    " Files kept, nothing sent."
                 return null
             }
             out += StagedUpload(ptySafe(f.name), f.sizeBytes, path)
