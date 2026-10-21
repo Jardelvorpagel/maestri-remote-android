@@ -52,6 +52,7 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.CanvasStrings
+import app.maestri.ui.NotesStrings
 import app.maestri.wire.CanvasCableTie
 import app.maestri.wire.CanvasConnection
 import app.maestri.wire.CanvasNode
@@ -664,6 +665,7 @@ internal suspend fun PointerInputScope.detectCanvasInteractions(
         fun canvasAt(px: Offset): Offset = toCanvas(Offset(px.x / density, px.y / density))
 
         val down = awaitFirstDown(requireUnconsumed = false)
+        if (down.isConsumed) return@awaitEachGesture   // an inner handler (note-stack rail) took it
         val startScreen = down.position
         val hit = hitIndex()
         val startCanvas = canvasAt(startScreen)
@@ -1050,6 +1052,9 @@ fun NodeContextMenu(
     onDisconnectAll: () -> Unit,
     onDelete: () -> Unit,
     onEditText: (() -> Unit)?,
+    onEditNote: (() -> Unit)? = null,
+    ficharioItems: List<Pair<String, () -> Unit>> = emptyList(),
+    ficharioDisabledReason: String? = null,
     // design-v2 modern: the floating toolbar's ⊞ pill is group-or-rename; UNGROUP
     // rides here so the 7-pill spec toolbar loses no action.
     onUngroup: (() -> Unit)? = null,
@@ -1066,12 +1071,26 @@ fun NodeContextMenu(
         )
         MenuItem(CanvasStrings.rename, onRename, itemsEnabled)
         if (onEditText != null) MenuItem("Edit text", onEditText, itemsEnabled)
+        if (onEditNote != null) MenuItem(NotesStrings.EDIT_NOTE, onEditNote)
         MenuItem(if (node.isNodeLocked) "Unlock" else "Lock", onLock, itemsEnabled)
         MenuItem("Duplicate", onDuplicate, itemsEnabled)
         if (onUngroup != null && node.groupId != null) MenuItem(CanvasStrings.ungroup + " · " + (node.groupId ?: ""), onUngroup, itemsEnabled)
         MenuItem(CanvasStrings.connectToAnotherNode, onConnect, itemsEnabled)
         if (mine.size > 1) MenuItem(CanvasStrings.removeAllConnections, onDisconnectAll, itemsEnabled)
         MenuItem(CanvasStrings.removeConnection, onDisconnectAll, itemsEnabled)
+        ficharioItems.forEach { (label, action) ->
+            MenuItem(label, action, ficharioDisabledReason == null)
+        }
+        if (ficharioItems.isNotEmpty()) {
+            ficharioDisabledReason?.let {
+                Text(
+                    it,
+                    fontSize = 10.5.sp,
+                    color = LocalMaestriColors.current.secondaryLabel,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+        }
         MenuItem("Delete", onDelete, itemsEnabled)
         writeDisabledReason?.let {
             Text(

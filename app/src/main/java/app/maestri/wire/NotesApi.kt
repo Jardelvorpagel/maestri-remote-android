@@ -107,28 +107,32 @@ data class FicharioState(
 ) {
     data class FicharioTab(val nodeId: String, val title: String, val color: String?)
 
-    /** Parse from the raw canvas-node JSON; null when the payload is absent/unparsable. */
-    fun parse(nodeJson: JSONObject): FicharioState? {
-        val s = nodeJson.optJSONObject("noteStack") ?: return null
-        val id = nodeJson.optString("id", "")
-        if (id.isBlank()) return null
-        val tabs = s.optJSONArray("tabs")?.let { a ->
-            (0 until a.length()).mapNotNull { i ->
-                val t = a.optJSONObject(i) ?: return@mapNotNull null
-                FicharioTab(
-                    nodeId = t.optString("nodeId", ""),
-                    title = t.optString("title", ""),
-                    color = if (t.has("color") && !t.isNull("color")) t.optString("color") else null,
-                )
-            }
-        } ?: emptyList()
-        return FicharioState(
-            stackNodeId = id,
-            name = s.optString("name", "Fichário"),
-            frontNoteId = if (s.has("frontNoteId") && !s.isNull("frontNoteId")) s.optString("frontNoteId") else null,
-            tabs = tabs,
-        )
+    companion object {
+        /** Static path for [app.maestri.wire.CanvasNode.parse]; null when the payload is absent/unparsable. */
+        fun parse(nodeJson: JSONObject): FicharioState? = parseFicharioState(nodeJson)
     }
+}
+
+private fun parseFicharioState(nodeJson: JSONObject): FicharioState? {
+    val s = nodeJson.optJSONObject("noteStack") ?: return null
+    val id = nodeJson.optString("id", "")
+    if (id.isBlank()) return null
+    val tabs = s.optJSONArray("tabs")?.let { a ->
+        (0 until a.length()).mapNotNull { i ->
+            val t = a.optJSONObject(i) ?: return@mapNotNull null
+            FicharioState.FicharioTab(
+                nodeId = t.optString("nodeId", ""),
+                title = t.optString("title", ""),
+                color = if (t.has("color") && !t.isNull("color")) t.optString("color") else null,
+            )
+        }
+    } ?: emptyList()
+    return FicharioState(
+        stackNodeId = id,
+        name = s.optString("name", "Fichário"),
+        frontNoteId = if (s.has("frontNoteId") && !s.isNull("frontNoteId")) s.optString("frontNoteId") else null,
+        tabs = tabs,
+    )
 }
 
 class NotesApi(private val session: app.maestri.wire.session.WireSession) {

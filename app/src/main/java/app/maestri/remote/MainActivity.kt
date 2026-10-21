@@ -58,6 +58,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import app.maestri.ui.ChatNav
+import app.maestri.ui.noteEditorRoute
+import app.maestri.ui.openNote
 import app.maestri.live.DataStorePiRelayStore
 import app.maestri.wire.NotificationsRouter
 import app.maestri.ui.NotificationsNav
@@ -297,6 +299,7 @@ fun Root(session: WireSession, appLock: AppLockStore, updates: UpdateController)
             var lastWs by remember { mutableStateOf<Pair<String, String>?>(null) }
             var lastTerm by remember { mutableStateOf<Triple<String, String, String>?>(null) }
             NavHost(navController = nav, startDestination = "workspaces") {
+                noteEditorRoute(session, onBack = { nav.popBackStack() })
                 composable("workspaces") {
                     Box(Modifier.fillMaxSize()) {
                         WorkspacesScreen(
@@ -368,6 +371,7 @@ fun Root(session: WireSession, appLock: AppLockStore, updates: UpdateController)
                         onOpenTerminal = { terminalId, terminalName ->
                             nav.navigate("terminal/${enc(wsId)}/${enc(terminalId)}/${enc(terminalName)}")
                         },
+                        onOpenNote = { noteWsId, nodeId -> nav.openNote(noteWsId, nodeId) },
                     )
                 }
                 composable(

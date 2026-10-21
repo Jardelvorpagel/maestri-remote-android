@@ -36,6 +36,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.input.pointer.pointerInput
@@ -67,6 +69,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import app.maestri.ui.CanvasStrings
 import app.maestri.ui.iconGlyph
+import app.maestri.ui.notes.FicharioActions
+import app.maestri.ui.notes.FicharioTabRailInline
+import app.maestri.ui.NotesStrings
 import app.maestri.wire.CanvasCableTie
 import app.maestri.wire.CanvasConnection
 import app.maestri.wire.CanvasNode
@@ -77,6 +82,8 @@ import app.maestri.wire.SnapshotMedia
 import androidx.compose.runtime.mutableStateMapOf
 import app.maestri.store.PairingStore
 import app.maestri.wire.FeedSnapshot
+import app.maestri.wire.FicharioState
+import app.maestri.wire.NotesApi
 import app.maestri.wire.PresencePeer
 import app.maestri.wire.TerminalCard
 import app.maestri.wire.session.WireSession
@@ -127,6 +134,7 @@ fun CanvasScreen(
     wsName: String,
     onBack: () -> Unit,
     onOpenTerminal: (terminalId: String, terminalName: String) -> Unit,
+    onOpenNote: (wsId: String, nodeId: String) -> Unit,
 ) {
     val snapshot by session.feed.snapshot.collectAsState()
     val socketState by session.feed.state.collectAsState()
@@ -144,6 +152,16 @@ fun CanvasScreen(
     val caps = session.serverInfo
     val canWrite = caps?.has("canvasWrite") == true && caps?.role == "owner"
     val writeReason = CanvasStrings.writeGateReason(canWrite, caps)
+    val ficharioCaps = caps?.has("nativeNotes") == true && caps?.has("noteStackWrites") == true &&
+        caps?.has("noteStackPages") == true
+    val canFileNotes = ficharioCaps && caps?.has("noteStackFiling") == true
+    val ficharioReason = if (ficharioCaps) null else NotesStrings.YOUR_COMPUTER_CANT_TAKE_FICHARIO_CHANGES_YET
+    val toastContext = androidx.compose.ui.platform.LocalContext.current
+    val fichario = remember(session, wsId, toastContext) {
+        FicharioActions(NotesApi(session), wsId) { message: String ->
+            android.widget.Toast.makeText(toastContext, message, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
     val optimism = ctl.optimism
     var marquee by remember { mutableStateOf<Rect?>(null) }
     var addMenu by remember { mutableStateOf(false) }
@@ -227,6 +245,7 @@ fun CanvasScreen(
             val t = node.terminal
             when {
                 node.kind == "terminal" && t != null -> onOpenTerminal(t.id, t.name)
+                node.kind == "note" -> onOpenNote(wsId, node.id)
                 node.kind == "text" -> ctl.openTextEditor(node)
                 node.kind == "portal" && node.portal != null -> portalFor = node
                 else -> ctl.selectNode(node, canvas)
@@ -429,12 +448,22 @@ fun CanvasScreen(
                 DrawingLayer(canvas?.drawings.orEmpty(), ctl.strokes)
                 TieLayer(canvas?.cableTies.orEmpty(), tiePositions)
                 visibleNodes.forEach { node ->
-                    // An optimistic frame wins over the snapshot until the host reports the same one.
-                    val ov = optimism.frames[node.id]
-                    val shown = if (ov != null) node.copy(frame = app.maestri.wire.CanvasRect(
-                        ov.x.toDouble(), ov.y.toDouble(), ov.width.toDouble(), ov.height.toDouble(),
-                    )) else node
-                    CanvasNodeCard(shown, snap, ctl.selection[node.id] == true, compact = compact)
+                    key(node.id) {
+                        // An optimistic frame wins over the snapshot until the host reports the same one.
+                        val ov = optimism.frames[node.id]
+                        val shown = if (ov != null) node.copy(frame = app.maestri.wire.CanvasRect(
+                            ov.x.toDouble(), ov.y.toDouble(), ov.width.toDouble(), ov.height.toDouble(),
+                        )) else node
+                        CanvasNodeCard(
+                            node = shown,
+                            snap = snap,
+                            selected = ctl.selection[node.id] == true,
+                            compact = compact,
+                            session = session,
+                            wsId = wsId,
+                            onOpenNote = onOpenNote,
+                        )
+                    }
                 }
                 MarqueeRect(marquee)
                 CursorsLayer(self = selfPresence, peers = peers, nodeIndex = nodeIndex)
@@ -651,12 +680,17 @@ fun CanvasScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             visible.forEach { node ->
-                                StackNodeCard(
-                                    node = node,
-                                    snap = snap,
-                                    selected = ctl.selection[node.id] == true,
-                                    onClick = { openOrSelect(node) },
-                                )
+                                key(node.id) {
+                                    StackNodeCard(
+                                        node = node,
+                                        snap = snap,
+                                        selected = ctl.selection[node.id] == true,
+                                        session = session,
+                                        wsId = wsId,
+                                        onOpenNote = onOpenNote,
+                                        onClick = { openOrSelect(node) },
+                                    )
+                                }
                             }
                         }
                     }
@@ -670,6 +704,50 @@ fun CanvasScreen(
 
         // ------------------------------------------------------------------ overlays
         ctl.menuFor?.let { node ->
+            val stacks = canvas?.nodes.orEmpty().mapNotNull { it.noteStack }
+            val selectedNoteIds = canvas?.nodes.orEmpty()
+                .filter { ctl.selection[it.id] == true && it.kind == "note" }
+                .map { it.id }
+            val ficharioItems = mutableListOf<Pair<String, () -> Unit>>()
+            if (node.kind == "note") {
+                if (canFileNotes) {
+                    stacks.filterNot { s -> s.tabs.any { it.nodeId == node.id } }.forEach { s ->
+                        val label = if (s.name.isBlank() || s.name == "null") NotesStrings.FICHARIO else s.name
+                        ficharioItems.add(
+                            (NotesStrings.ADD_TO_FICHARIO + " · " + label) to {
+                                ctl.menuFor = null
+                                scope.launch { fichario.fileNote(s.stackNodeId, node.id, null, null) }
+                            },
+                        )
+                    }
+                    if (selectedNoteIds.size >= 2) {
+                        val ids = (selectedNoteIds + node.id).distinct()
+                        ficharioItems.add(
+                            "New Fichário" to {
+                                ctl.menuFor = null
+                                scope.launch { fichario.createFromSelection(ids, null) }
+                            },
+                        )
+                    }
+                }
+                stacks.filter { s -> s.tabs.any { it.nodeId == node.id } }.forEach { s ->
+                    val label = if (s.name.isBlank() || s.name == "null") NotesStrings.FICHARIO else s.name
+                    ficharioItems.add(
+                        (NotesStrings.REMOVE_FROM_FICHARIO + " · " + label) to {
+                            ctl.menuFor = null
+                            scope.launch { fichario.removeFromFichario(s.stackNodeId, node.id, 40.0, 40.0) }
+                        },
+                    )
+                }
+            }
+            node.noteStack?.let { s ->
+                ficharioItems.add(
+                    NotesStrings.NEW_PAGE to {
+                        ctl.menuFor = null
+                        scope.launch { fichario.newPage(s.stackNodeId, s.frontNoteId) }
+                    },
+                )
+            }
             NodeContextMenu(
                 node = node,
                 connections = canvas?.connections.orEmpty(),
@@ -704,6 +782,14 @@ fun CanvasScreen(
                         ctl.openTextEditor(node)
                     }
                 } else null,
+                onEditNote = if (node.kind == "note") {
+                    {
+                        ctl.menuFor = null
+                        onOpenNote(wsId, node.id)
+                    }
+                } else null,
+                ficharioItems = ficharioItems,
+                ficharioDisabledReason = ficharioReason,
             )
         }
         tieMenu?.let { tie ->
@@ -1091,6 +1177,9 @@ private fun CanvasNodeCard(
     snap: FeedSnapshot?,
     selected: Boolean,
     compact: Boolean = false,   // v2.1 phone blip tints (frame 04); tablet keeps the classic card
+    session: WireSession,
+    wsId: String,
+    onOpenNote: (wsId: String, nodeId: String) -> Unit,
 ) {
     val t = node.terminal
     if (node.kind == "terminal" && t != null) {
@@ -1100,7 +1189,14 @@ private fun CanvasNodeCard(
         CanvasPortalNode(node, node.portal, selected, compact = compact)
     } else {
         // Per docs: an unknown/non-terminal kind still has frame + title — simple box.
-        UnknownNodeBox(node, selected, compact = compact)
+        UnknownNodeBox(
+            node = node,
+            selected = selected,
+            compact = compact,
+            session = session,
+            wsId = wsId,
+            onOpenNote = onOpenNote,
+        )
     }
 }
 
@@ -1423,7 +1519,14 @@ private fun PortalViewer(
 }
 
 @Composable
-private fun UnknownNodeBox(node: CanvasNode, selected: Boolean, compact: Boolean = false) {
+private fun UnknownNodeBox(
+    node: CanvasNode,
+    selected: Boolean,
+    compact: Boolean = false,
+    session: WireSession,
+    wsId: String,
+    onOpenNote: (wsId: String, nodeId: String) -> Unit,
+) {
     val isNote = compact && node.kind == "note"
     Box(
         Modifier
@@ -1474,6 +1577,11 @@ private fun UnknownNodeBox(node: CanvasNode, selected: Boolean, compact: Boolean
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+        }
+        node.noteStack?.let { stack ->
+            Box(Modifier.align(Alignment.BottomCenter)) {
+                NoteStackRailHost(session = session, wsId = wsId, stack = stack, onOpenNote = onOpenNote)
             }
         }
     }
@@ -1594,6 +1702,9 @@ private fun StackNodeCard(
     node: CanvasNode,
     snap: FeedSnapshot?,
     selected: Boolean,
+    session: WireSession,
+    wsId: String,
+    onOpenNote: (wsId: String, nodeId: String) -> Unit,
     onClick: () -> Unit,
 ) {
     val c = LocalMaestriColors.current
@@ -1605,7 +1716,7 @@ private fun StackNodeCard(
         else -> 1.dp to Palette.DarkWarm
     }
     val cardBase = Palette.DarkSurface
-    Box(
+    Column(
         Modifier
             .fillMaxWidth()
             .clickable { onClick() }
@@ -1617,8 +1728,8 @@ private fun StackNodeCard(
                 RoundedCornerShape(MaestriRadii.Card),
             )
             .warmRing(hairline = ring.second, radius = MaestriRadii.Card)
-            .padding(14.dp)
     ) {
+        Box(Modifier.fillMaxWidth().padding(14.dp)) {
         when {
             node.kind == "terminal" && node.terminal != null -> {
                 val t = node.terminal
@@ -1765,6 +1876,10 @@ private fun StackNodeCard(
                     )
                 }
             }
+        }
+        }
+        node.noteStack?.let { stack ->
+            NoteStackRailHost(session = session, wsId = wsId, stack = stack, onOpenNote = onOpenNote)
         }
     }
 }
@@ -1926,6 +2041,26 @@ private fun canvasBoundsOf(canvas: app.maestri.wire.CanvasSnapshot): Rect {
             Rect(minOf(a.left, r.left), minOf(a.top, r.top), maxOf(a.right, r.right), maxOf(a.bottom, r.bottom))
         }
         ?: Rect(0f, 0f, 800f, 600f)
+}
+
+@Composable
+private fun NoteStackRailHost(
+    session: WireSession,
+    wsId: String,
+    stack: FicharioState,
+    onOpenNote: (wsId: String, nodeId: String) -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .pointerInput(stack.stackNodeId) {
+                awaitEachGesture {
+                    awaitFirstDown(pass = PointerEventPass.Main).consume()
+                }
+            },
+    ) {
+        FicharioTabRailInline(session, wsId, stack) { noteId -> onOpenNote(wsId, noteId) }
+    }
 }
 
 /** #RRGGBB → Color, verbatim hex; anything malformed → fallback. */

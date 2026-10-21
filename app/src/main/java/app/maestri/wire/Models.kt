@@ -292,11 +292,14 @@ data class CanvasRect(val x: Double, val y: Double, val width: Double, val heigh
 /**
  * A node on a single floor's canvas (CanvasNode). Per the docs a node has exactly one
  * payload per kind; kinds are open strings — unknown kinds still carry frame + title and
- * render as a simple box. Only the `terminal` payload is consumed in v1; note/text/file/
- * link/fileTree/portal/connector/noteStack payloads are ignored (graceful box).
+ * render as a simple box. The `terminal`, `text`, `portal`, `note` and `noteStack` payloads
+ * are consumed; file/link/fileTree/connector payloads are ignored (graceful box).
  *
  * `id` is the NODE id (UUID verbatim); a terminal node's payload re-addresses the
  * TERMINAL id under `.terminal.id` — they are different ids, never rebuild them.
+ *
+ * Payloads are TYPED data classes (never a raw JSONObject: that would break structural
+ * equality on this @Stable data class and recompose the whole tree per snapshot).
  */
 data class CanvasNode(
     val id: String,
@@ -312,6 +315,8 @@ data class CanvasNode(
     val terminal: TerminalCard?,    // present when kind == "terminal" and payload parses
     val text: CanvasTextBlock?,     // present when kind == "text": the styled text payload
     val portal: CanvasPortal?,      // present when kind == "portal": the host-managed card payload
+    val note: CanvasNodeNote?,      // present when kind == "note": the card payload (no text)
+    val noteStack: FicharioState?,  // present when kind == "noteStack": the tab rail payload
 ) {
     companion object {
         fun parse(o: JSONObject): CanvasNode {
@@ -337,8 +342,43 @@ data class CanvasNode(
                 portal = if (kind == "portal") o.optJSONObject("portal")?.let {
                     runCatching { CanvasPortal.parse(it) }.getOrNull()
                 } else null,
+                note = if (kind == "note") o.optJSONObject("note")?.let {
+                    runCatching { CanvasNodeNote.parse(it) }.getOrNull()
+                } else null,
+                noteStack = if (kind == "noteStack") {
+                    runCatching { FicharioState.parse(o) }.getOrNull()
+                } else null,
             )
         }
+    }
+}
+
+/**
+ * A `kind == "note"` node's card payload (live wire dump): the note's identity plus
+ * `preview` — the FIRST LINES ONLY. The snapshot never carries note text, so anything that
+ * shows content fetches `GET …/nodes/{id}/note`. `color` is a vocabulary name.
+ */
+data class CanvasNodeNote(
+    val fileName: String,
+    val displayName: String,
+    val color: String?,
+    val preview: List<String>,
+    val isContentLocked: Boolean,
+    val isExternal: Boolean,
+    val hasCustomName: Boolean,
+) {
+    companion object {
+        fun parse(o: JSONObject): CanvasNodeNote = CanvasNodeNote(
+            fileName = o.optString("fileName", ""),
+            displayName = o.optString("displayName", "").ifBlank { o.optString("fileName", "note") },
+            color = if (o.has("color") && !o.isNull("color")) o.optString("color") else null,
+            preview = o.optJSONArray("preview")?.let { a ->
+                (0 until a.length()).map { a.optString(it) }
+            } ?: emptyList(),
+            isContentLocked = o.optBoolean("isContentLocked", false),
+            isExternal = o.optBoolean("isExternal", false),
+            hasCustomName = o.optBoolean("hasCustomName", false),
+        )
     }
 }
 
