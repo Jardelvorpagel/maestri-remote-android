@@ -70,6 +70,7 @@ import app.maestri.live.LiveFeedContent
 import app.maestri.live.LiveViewModel
 import app.maestri.live.LiveViewModelFactory
 import app.maestri.ui.settings.TerminalFontStore
+import app.maestri.ui.settings.TerminalScrollSpeedStore
 import app.maestri.ui.settings.TerminalViewModeStore
 import app.maestri.wire.ChatApi
 import app.maestri.ui.Style.BackLabel
@@ -124,6 +125,12 @@ fun TerminalScreen(
     )
     val fontSp by fontStore.sizeSp.collectAsState()
     var showTypeScale by remember { mutableStateOf(false) }
+    // Scroll speed: how many rows the content moves per row of finger travel. A phone
+    // flick carries further than the finger, so 1x (the terminal-native feel) reads as
+    // sluggish on a long transcript.
+    val speedStore = remember(ctx) { TerminalScrollSpeedStore(ctx.applicationContext) }
+    val scrollSpeed by speedStore.speedX.collectAsState()
+    var showScrollSpeed by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
     val snapshot by session.feed.snapshot.collectAsState()
     val feedState by session.feed.state.collectAsState()
@@ -295,6 +302,12 @@ fun TerminalScreen(
                 Text("Aa $fontSp", fontFamily = MaestriType.Mono, fontSize = 12.sp)
             }
         }
+        // Scroll speed chip: rows moved per row of finger travel, tap = the stepper row.
+        val scrollChip: @Composable () -> Unit = {
+            TextButton(onClick = { showScrollSpeed = !showScrollSpeed }) {
+                Text("⇕ ${scrollSpeed}×", fontFamily = MaestriType.Mono, fontSize = 12.sp)
+            }
+        }
         val fullscreenBtn: @Composable () -> Unit = {
             if (canStream) {
                 TextButton(onClick = { fullscreen = !fullscreen }) {
@@ -340,6 +353,7 @@ fun TerminalScreen(
                     floorChip()
                     Spacer(Modifier.width(6.dp))
                     aaStepper()
+                    scrollChip()
                     fullscreenBtn()
                     chatPill()
                 }
@@ -361,6 +375,7 @@ fun TerminalScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             aaStepper()
+                            scrollChip()
                             fullscreenPadded()
                             chatPillCapped()
                         }
@@ -414,6 +429,28 @@ fun TerminalScreen(
             Spacer(Modifier.height(10.dp))
         }
 
+        if (showScrollSpeed && !fullscreen && !imeUp) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Scroll speed · ${scrollSpeed}× — rows per row of finger",
+                    fontFamily = MaestriType.Mono,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(
+                    onClick = { speedStore.setSpeed(scrollSpeed - 1) },
+                    enabled = scrollSpeed > TerminalScrollSpeedStore.MIN_X,
+                ) { Text("−", fontFamily = MaestriType.Mono, fontSize = 14.sp) }
+                Spacer(Modifier.width(6.dp))
+                OutlinedButton(
+                    onClick = { speedStore.setSpeed(scrollSpeed + 1) },
+                    enabled = scrollSpeed < TerminalScrollSpeedStore.MAX_X,
+                ) { Text("+", fontFamily = MaestriType.Mono, fontSize = 14.sp) }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+
         if (pendingPrompt != null && !fullscreen && !imeUp) {
             Spacer(Modifier.height(10.dp))
             PendingPromptCard(card ?: TerminalCard(
@@ -455,6 +492,7 @@ fun TerminalScreen(
             terminalId = terminalId,
             fontSizeSp = fontSp,
             canResize = canResize,
+            scrollSpeed = scrollSpeed,
             // canStream also gates the dial: the face stays composed (and explains itself
             // above) but never opens a stream this host cannot serve.
             enabled = canStream && !locked && !inChat,

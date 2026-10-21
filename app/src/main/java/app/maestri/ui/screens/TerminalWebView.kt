@@ -220,6 +220,7 @@ fun TerminalWebView(
     canResize: Boolean,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    scrollSpeed: Int = 1,
 ) {
     val context = LocalContext.current
     val main = remember { Handler(Looper.getMainLooper()) }
@@ -235,10 +236,15 @@ fun TerminalWebView(
     var lastTouchY by remember { mutableStateOf(0f) }
     var pendingScroll by remember { mutableStateOf(0f) }
     var lastScrollAt by remember { mutableStateOf(0L) }
+    // The touch listener is installed once per WebView, so the speed is read from a state
+    // holder at gesture time; capturing the parameter here would freeze the value the
+    // listener was built with.
+    var scrollSpeedState by remember { mutableStateOf(scrollSpeed) }
+    LaunchedEffect(scrollSpeed) { scrollSpeedState = scrollSpeed }
 
     fun scrollByInPage(deltaPx: Float) {
         val wv = webView ?: return
-        wv.evaluateJavascript("window.__scrollTerminal(${deltaPx})", null)
+        wv.evaluateJavascript("window.__scrollTerminal(${deltaPx * scrollSpeedState})", null)
     }
     fun ready(): Boolean = rendererGen > 0 && webView?.parent != null
     fun pump() = feed.schedule(ready())
