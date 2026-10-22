@@ -1,5 +1,6 @@
 package app.maestri.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -18,12 +19,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,13 +55,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import android.net.Uri
 import app.maestri.wire.FeedItem
 import app.maestri.wire.FeedSnapshot
@@ -67,6 +76,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriType
+import app.maestri.ui.Style.TerminalThemes
 import app.maestri.ui.Style.pillShape
 import app.maestri.ui.settings.LocalAppLocked
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -357,6 +367,16 @@ fun TerminalScreen(
             ?.firstOrNull { it.terminal.id == terminalId }?.prompt
 
     val imeUp = WindowInsets.isImeVisible
+    val streamState by session.terminalStream.state.collectAsState()
+    var chipOpen by remember { mutableStateOf(false) }
+    val inputFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(imeUp, terminalId, inChat, streamState) {
+        chipOpen = false
+    }
+    BackHandler(enabled = chipOpen) {
+        chipOpen = false
+    }
     // Typing needs the grid, not the chrome: the IME leaves ~140dp here, so the header
     // steps aside while the keyboard is up (system back closes the IME first).
     val chromeTight = imeUp && !inChat && !fullscreen
@@ -605,24 +625,60 @@ fun TerminalScreen(
                 Spacer(Modifier.height(6.dp))
             }
         }
-        TerminalWebView(
-            session = session,
-            terminalId = terminalId,
-            fontSizeSp = fontSp,
-            canResize = canResize,
-            scrollSpeed = scrollSpeed,
-            // canStream also gates the dial: the face stays composed (and explains itself
-            // above) but never opens a stream this host cannot serve.
-            enabled = canStream && !locked && !inChat,
-            modifier = Modifier.fillMaxWidth().weight(1f),
-        )
-        Spacer(Modifier.height(6.dp))
-        TerminalKeyRail(
-            onSend = { session.terminalStream.sendInput(it) },
-            onChat = if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
-                ({ enterChatMode() })
-            } else null,
-        )
+        val chipCols = card?.cols ?: streamGeometry?.cols ?: 80
+        val chipRows = card?.rows ?: streamGeometry?.rows ?: 24
+        val chipStatusLabel = "${card?.status?.ifBlank { "—" } ?: "—"} · ${chipCols}×${chipRows}"
+        val chipDotColor = when {
+            streamState == SocketState.CLOSED -> TerminalThemes.TokyoNight.dim
+            pending || card?.needsAttention == true -> MaterialTheme.colorScheme.error
+            card?.isRunning == true || card?.isLive == true -> TerminalThemes.TokyoNight.green
+            else -> TerminalThemes.TokyoNight.dim
+        }
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            TerminalWebView(
+                session = session,
+                terminalId = terminalId,
+                fontSizeSp = fontSp,
+                canResize = canResize,
+                scrollSpeed = scrollSpeed,
+                // canStream also gates the dial: the face stays composed (and explains itself
+                // above) but never opens a stream this host cannot serve.
+                enabled = canStream && !locked && !inChat,
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (!fullscreen) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                        .padding(12.dp)
+                        .zIndex(6f),
+                ) {
+                    TerminalChip(
+                        status = TerminalChipStatus(
+                            label = chipStatusLabel,
+                            dotColor = chipDotColor,
+                        ),
+                        expanded = chipOpen,
+                        imeVisible = imeUp,
+                        onToggle = { chipOpen = !chipOpen },
+                        onKey = { key ->
+                            chipOpen = false
+                            if (key.kind == QuickChipKey.Kind.Chat) {
+                                enterChatMode()
+                            } else if (key.bytes != null) {
+                                session.terminalStream.sendInput(key.bytes.toString(Charsets.UTF_8))
+                            }
+                        },
+                        onShowKeyboard = {
+                            chipOpen = false
+                            inputFocusRequester.requestFocus()
+                            keyboardController?.show()
+                        },
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(8.dp))
         if (stagedFiles.isNotEmpty() && !fullscreen && !imeUp) {
             TerminalStagedChips(
@@ -637,6 +693,7 @@ fun TerminalScreen(
             onAttach = ::stageAttachments,
             canSend = (termInput.isNotBlank() || stagedFiles.isNotEmpty()) && !uploading,
             busy = uploading,
+            focusRequester = inputFocusRequester,
         )
 
         // todo #58: the agent prompt composer now lives on the Chat face only
@@ -751,6 +808,7 @@ private fun TerminalInputLine(
     onAttach: (List<Uri>) -> Unit,
     canSend: Boolean,
     busy: Boolean,
+    focusRequester: FocusRequester,
 ) {
     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         // Single-line with the IME Send action driving the SAME guarded path as the Send
@@ -759,7 +817,7 @@ private fun TerminalInputLine(
             value = value,
             onValueChange = onChange,
             placeholder = { Text("Type to the terminal…") },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).focusRequester(focusRequester),
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(
