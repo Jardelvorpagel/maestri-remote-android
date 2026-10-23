@@ -65,6 +65,8 @@ object TerminalThemes {
         val codeBackground = Color(0xFF151518)
         val panel = Color(0xFF191A24)
         val blueDeep = Color(0xFF5D89D6)
+        val red = Color(0xFFF7768E)
+        val amber = Color(0xFFE0AF68)
 
         /** Prompt ink: blue at weight 700 (spec §4-03). */
         val prompt = blue

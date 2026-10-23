@@ -26,12 +26,24 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -49,11 +61,14 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.Style.MaestriType
+import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.TerminalThemes.TokyoNight
 import app.maestri.ui.Style.pillShape
 
@@ -65,24 +80,21 @@ data class TerminalChipStatus(
 class QuickChipKey(
     val label: String,
     val description: String,
-    val bytes: ByteArray?,
-    val kind: Kind = Kind.Byte,
+    val bytes: ByteArray,
+    val compactLabel: String = label,
 ) {
-    enum class Kind { Byte, Chat }
-
     companion object {
         val DEFAULT: List<QuickChipKey> = listOf(
-            QuickChipKey("Ctrl-C", "Control C — interrupt", byteArrayOf(0x03)),
-            // ⌘ has no PTY encoding; maps ⌘K to Ctrl-K (0x0B, kill-line).
-            QuickChipKey("\u2318K", "Command K — kill line", byteArrayOf(0x0B)),
+            QuickChipKey("Ctrl-C", "Control C — interrupt", byteArrayOf(0x03), "⌃C"),
+            // shortcut: Ctrl-K sends 0x0B (kill-line), not a command-palette action.
+            QuickChipKey("\u2303K", "Control K — kill line", byteArrayOf(0x0B)),
             QuickChipKey("\u21E5", "Tab key", byteArrayOf(0x09)),
             QuickChipKey("esc", "Escape key", byteArrayOf(0x1B)),
             QuickChipKey("\u2191", "Arrow up", byteArrayOf(0x1B, 0x5B, 0x41)),
             QuickChipKey("\u2193", "Arrow down", byteArrayOf(0x1B, 0x5B, 0x42)),
-            QuickChipKey("Ctrl-L", "Control L — clear screen", byteArrayOf(0x0C)),
-            QuickChipKey("Ctrl-D", "Control D — end of file", byteArrayOf(0x04)),
-            QuickChipKey("Ctrl-R", "Control R — reverse search", byteArrayOf(0x12)),
-            QuickChipKey("Chat \u2192", "Switch to chat mode", null, Kind.Chat),
+            QuickChipKey("Ctrl-L", "Control L — clear screen", byteArrayOf(0x0C), "⌃L"),
+            QuickChipKey("Ctrl-D", "Control D — end of file", byteArrayOf(0x04), "⌃D"),
+            QuickChipKey("Ctrl-R", "Control R — reverse search", byteArrayOf(0x12), "⌃R"),
         )
     }
 }
@@ -94,10 +106,19 @@ fun TerminalChip(
     imeVisible: Boolean,
     onToggle: () -> Unit,
     onKey: (QuickChipKey) -> Unit,
+    onChat: () -> Unit,
     onShowKeyboard: () -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
+    val keyHeight = if (density.fontScale >= 2f) 56.dp else 44.dp
+    var announceOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(expanded) {
+        announceOpen = expanded
+        if (expanded) withFrameNanos { }
+        announceOpen = false
+    }
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(durationMillis = 180),
@@ -132,14 +153,15 @@ fun TerminalChip(
                         .padding(10.dp)
                         .semantics {
                             isTraversalGroup = true
-                            liveRegion = LiveRegionMode.Polite
+                            if (announceOpen) liveRegion = LiveRegionMode.Polite
                         },
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 2.dp),
+                            .padding(horizontal = 2.dp)
+                            .semantics(mergeDescendants = true) { traversalIndex = 0f },
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(7.dp),
                     ) {
@@ -160,43 +182,62 @@ fun TerminalChip(
                         )
                     }
 
-                    QuickChipKey.DEFAULT.chunked(5).forEach { rowKeys ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            rowKeys.forEach { key ->
-                                QuickChipKeyCell(
-                                    key = key,
-                                    onClick = { onKey(key) },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(44.dp),
-                                )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        (QuickChipKey.DEFAULT + QuickChipKey("Chat →", "Chat", byteArrayOf(), "Chat")).chunked(5).forEachIndexed { rowIndex, rowKeys ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                rowKeys.forEachIndexed { columnIndex, key ->
+                                    QuickChipKeyCell(
+                                        key = key,
+                                        enabled = enabled,
+                                        onClick = { if (key.bytes.isEmpty()) onChat() else onKey(key) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(keyHeight)
+                                            .semantics { traversalIndex = (1 + rowIndex * 5 + columnIndex).toFloat() },
+                                    )
+                                }
                             }
                         }
                     }
 
                     if (!imeVisible) {
                         val kbShape = RoundedCornerShape(10.dp)
-                        Box(
+                        val keyboardMeasurer = rememberTextMeasurer()
+                        BoxWithConstraints(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(44.dp)
+                                .height(keyHeight)
                                 .clip(kbShape)
                                 .background(TokyoNight.foreground.copy(alpha = 0.10f), kbShape)
                                 .border(1.dp, TokyoNight.foreground.copy(alpha = 0.20f), kbShape)
-                                .semantics { contentDescription = "Show keyboard" }
+                                .terminalFocusRing(kbShape)
+                                .semantics { traversalIndex = 11f }
                                 .clickable(role = Role.Button, onClick = onShowKeyboard),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(
+                            val measured = keyboardMeasurer.measure(
                                 text = "Show keyboard",
+                                style = TextStyle(
+                                    fontFamily = MaestriType.Mono,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                ),
+                                constraints = constraints,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                            Text(
+                                text = if (measured.hasVisualOverflow) "Keyboard" else "Show keyboard",
+                                modifier = Modifier.clearAndSetSemantics { contentDescription = "Show keyboard" },
                                 fontFamily = MaestriType.Mono,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TokyoNight.foreground,
                                 maxLines = 1,
+                                softWrap = false,
                             )
                         }
                     }
@@ -208,6 +249,7 @@ fun TerminalChip(
                 modifier = Modifier
                     .defaultMinSize(minHeight = 48.dp)
                     .shadow(8.dp, pill)
+                    .terminalFocusRing(pill)
                     .clip(pill)
                     .background(TokyoNight.panel, pill)
                     .border(1.dp, TokyoNight.border, pill)
@@ -231,15 +273,7 @@ fun TerminalChip(
                         .size(7.dp)
                         .background(status.dotColor, CircleShape),
                 )
-                Text(
-                    text = status.label,
-                    fontFamily = MaestriType.Mono,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TokyoNight.foreground,
-                    maxLines = 1,
-                    softWrap = false,
-                )
+
                 Canvas(
                     modifier = Modifier
                         .size(13.dp)
@@ -268,39 +302,75 @@ fun TerminalChip(
 }
 
 @Composable
+private fun Modifier.terminalFocusRing(shape: RoundedCornerShape): Modifier {
+    var focused by remember { mutableStateOf(false) }
+    return this.onFocusChanged { focused = it.isFocused }.drawBehind {
+        if (focused) {
+            val offset = 3.dp.toPx()
+            val radius = shape.topStart.toPx(size, this)
+            drawRoundRect(
+                color = Palette.FocusBlue,
+                topLeft = Offset(-offset, -offset),
+                size = Size(size.width + offset * 2, size.height + offset * 2),
+                cornerRadius = CornerRadius(radius + offset),
+                style = Stroke(2.dp.toPx()),
+            )
+        }
+    }
+}
+
+@Composable
 private fun QuickChipKeyCell(
     key: QuickChipKey,
     onClick: () -> Unit,
+    enabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(10.dp)
-    val isChat = key.kind == QuickChipKey.Kind.Chat
-    val bgModifier = if (isChat) {
-        Modifier
-            .background(
-                brush = Brush.linearGradient(listOf(TokyoNight.blue, TokyoNight.blueDeep)),
-                shape = shape,
-            )
-            .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
-    } else {
-        Modifier
-            .background(TokyoNight.foreground.copy(alpha = 0.08f), shape)
-            .border(1.dp, TokyoNight.foreground.copy(alpha = 0.16f), shape)
+    val chat = key.bytes.isEmpty()
+    val paint = remember { android.graphics.Paint().apply { typeface = android.graphics.Typeface.MONOSPACE } }
+    val label = if (paint.hasGlyph(key.label)) key.label else when (key.label) {
+        "⇥" -> "Tab"
+        "↑" -> "Up"
+        "↓" -> "Down"
+        "⌃K" -> "Ctrl-K"
+        else -> key.label
     }
-    Box(
+    val textMeasurer = rememberTextMeasurer()
+    val labelStyle = TextStyle(
+        fontFamily = MaestriType.Mono,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+    )
+    BoxWithConstraints(
         modifier = modifier
+            .terminalFocusRing(shape)
             .clip(shape)
-            .then(bgModifier)
+            .background(
+                if (chat) Brush.horizontalGradient(listOf(TokyoNight.blue, TokyoNight.blueDeep))
+                else Brush.horizontalGradient(listOf(TokyoNight.foreground.copy(alpha = 0.08f), TokyoNight.foreground.copy(alpha = 0.08f))),
+                shape,
+            )
+            .border(1.dp, TokyoNight.foreground.copy(alpha = 0.16f), shape)
             .semantics { contentDescription = key.description }
-            .clickable(role = Role.Button, onClick = onClick),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
+        val measured = textMeasurer.measure(
+            text = label,
+            style = labelStyle,
+            constraints = constraints,
+            maxLines = 1,
+            softWrap = false,
+        )
+        val fittedLabel = if (measured.hasVisualOverflow) key.compactLabel else key.label
         Text(
-            text = key.label,
+            text = fittedLabel,
+            modifier = Modifier.clearAndSetSemantics {},
             fontFamily = MaestriType.Mono,
-            fontSize = if (isChat) 11.sp else 12.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            color = if (isChat) TokyoNight.background else TokyoNight.foreground,
+            color = if (chat) TokyoNight.background else TokyoNight.foreground,
             maxLines = 1,
             softWrap = false,
         )

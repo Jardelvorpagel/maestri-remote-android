@@ -60,6 +60,12 @@ object Palette {
     /** Accessibility focus rings only; also the literal named in the Settings row. */
     val FocusBlue = Color(0xFF3898EC)
 
+    /**
+     * Terminal composer send accent (design 03 `--gemini #4285F4`). Same literal as [Gemini]
+     * but a chrome role, so it carries its own name instead of overloading the vendor token.
+     */
+    val ComposerAccent = Color(0xFF4285F4)
+
     // Vendor agent identities (data roles — dots/arcs/rows only, never chrome).
     val Claude = Color(0xFFD97757)
     val Codex = Color(0xFF10A37F)

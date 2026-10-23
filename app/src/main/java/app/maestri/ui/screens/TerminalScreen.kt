@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,7 +19,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -32,12 +37,8 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -56,16 +57,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.alpha
 import android.net.Uri
 import app.maestri.wire.FeedItem
 import app.maestri.wire.FeedSnapshot
@@ -81,7 +88,6 @@ import app.maestri.ui.Style.pillShape
 import app.maestri.ui.settings.LocalAppLocked
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.maestri.live.DataStorePiRelayStore
-import app.maestri.live.LiveAttachButton
 import app.maestri.live.LiveFeedContent
 import app.maestri.live.LiveStagedFile
 import app.maestri.live.LiveViewModel
@@ -146,13 +152,12 @@ fun TerminalScreen(
         factory = LiveViewModelFactory(relayStore),
     )
     val fontSp by fontStore.sizeSp.collectAsState()
-    var showTypeScale by remember { mutableStateOf(false) }
+    var showDisplayConfig by remember { mutableStateOf(false) }
     // Scroll speed: how many rows the content moves per row of finger travel. A phone
     // flick carries further than the finger, so 1x (the terminal-native feel) reads as
     // sluggish on a long transcript.
     val speedStore = remember(ctx) { TerminalScrollSpeedStore(ctx.applicationContext) }
     val scrollSpeed by speedStore.speedX.collectAsState()
-    var showScrollSpeed by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
     val snapshot by session.feed.snapshot.collectAsState()
     val feedState by session.feed.state.collectAsState()
@@ -346,11 +351,10 @@ fun TerminalScreen(
 
     /** Chat key on the quickkey rail: the same enable-chat handshake the nav button runs. */
     fun enterChatMode() {
-        val enter = onEnterChat ?: return
         scope.launch {
             try {
                 ChatApi(session).chatSetFace(terminalId, true, null)
-                enter(terminalId, terminalName)
+                viewModeStore.setMode(terminalId, TerminalViewModeStore.CHAT)
             } catch (e: Exception) {
                 notice = "chat mode failed: ${e.message}"
             }
@@ -371,8 +375,10 @@ fun TerminalScreen(
     var chipOpen by remember { mutableStateOf(false) }
     val inputFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
-    LaunchedEffect(terminalId, inChat) {
+    val configuration = LocalConfiguration.current
+    LaunchedEffect(terminalId, inChat, imeUp, streamState, configuration.orientation, configuration.screenWidthDp, locked) {
         chipOpen = false
+        showDisplayConfig = false
     }
     BackHandler(enabled = chipOpen) {
         chipOpen = false
@@ -384,12 +390,20 @@ fun TerminalScreen(
     // NOT shrink (reno_kb2 proves it: the viewport extends under Gboard) — so the screen
     // consumes it here. One shared fix lifting the terminal input line + rail AND the agent
     // prompt composer (Chat face) above the keyboard. Closed keyboard → zero inset → identical.
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(12.dp).imePadding()) {
+    Column(
+        Modifier.fillMaxSize().background(TerminalThemes.TokyoNight.background)
+            .statusBarsPadding()
+            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+    ) {
         // Header: responsive below a 480dp breakpoint (todo #42, Reno 411dp case).
         // The tablet path is the ARRANGEMENT-IDENTICAL row it has always been; the
         // compact path re-flows chips + controls onto a second, right-aligned row and
         // gives the Enter-Chat pill a measured minimum width so it renders on one line.
-        val backBtn: @Composable () -> Unit = { TextButton(onClick = onBack) { BackLabel("Back") } }
+        val backBtn: @Composable () -> Unit = {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+        }
         val titleBlock: @Composable RowScope.() -> Unit = {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -419,7 +433,25 @@ fun TerminalScreen(
                 )
             }
         }
-        val connChip: @Composable () -> Unit = { ConnChip(feedState, feedError) }
+        val connChip: @Composable () -> Unit = {
+            val pulse = rememberInfiniteTransition(label = "terminalLive")
+            val opacity by pulse.animateFloat(
+                initialValue = 1f,
+                targetValue = 0.35f,
+                animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+                label = "terminalLiveOpacity",
+            )
+            val live = streamState == SocketState.OPEN
+            Row(
+                Modifier.padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(Modifier.size(7.dp).alpha(if (live) opacity else 1f)
+                    .background(if (live) TerminalThemes.TokyoNight.green else TerminalThemes.TokyoNight.amber, CircleShape))
+                Text(if (live) "live" else "offline", fontSize = 11.sp, color = TerminalThemes.TokyoNight.foreground)
+            }
+        }
         // Mono workspace chip (design v2 §4-03): floor name when the card carries one,
         // else the short workspace id — never a styled/serif value.
         val floorChip: @Composable () -> Unit = {
@@ -434,161 +466,88 @@ fun TerminalScreen(
                     .padding(horizontal = 8.dp, vertical = 3.dp),
             )
         }
-        // Aa stepper chip: current persisted size, tap = the stepper row.
-        val aaStepper: @Composable () -> Unit = {
-            TextButton(onClick = { showTypeScale = !showTypeScale }) {
-                Text("Aa $fontSp", fontFamily = MaestriType.Mono, fontSize = 12.sp)
-            }
-        }
-        // Scroll speed chip: rows moved per row of finger travel, tap = the stepper row.
-        val scrollChip: @Composable () -> Unit = {
-            TextButton(onClick = { showScrollSpeed = !showScrollSpeed }) {
-                Text("⇕ ${scrollSpeed}×", fontFamily = MaestriType.Mono, fontSize = 12.sp)
-            }
-        }
         val fullscreenBtn: @Composable () -> Unit = {
             if (canStream) {
-                TextButton(onClick = { fullscreen = !fullscreen }) {
-                    Text(if (fullscreen) "\u2921" else "\u2922", fontSize = 18.sp)
-                }
-            }
-        }
-        // Compact-only: breathing room around the expand glyph on the re-flowed row.
-        val fullscreenPadded: @Composable () -> Unit = {
-            Box(Modifier.padding(horizontal = 3.dp)) { fullscreenBtn() }
-        }
-        // Enter-Chat pill. Tablet: the plain call, UNCHANGED. Compact: a min-width
-        // floor keeps the label on ONE line (12sp "Enter Chat Mode" measures ~117dp
-        // incl. its 12dp side paddings; at larger font scales the loose upper bound
-        // lets it grow instead of wrapping).
-        val chatPill: @Composable () -> Unit = {
-            if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
-                app.maestri.ui.screens.EnterChatModeButton(
-                    session = session,
-                    terminalId = terminalId,
-                    onChatReady = { onEnterChat?.invoke(terminalId, terminalName) },
-                )
-            }
-        }
-        val chatPillCapped: @Composable () -> Unit = {
-            if (session.serverInfo?.has("terminalChat") == true && onEnterChat != null) {
-                Box(Modifier.defaultMinSize(minWidth = 128.dp)) {
-                    app.maestri.ui.screens.EnterChatModeButton(
-                        session = session,
-                        terminalId = terminalId,
-                        onChatReady = { onEnterChat?.invoke(terminalId, terminalName) },
+                IconButton(onClick = { fullscreen = !fullscreen }) {
+                    Text(
+                        if (fullscreen) "\u2921" else "\u2922",
+                        fontSize = 18.sp,
+                        modifier = Modifier.semantics {
+                            contentDescription = if (fullscreen) "Exit fullscreen" else "Fullscreen"
+                        },
                     )
                 }
             }
         }
-        if (!chromeTight) BoxWithConstraints {
-            val compact = maxWidth < 480.dp
-            if (!compact) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    backBtn()
-                    titleBlock()
-                    connChip()
-                    floorChip()
-                    Spacer(Modifier.width(6.dp))
-                    aaStepper()
-                    scrollChip()
-                    fullscreenBtn()
-                    chatPill()
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        backBtn()
-                        titleBlock()
-                        connChip()
+        if (!chromeTight && !fullscreen) {
+            Row(
+                Modifier.fillMaxWidth().height(50.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                backBtn()
+                titleBlock()
+                connChip()
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                floorChip()
+                Spacer(Modifier.weight(1f))
+                fullscreenBtn()
+                Box {
+                    IconButton(onClick = { showDisplayConfig = !showDisplayConfig }) {
+                        Icon(Icons.Filled.Tune, contentDescription = "Display settings")
                     }
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                    DropdownMenu(
+                        expanded = showDisplayConfig,
+                        onDismissRequest = { showDisplayConfig = false },
+                        modifier = Modifier.width(248.dp),
+                        containerColor = TerminalThemes.TokyoNight.panel,
                     ) {
-                        floorChip()
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            aaStepper()
-                            scrollChip()
-                            fullscreenPadded()
-                            chatPillCapped()
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Font size · $fontSp", fontSize = 12.sp)
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                val sizes = listOf(TerminalFontStore.MIN_SP, 13, TerminalFontStore.MAX_SP).distinct()
+                                sizes.forEachIndexed { index, size ->
+                                    SegmentedButton(
+                                        selected = fontSp == size,
+                                        onClick = {
+                                            fontStore.setSize(size)
+                                            showDisplayConfig = false
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(index, sizes.size),
+                                    ) { Text("$size") }
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Scroll speed · ${scrollSpeed}×", fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                TextButton(
+                                    enabled = scrollSpeed > TerminalScrollSpeedStore.MIN_X,
+                                    onClick = { speedStore.setSpeed(scrollSpeed - 1) },
+                                ) { Text("−") }
+                                TextButton(
+                                    enabled = scrollSpeed < TerminalScrollSpeedStore.MAX_X,
+                                    onClick = { speedStore.setSpeed(scrollSpeed + 1) },
+                                ) { Text("+") }
+                            }
                         }
                     }
                 }
             }
         }
-
-        // View mode: Terminal keeps the renderer below untouched; Chat hosts the Pi
-        // relay feed (settings, event list, decision banner, composer) with its own
-        // scroller. The terminal grid is uncomposed in Chat and its stream closed
-        // above; the remembered emulator retains the grid for a blank-free return.
-        if (!fullscreen && !imeUp) {
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            SegmentedButton(
-                selected = !inChat,
-                onClick = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },
-                shape = SegmentedButtonDefaults.itemShape(0, 2),
-            ) { Text("Terminal") }
-            SegmentedButton(
-                selected = inChat,
-                onClick = { viewModeStore.setMode(terminalId, TerminalViewModeStore.CHAT) },
-                shape = SegmentedButtonDefaults.itemShape(1, 2),
-            ) { Text("Chat") }
-        }
-        Spacer(Modifier.height(10.dp))
+        if (fullscreen) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                fullscreenBtn()
+            }
         }
 
         if (inChat) {
+            TextButton(onClick = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) }) {
+                Text("Terminal")
+            }
             LiveFeedContent(liveVm)
         } else {
-        if (showTypeScale && !fullscreen && !imeUp) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "Terminal font · ${MaestriType.MonoName} · $fontSp",
-                    fontFamily = MaestriType.Mono,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedButton(
-                    onClick = { fontStore.setSize(fontSp - 1) },
-                    enabled = fontSp > TerminalFontStore.MIN_SP,
-                ) { Text("−", fontFamily = MaestriType.Mono, fontSize = 14.sp) }
-                Spacer(Modifier.width(6.dp))
-                OutlinedButton(
-                    onClick = { fontStore.setSize(fontSp + 1) },
-                    enabled = fontSp < TerminalFontStore.MAX_SP,
-                ) { Text("+", fontFamily = MaestriType.Mono, fontSize = 14.sp) }
-            }
-            Spacer(Modifier.height(10.dp))
-        }
-
-        if (showScrollSpeed && !fullscreen && !imeUp) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "Scroll speed · ${scrollSpeed}× — rows per row of finger",
-                    fontFamily = MaestriType.Mono,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedButton(
-                    onClick = { speedStore.setSpeed(scrollSpeed - 1) },
-                    enabled = scrollSpeed > TerminalScrollSpeedStore.MIN_X,
-                ) { Text("−", fontFamily = MaestriType.Mono, fontSize = 14.sp) }
-                Spacer(Modifier.width(6.dp))
-                OutlinedButton(
-                    onClick = { speedStore.setSpeed(scrollSpeed + 1) },
-                    enabled = scrollSpeed < TerminalScrollSpeedStore.MAX_X,
-                ) { Text("+", fontFamily = MaestriType.Mono, fontSize = 14.sp) }
-            }
-            Spacer(Modifier.height(10.dp))
-        }
-
         if (pendingPrompt != null && !fullscreen && !imeUp) {
             Spacer(Modifier.height(10.dp))
             PendingPromptCard(card ?: TerminalCard(
@@ -627,12 +586,18 @@ fun TerminalScreen(
         }
         val chipCols = card?.cols ?: streamGeometry?.cols ?: 80
         val chipRows = card?.rows ?: streamGeometry?.rows ?: 24
-        val chipStatusLabel = "${card?.status?.ifBlank { "—" } ?: "—"} · ${chipCols}×${chipRows}"
+        val reconnecting = streamState == SocketState.CONNECTING ||
+            (streamState == SocketState.CLOSED && card?.isRunning == true)
+        val chipStatusLabel = when {
+            reconnecting -> "Reconnecting"
+            streamState == SocketState.CLOSED -> "closed"
+            else -> "${card?.status?.ifBlank { "—" } ?: "—"} · ${chipCols}×${chipRows}"
+        }
         val chipDotColor = when {
-            streamState == SocketState.CLOSED -> TerminalThemes.TokyoNight.dim
-            pending || card?.needsAttention == true -> MaterialTheme.colorScheme.error
-            card?.isRunning == true || card?.isLive == true -> TerminalThemes.TokyoNight.green
-            else -> TerminalThemes.TokyoNight.dim
+            reconnecting -> TerminalThemes.TokyoNight.amber
+            streamState != SocketState.OPEN -> TerminalThemes.TokyoNight.dim
+            pending || card?.needsAttention == true -> TerminalThemes.TokyoNight.red
+            else -> TerminalThemes.TokyoNight.green
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
             TerminalWebView(
@@ -647,52 +612,58 @@ fun TerminalScreen(
                 modifier = Modifier.fillMaxSize(),
             )
             if (!fullscreen) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
+                TerminalChip(
+                    status = TerminalChipStatus(label = chipStatusLabel, dotColor = chipDotColor),
+                    expanded = chipOpen,
+                    imeVisible = imeUp,
+                    enabled = streamState == SocketState.OPEN && !locked,
+                    onToggle = { chipOpen = !chipOpen },
+                    onKey = { key ->
+                        chipOpen = false
+                        session.terminalStream.sendInput(key.bytes.toString(Charsets.UTF_8))
+                    },
+                    onChat = {
+                        chipOpen = false
+                        enterChatMode()
+                    },
+                    onShowKeyboard = {
+                        chipOpen = false
+                        inputFocusRequester.requestFocus()
+                        keyboardController?.show()
+                    },
+                    modifier = Modifier.align(Alignment.BottomEnd)
                         .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
-                        .padding(12.dp)
-                        .zIndex(6f),
-                ) {
-                    TerminalChip(
-                        status = TerminalChipStatus(
-                            label = chipStatusLabel,
-                            dotColor = chipDotColor,
-                        ),
-                        expanded = chipOpen,
-                        imeVisible = imeUp,
-                        onToggle = { chipOpen = !chipOpen },
-                        onKey = { key ->
-                            if (key.kind == QuickChipKey.Kind.Chat) {
-                                enterChatMode()
-                            } else if (key.bytes != null) {
-                                session.terminalStream.sendInput(key.bytes.toString(Charsets.UTF_8))
-                            }
-                        },
-                        onShowKeyboard = {
-                            inputFocusRequester.requestFocus()
-                            keyboardController?.show()
-                        },
-                    )
-                }
+                        .padding(12.dp).zIndex(6f),
+                )
             }
         }
-        Spacer(Modifier.height(8.dp))
-        if (stagedFiles.isNotEmpty() && !fullscreen && !imeUp) {
-            TerminalStagedChips(
-                files = stagedFiles,
-                onRemove = { key -> stagedFiles = stagedFiles.filter { it.key != key } },
+        if (!fullscreen) {
+            val composerMeta = when {
+                uploading -> "uploading…"
+                streamState != SocketState.OPEN -> "offline"
+                stagedFiles.isNotEmpty() ->
+                    "${stagedFiles.size} file${if (stagedFiles.size == 1) "" else "s"}"
+                else -> null
+            }
+            TerminalComposer(
+                placeholder = "Ask $terminalName to fix it…",
+                value = termInput,
+                onChange = { termInput = it },
+                onSend = ::sendTyped,
+                onAttach = ::stageAttachments,
+                canSend = streamState == SocketState.OPEN && !locked &&
+                    (termInput.isNotBlank() || stagedFiles.isNotEmpty()) && !uploading,
+                busy = uploading,
+                meta = composerMeta,
+                chatSelected = inChat,
+                onChat = ::enterChatMode,
+                onRun = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },
+                staged = stagedFiles,
+                onRemoveStaged = { key -> stagedFiles = stagedFiles.filter { it.key != key } },
+                focusRequester = inputFocusRequester,
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
             )
         }
-        TerminalInputLine(
-            value = termInput,
-            onChange = { termInput = it },
-            onSend = ::sendTyped,
-            onAttach = ::stageAttachments,
-            canSend = (termInput.isNotBlank() || stagedFiles.isNotEmpty()) && !uploading,
-            busy = uploading,
-            focusRequester = inputFocusRequester,
-        )
 
         // todo #58: the agent prompt composer now lives on the Chat face only
         // (LiveComposerBar, LiveComposer.kt:35, rendered by LiveFeedContent,
@@ -748,7 +719,7 @@ private fun attentionDot(t: TerminalCard?, pending: Boolean): Color = when {
  * this one lists the files and nothing else.
  */
 @Composable
-private fun TerminalStagedChips(files: List<LiveStagedFile>, onRemove: (String) -> Unit) {
+internal fun TerminalStagedChips(files: List<LiveStagedFile>, onRemove: (String) -> Unit) {
     val colors = LocalMaestriColors.current
     Column(
         Modifier
@@ -798,35 +769,3 @@ private fun TerminalStagedChips(files: List<LiveStagedFile>, onRemove: (String) 
     }
 }
 
-@Composable
-private fun TerminalInputLine(
-    value: String,
-    onChange: (String) -> Unit,
-    onSend: () -> Unit,
-    onAttach: (List<Uri>) -> Unit,
-    canSend: Boolean,
-    busy: Boolean,
-    focusRequester: FocusRequester,
-) {
-    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Single-line with the IME Send action driving the SAME guarded path as the Send
-        // button (hardware Enter must submit — todo #42 round 2 convention).
-        OutlinedTextField(
-            value = value,
-            onValueChange = onChange,
-            placeholder = { Text("Type to the terminal…") },
-            modifier = Modifier.weight(1f).focusRequester(focusRequester),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(
-                onSend = { if (canSend) onSend() },
-            ),
-        )
-        // Attach: the file travels to the host on the next Send, and the terminal line
-        // hands the agent the path the host stored it under.
-        LiveAttachButton(enabled = !busy) { uris -> onAttach(uris) }
-        Button(onClick = { if (canSend) onSend() }, enabled = canSend) {
-            Text(if (busy) "…" else "Send")
-        }
-    }
-}
