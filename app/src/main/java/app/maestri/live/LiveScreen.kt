@@ -160,7 +160,7 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
  * never duplicated per host.
  */
 @Composable
-fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
+fun ColumnScope.LiveFeedContent(vm: LiveViewModel, showComposer: Boolean = true) {
     val colors = LocalMaestriColors.current
     val scope = rememberCoroutineScope()
     val relayState by vm.relayState.collectAsState()
@@ -230,7 +230,7 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
         if (followingNow) listState.scrollToItem(allRows.size - 1)
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxWidth().weight(1f)) {
         RelaySettingsCard(
             url = url,
             token = token,
@@ -346,7 +346,7 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel) {
                 onOption = { label -> vm.sendOption(label) },
             )
         }
-        LiveComposerBar(vm)
+        if (showComposer) LiveComposerBar(vm)
     }
 }
 

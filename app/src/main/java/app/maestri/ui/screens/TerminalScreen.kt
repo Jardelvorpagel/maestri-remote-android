@@ -88,10 +88,13 @@ import app.maestri.ui.Style.pillShape
 import app.maestri.ui.settings.LocalAppLocked
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.maestri.live.DataStorePiRelayStore
+import app.maestri.live.LiveComposeState
 import app.maestri.live.LiveFeedContent
+import app.maestri.live.LiveSendStatus
 import app.maestri.live.LiveStagedFile
 import app.maestri.live.LiveViewModel
 import app.maestri.live.LiveViewModelFactory
+import app.maestri.live.rememberLiveAttachHandler
 import app.maestri.live.MAX_ATTACH_BYTES
 import app.maestri.live.MAX_STAGED_FILES
 import app.maestri.live.PiRelayUpload
@@ -543,10 +546,40 @@ fun TerminalScreen(
         }
 
         if (inChat) {
-            TextButton(onClick = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) }) {
-                Text("Terminal")
+            val liveDraft by liveVm.draft.collectAsState()
+            val liveStaged by liveVm.staged.collectAsState()
+            val liveComposeState by liveVm.composeState.collectAsState()
+            val livePending by liveVm.pending.collectAsState()
+            val liveReady = liveComposeState is LiveComposeState.Ready
+            val liveDisabledReason = (liveComposeState as? LiveComposeState.Disabled)?.reason
+            val liveSending = livePending.any { it.status == LiveSendStatus.SENDING }
+            val liveCanSend = liveReady && (liveDraft.isNotBlank() || liveStaged.isNotEmpty())
+            val liveMeta = liveDisabledReason
+                ?: if (liveStaged.isNotEmpty())
+                    "${liveStaged.size} file${if (liveStaged.size == 1) "" else "s"}"
+                else null
+            val liveOnAttach = rememberLiveAttachHandler(liveVm)
+            LiveFeedContent(liveVm, showComposer = false)
+            if (!fullscreen) {
+                TerminalComposer(
+                    placeholder = "Message Pi…",
+                    value = liveDraft,
+                    onChange = { liveVm.updateDraft(it) },
+                    onSend = { if (liveCanSend) liveVm.send() },
+                    onAttach = liveOnAttach,
+                    canSend = liveCanSend,
+                    busy = liveSending,
+                    meta = liveMeta,
+                    chatSelected = true,
+                    onChat = ::enterChatMode,
+                    onRun = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },
+                    staged = liveStaged,
+                    onRemoveStaged = { liveVm.removeStaged(it) },
+                    focusRequester = inputFocusRequester,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                    attachEnabled = liveReady,
+                )
             }
-            LiveFeedContent(liveVm)
         } else {
         if (pendingPrompt != null && !fullscreen && !imeUp) {
             Spacer(Modifier.height(10.dp))
@@ -665,13 +698,12 @@ fun TerminalScreen(
             )
         }
 
-        // todo #58: the agent prompt composer now lives on the Chat face only
-        // (LiveComposerBar, LiveComposer.kt:35, rendered by LiveFeedContent,
-        // LiveScreen.kt:349). It was retired here together with the Preview face it had
-        // been moved onto: stacking it under the rail stranded "Prompt to the agent…"
-        // with a focus ring (reno_termbox). Pre-#42 rendered it on both faces
-        // (a922c8a:356 gated fullscreen-only, 361cbef:282 unconditional) — that
-        // both-faces state IS the reported duplicate, so history keeps no other owner.
+        // Chat and terminal faces share one composer: TerminalScreen hosts TerminalComposer
+        // on both faces (terminal PTY send vs. LiveViewModel relay send), with the Chat/Run
+        // segment pair as the explicit two-way face switch. The standalone LiveScreen route
+        // keeps LiveComposerBar (LiveComposer.kt:35); the embedded chat mode here hides it
+        // via LiveFeedContent(showComposer = false) so there is exactly one composer band
+        // and no path can enter chat without a Run way back.
         }
     }
 }

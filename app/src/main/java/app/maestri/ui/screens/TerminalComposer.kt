@@ -74,6 +74,7 @@ fun TerminalComposer(
     onRemoveStaged: (String) -> Unit,
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
+    attachEnabled: Boolean = true,
 ) {
     val fieldStyle = TextStyle(fontSize = 13.5.sp, color = ComposerText)
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -107,7 +108,7 @@ fun TerminalComposer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                AttachButton(enabled = !busy, onPicked = onAttach)
+                AttachButton(enabled = attachEnabled && !busy, onPicked = onAttach)
                 Spacer(Modifier.weight(1f))
                 if (meta != null) {
                     Text(meta, fontSize = 11.5.sp, color = ComposerMuted)
