@@ -371,7 +371,7 @@ fun TerminalScreen(
     var chipOpen by remember { mutableStateOf(false) }
     val inputFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
-    LaunchedEffect(imeUp, terminalId, inChat, streamState) {
+    LaunchedEffect(terminalId, inChat) {
         chipOpen = false
     }
     BackHandler(enabled = chipOpen) {
@@ -663,7 +663,6 @@ fun TerminalScreen(
                         imeVisible = imeUp,
                         onToggle = { chipOpen = !chipOpen },
                         onKey = { key ->
-                            chipOpen = false
                             if (key.kind == QuickChipKey.Kind.Chat) {
                                 enterChatMode()
                             } else if (key.bytes != null) {
@@ -671,7 +670,6 @@ fun TerminalScreen(
                             }
                         },
                         onShowKeyboard = {
-                            chipOpen = false
                             inputFocusRequester.requestFocus()
                             keyboardController?.show()
                         },
