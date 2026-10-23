@@ -1,8 +1,12 @@
 package app.maestri.live
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,21 +47,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriRadii
+import app.maestri.ui.Style.Motion
 import app.maestri.ui.Style.Rhythm
 import app.maestri.ui.Style.cardShape
 import app.maestri.ui.Style.monoHud
 import app.maestri.ui.Style.pillShape
 import app.maestri.ui.Style.warmRing
+import app.maestri.ui.settings.ChatDensityStore
+import app.maestri.ui.settings.ChatTextSizeStore
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -160,7 +170,14 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
  * never duplicated per host.
  */
 @Composable
-fun ColumnScope.LiveFeedContent(vm: LiveViewModel, showComposer: Boolean = true) {
+fun ColumnScope.LiveFeedContent(
+    vm: LiveViewModel,
+    showComposer: Boolean = true,
+    /** Tap destination for tool rows: the chat face passes the Terminal face switch.
+     * Null keeps the legacy expand-in-place, reachable only from the retired
+     * standalone LiveScreen route. */
+    onOpenTerminal: (() -> Unit)? = null,
+) {
     val colors = LocalMaestriColors.current
     val scope = rememberCoroutineScope()
     val relayState by vm.relayState.collectAsState()
@@ -178,6 +195,16 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel, showComposer: Boolean = true)
     val decisionPrompt by vm.decisionPrompt.collectAsState()
     val autoRetry by vm.autoRetry.collectAsState()
     val relayError = relayState as? RelayState.Error
+    // Chat display settings (same DataStore idiom as the terminal settings): text
+    // steps 12/13/15 drive the message body; density drives list spacing and
+    // bubble padding. Both faces of LiveFeedContent read the same stores.
+    val ctx = LocalContext.current
+    val chatTextSizeStore = remember(ctx) { ChatTextSizeStore(ctx.applicationContext) }
+    val chatDensityStore = remember(ctx) { ChatDensityStore(ctx.applicationContext) }
+    val chatTextSize by chatTextSizeStore.sizeSp.collectAsState()
+    val chatCompact by chatDensityStore.compact.collectAsState()
+    val listSpacing = if (chatCompact) 8.dp else 12.dp
+    val bubbleVertical = if (chatCompact) 8.dp else 12.dp
 
     // Auto-connect on entering Chat when a relay URL is already stored: one shot
     // per composition (leaving Chat disposes it, so re-entry retries; Stop sets a
@@ -296,12 +323,21 @@ fun ColumnScope.LiveFeedContent(vm: LiveViewModel, showComposer: Boolean = true)
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(listSpacing),
                 ) {
                     items(allRows, key = { rowKey(it) }) { row ->
                         when (row) {
-                            is DisplayRow.Message -> MessageRow(row.event)
-                            is DisplayRow.Tool -> ToolRow(row.call, row.result)
+                            is DisplayRow.Message -> MessageRow(
+                                row.event,
+                                bodySizeSp = chatTextSize,
+                                bubbleVertical = bubbleVertical,
+                            )
+                            is DisplayRow.Tool -> ToolRow(
+                                row.call,
+                                row.result,
+                                bubbleVertical = bubbleVertical,
+                                onOpenTerminal = onOpenTerminal,
+                            )
                             is DisplayRow.StatusLine -> StatusLineRow(row.event)
                             is DisplayRow.Err -> ErrorRow(row.event)
                             is DisplayRow.Unknown -> UnknownRow(row.event)
@@ -611,7 +647,11 @@ private fun RelaySettingsCard(
 }
 
 @Composable
-private fun MessageRow(event: PiEvent) {
+private fun MessageRow(
+    event: PiEvent,
+    bodySizeSp: Int = ChatTextSizeStore.DEFAULT_SP,
+    bubbleVertical: Dp = 8.dp,
+) {
     val colors = LocalMaestriColors.current
     val mine = event.kind == LiveKinds.USER_MESSAGE
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
@@ -623,7 +663,7 @@ private fun MessageRow(event: PiEvent) {
                     RoundedCornerShape(14.dp),
                 )
                 .border(1.dp, colors.hairline, RoundedCornerShape(14.dp))
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = bubbleVertical),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -642,7 +682,7 @@ private fun MessageRow(event: PiEvent) {
             Spacer(Modifier.height(2.dp))
             Text(
                 event.text.orEmpty().ifBlank { "—" },
-                fontSize = 13.5.sp,
+                fontSize = bodySizeSp.sp,
                 color = if (mine) colors.bubbleMineText else MaterialTheme.colorScheme.onSurface,
             )
         }
@@ -650,8 +690,16 @@ private fun MessageRow(event: PiEvent) {
 }
 
 @Composable
-private fun ToolRow(call: PiEvent, result: PiEvent?) {
+private fun ToolRow(
+    call: PiEvent,
+    result: PiEvent?,
+    bubbleVertical: Dp = 8.dp,
+    onOpenTerminal: (() -> Unit)?,
+) {
     val colors = LocalMaestriColors.current
+    // The expand path below survives only for the null callback — the retired
+    // standalone LiveScreen route. The chat face always passes a callback, so its
+    // rows navigate instead of expanding and the preview stays static.
     var expanded by remember(call.entryId, call.seq) { mutableStateOf(false) }
     val info = call.tool
     val name = info?.name?.takeIf { it.isNotBlank() } ?: "tool"
@@ -663,13 +711,30 @@ private fun ToolRow(call: PiEvent, result: PiEvent?) {
     }
     val summary = (result?.tool?.summary ?: info?.summary ?: result?.text ?: call.text).orEmpty()
         .take(140).ifBlank { status.ifBlank { "running" } }
+    // Press state per the design: scale .97 with a 2px accent ring.
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) Motion.PressScale else 1f,
+        animationSpec = tween(Motion.Fast, easing = Motion.Ease),
+        label = "tool-press",
+    )
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .warmRing(colors.hairline, radius = MaestriRadii.Card)
+            .scale(scale)
+            .warmRing(
+                if (pressed) colors.accent else colors.hairline,
+                radius = MaestriRadii.Card,
+                ringWidth = if (pressed) 2.dp else 1.dp,
+            )
             .background(colors.canvasSurface, cardShape())
-            .clickable { expanded = !expanded }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .clickable(
+                interactionSource = source,
+                indication = null,
+                onClick = { onOpenTerminal?.invoke() ?: run { expanded = !expanded } },
+            )
+            .padding(horizontal = 12.dp, vertical = bubbleVertical),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(7.dp).background(dot, CircleShape))
@@ -685,18 +750,16 @@ private fun ToolRow(call: PiEvent, result: PiEvent?) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(status.ifBlank { "running" }, style = monoHud(10, color = colors.secondaryLabel))
-            Spacer(Modifier.width(6.dp))
-            Text(if (expanded) "▾" else "▸", fontSize = 12.sp, color = colors.secondaryLabel)
         }
         Spacer(Modifier.height(2.dp))
         Text(
             summary,
             fontSize = 12.5.sp,
             color = colors.secondaryLabel,
-            maxLines = if (expanded) Int.MAX_VALUE else 1,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (expanded) {
+        if (expanded && onOpenTerminal == null) {
             Spacer(Modifier.height(6.dp))
             val args = info?.argsPreview?.take(500).orEmpty()
             val res = (result?.tool?.resultPreview ?: info?.resultPreview ?: result?.text).orEmpty().take(500)

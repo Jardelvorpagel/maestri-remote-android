@@ -85,6 +85,8 @@ import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.TerminalThemes
 import app.maestri.ui.Style.pillShape
+import app.maestri.ui.settings.ChatDensityStore
+import app.maestri.ui.settings.ChatTextSizeStore
 import app.maestri.ui.settings.LocalAppLocked
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.maestri.live.DataStorePiRelayStore
@@ -155,6 +157,12 @@ fun TerminalScreen(
         factory = LiveViewModelFactory(relayStore),
     )
     val fontSp by fontStore.sizeSp.collectAsState()
+    // Chat-face display settings: own text steps (12/13/15) and density, same
+    // DataStore idiom as the terminal settings above.
+    val chatTextSizeStore = remember(ctx) { ChatTextSizeStore(ctx.applicationContext) }
+    val chatDensityStore = remember(ctx) { ChatDensityStore(ctx.applicationContext) }
+    val chatTextSize by chatTextSizeStore.sizeSp.collectAsState()
+    val chatCompact by chatDensityStore.compact.collectAsState()
     var showDisplayConfig by remember { mutableStateOf(false) }
     // Scroll speed: how many rows the content moves per row of finger travel. A phone
     // flick carries further than the finger, so 1x (the terminal-native feel) reads as
@@ -482,6 +490,21 @@ fun TerminalScreen(
                 }
             }
         }
+        // Scroll speed is its own row with its own label on BOTH faces: shared
+        // store, never merged into density, never dropped.
+        val scrollSpeedRow: @Composable () -> Unit = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Scroll speed · ${scrollSpeed}×", fontSize = 12.sp, modifier = Modifier.weight(1f))
+                TextButton(
+                    enabled = scrollSpeed > TerminalScrollSpeedStore.MIN_X,
+                    onClick = { speedStore.setSpeed(scrollSpeed - 1) },
+                ) { Text("−") }
+                TextButton(
+                    enabled = scrollSpeed < TerminalScrollSpeedStore.MAX_X,
+                    onClick = { speedStore.setSpeed(scrollSpeed + 1) },
+                ) { Text("+") }
+            }
+        }
         if (!chromeTight && !fullscreen) {
             Row(
                 Modifier.fillMaxWidth().height(50.dp),
@@ -509,30 +532,51 @@ fun TerminalScreen(
                         containerColor = TerminalThemes.TokyoNight.panel,
                     ) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Font size · $fontSp", fontSize = 12.sp)
-                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                val sizes = listOf(TerminalFontStore.MIN_SP, 13, TerminalFontStore.MAX_SP).distinct()
-                                sizes.forEachIndexed { index, size ->
-                                    SegmentedButton(
-                                        selected = fontSp == size,
-                                        onClick = {
-                                            fontStore.setSize(size)
-                                            showDisplayConfig = false
-                                        },
-                                        shape = SegmentedButtonDefaults.itemShape(index, sizes.size),
-                                    ) { Text("$size") }
+                            if (inChat) {
+                                Text("Text size · $chatTextSize", fontSize = 12.sp)
+                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                    ChatTextSizeStore.STEPS.forEachIndexed { index, size ->
+                                        SegmentedButton(
+                                            selected = chatTextSize == size,
+                                            onClick = {
+                                                chatTextSizeStore.setSize(size)
+                                                showDisplayConfig = false
+                                            },
+                                            shape = SegmentedButtonDefaults.itemShape(index, ChatTextSizeStore.STEPS.size),
+                                        ) { Text("$size") }
+                                    }
                                 }
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Scroll speed · ${scrollSpeed}×", fontSize = 12.sp, modifier = Modifier.weight(1f))
-                                TextButton(
-                                    enabled = scrollSpeed > TerminalScrollSpeedStore.MIN_X,
-                                    onClick = { speedStore.setSpeed(scrollSpeed - 1) },
-                                ) { Text("−") }
-                                TextButton(
-                                    enabled = scrollSpeed < TerminalScrollSpeedStore.MAX_X,
-                                    onClick = { speedStore.setSpeed(scrollSpeed + 1) },
-                                ) { Text("+") }
+                                Text("Density", fontSize = 12.sp)
+                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                    val densities = listOf("Roomy" to false, "Compact" to true)
+                                    densities.forEachIndexed { index, (label, compact) ->
+                                        SegmentedButton(
+                                            selected = chatCompact == compact,
+                                            onClick = {
+                                                chatDensityStore.setCompact(compact)
+                                                showDisplayConfig = false
+                                            },
+                                            shape = SegmentedButtonDefaults.itemShape(index, densities.size),
+                                        ) { Text(label) }
+                                    }
+                                }
+                                scrollSpeedRow()
+                            } else {
+                                Text("Font size · $fontSp", fontSize = 12.sp)
+                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                    val sizes = listOf(TerminalFontStore.MIN_SP, 13, TerminalFontStore.MAX_SP).distinct()
+                                    sizes.forEachIndexed { index, size ->
+                                        SegmentedButton(
+                                            selected = fontSp == size,
+                                            onClick = {
+                                                fontStore.setSize(size)
+                                                showDisplayConfig = false
+                                            },
+                                            shape = SegmentedButtonDefaults.itemShape(index, sizes.size),
+                                        ) { Text("$size") }
+                                    }
+                                }
+                                scrollSpeedRow()
                             }
                         }
                     }
@@ -559,7 +603,11 @@ fun TerminalScreen(
                     "${liveStaged.size} file${if (liveStaged.size == 1) "" else "s"}"
                 else null
             val liveOnAttach = rememberLiveAttachHandler(liveVm)
-            LiveFeedContent(liveVm, showComposer = false)
+            LiveFeedContent(
+                liveVm,
+                showComposer = false,
+                onOpenTerminal = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },
+            )
             if (!fullscreen) {
                 TerminalComposer(
                     placeholder = "Message Pi…",
