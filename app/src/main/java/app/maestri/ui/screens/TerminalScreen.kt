@@ -1,7 +1,9 @@
 package app.maestri.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,10 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
@@ -56,6 +55,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -65,8 +65,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathBuilder
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -107,6 +117,69 @@ import app.maestri.ui.settings.TerminalScrollSpeedStore
 import app.maestri.ui.settings.TerminalViewModeStore
 import app.maestri.wire.ChatApi
 import app.maestri.ui.Style.BackLabel
+
+private val BackShape = RoundedCornerShape(12.dp)
+private val BackTouchShape = RoundedCornerShape(16.dp)
+private val SubBarShape = RoundedCornerShape(12.dp)
+
+/** design v2 Display settings glyph: two rails, two knobs (24x24, stroke 2). */
+private fun PathBuilder.knob(cx: Float, cy: Float, r: Float) {
+    moveTo(cx - r, cy)
+    arcToRelative(r, r, 0f, true, true, 2 * r, 0f)
+    arcToRelative(r, r, 0f, true, true, -2 * r, 0f)
+}
+
+private val SlidersIcon: ImageVector by lazy {
+    ImageVector.Builder("sliders", 24.dp, 24.dp, 24f, 24f).apply {
+        path(
+            fillAlpha = 0f,
+            stroke = androidx.compose.ui.graphics.SolidColor(Color.Black),
+            strokeLineWidth = 2f,
+            strokeLineCap = StrokeCap.Round,
+            strokeLineJoin = StrokeJoin.Round,
+        ) {
+            moveTo(4f, 7f)
+            horizontalLineTo(13f)
+            moveTo(17f, 7f)
+            horizontalLineTo(20f)
+            moveTo(4f, 17f)
+            horizontalLineTo(7f)
+            moveTo(11f, 17f)
+            horizontalLineTo(20f)
+            knob(15f, 7f, 2f)
+            knob(9f, 17f, 2f)
+        }
+    }.build()
+}
+
+private val CornersExpand: ImageVector by lazy {
+    ImageVector.Builder("corners-expand", 24.dp, 24.dp, 24f, 24f).apply {
+        path(
+            fillAlpha = 0f,
+            stroke = androidx.compose.ui.graphics.SolidColor(Color.Black),
+            strokeLineWidth = 2f,
+            strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
+            strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round,
+        ) {
+            moveTo(9f, 4f)
+            horizontalLineTo(5f)
+            arcTo(1f, 1f, 0f, false, false, 4f, 5f)
+            verticalLineTo(9f)
+            moveTo(15f, 4f)
+            horizontalLineTo(19f)
+            arcTo(1f, 1f, 0f, false, true, 20f, 5f)
+            verticalLineTo(9f)
+            moveTo(9f, 20f)
+            horizontalLineTo(5f)
+            arcTo(1f, 1f, 0f, false, true, 4f, 19f)
+            verticalLineTo(15f)
+            moveTo(15f, 20f)
+            horizontalLineTo(19f)
+            arcTo(1f, 1f, 0f, false, false, 20f, 19f)
+            verticalLineTo(15f)
+        }
+    }.build()
+}
 
 /**
  * Terminal detail: the terminal face IS the xterm live stream (key rail + wide input
@@ -154,7 +227,7 @@ fun TerminalScreen(
     val relayStore = remember(ctx) { DataStorePiRelayStore(ctx.applicationContext) }
     val liveVm: LiveViewModel = viewModel(
         key = "live-$terminalId",
-        factory = LiveViewModelFactory(relayStore),
+        factory = LiveViewModelFactory(relayStore, terminalId),
     )
     val fontSp by fontStore.sizeSp.collectAsState()
     // Chat-face display settings: own text steps (12/13/15) and density, same
@@ -261,7 +334,7 @@ fun TerminalScreen(
             }
             markStaged(f.key) { it.copy(uploading = true) }
             val outcome = runCatching {
-                uploader.upload(relayUrl, relayToken, ptySafe(f.name), f.bytes)
+                uploader.upload(relayUrl, relayToken, ptySafe(f.name), f.bytes, terminalId)
             }
             val path = outcome.getOrNull()?.path?.takeIf { it.isSafeHostPath() }
             markStaged(f.key) { it.copy(uploading = false, uploadedPath = path) }
@@ -384,15 +457,29 @@ fun TerminalScreen(
     val imeUp = WindowInsets.isImeVisible
     val streamState by session.terminalStream.state.collectAsState()
     var chipOpen by remember { mutableStateOf(false) }
+    var chipManualClose by remember { mutableStateOf(false) }
     val inputFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val configuration = LocalConfiguration.current
-    LaunchedEffect(terminalId, inChat, imeUp, streamState, configuration.orientation, configuration.screenWidthDp, locked) {
+    LaunchedEffect(terminalId, inChat, configuration.orientation, configuration.screenWidthDp, locked) {
         chipOpen = false
+        chipManualClose = false
         showDisplayConfig = false
     }
     BackHandler(enabled = chipOpen) {
         chipOpen = false
+        chipManualClose = true
+    }
+    // System back takes the same door as the topbar Voltar — including its fallback
+    // when this route was restored as the stack root (a bare pop would be a no-op).
+    BackHandler(enabled = !chipOpen && !locked) { onBack() }
+    LaunchedEffect(imeUp, inChat, locked) {
+        if (imeUp) {
+            chipOpen = false
+            chipManualClose = false
+        } else if (!inChat && !locked && !chipManualClose) {
+            chipOpen = true
+        }
     }
     // Typing needs the grid, not the chrome: the IME leaves ~140dp here, so the header
     // steps aside while the keyboard is up (system back closes the IME first).
@@ -411,12 +498,49 @@ fun TerminalScreen(
         // compact path re-flows chips + controls onto a second, right-aligned row and
         // gives the Enter-Chat pill a measured minimum width so it renders on one line.
         val backBtn: @Composable () -> Unit = {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            // Same shape as the composer's AttachButton on purpose: clip -> clickable ->
+            // semantics{desc, role} is the one form that uiautomator merges into a single
+            // android.widget.Button carrying ACTION_CLICK. The outer clip is inert
+            // (r=16dp on a 48dp box) and must never tighten to the 44dp box's own
+            // 12dp corners: a CircleShape here sliced all four of them into a blob.
+            Box(
+                Modifier.size(48.dp)
+                    .clip(BackTouchShape)
+                    .clickable(enabled = true) { onBack() }
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Voltar"
+                        role = Role.Button
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier.size(44.dp).clip(BackShape)
+                        .background(Color(0xFF232220), BackShape)
+                        .border(1.dp, Color(0x24B0AEA5), BackShape)
+                        // nothing of the paint box may reach the a11y tree: any child
+                        // semantics here split the node into View + orphan role Button.
+                        .clearAndSetSemantics {},
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // Drawn, not an Icon: a semantics-emitting child splits the a11y
+                    // node (clickable View + orphan role Button) instead of merging.
+                    Canvas(Modifier.size(18.dp)) {
+                        val p = Path().apply {
+                            moveTo(size.width * 0.625f, size.height * 0.25f)
+                            lineTo(size.width * 0.375f, size.height * 0.5f)
+                            lineTo(size.width * 0.625f, size.height * 0.75f)
+                        }
+                        drawPath(
+                            p,
+                            Color(0xFFD97B54),
+                            style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        )
+                    }
+                }
             }
         }
         val titleBlock: @Composable RowScope.() -> Unit = {
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier
@@ -426,7 +550,7 @@ fun TerminalScreen(
                     Spacer(Modifier.width(6.dp))
                     Text(
                         terminalName,
-                        fontSize = 17.sp,
+                        fontSize = 21.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -469,25 +593,57 @@ fun TerminalScreen(
             Text(
                 (card?.floorName?.takeIf { it.isNotBlank() } ?: wsId.take(8)),
                 fontFamily = MaestriType.Mono,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.5.sp,
+                color = Color(0xFFFAF9F5),
                 maxLines = 1,
                 modifier = Modifier
-                    .background(LocalMaestriColors.current.canvasSurface, pillShape())
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                    .background(Color(0xFF2B2A26), pillShape())
+                    .padding(horizontal = 15.dp, vertical = 8.dp),
             )
         }
+        // design v2 .tchip-collapse: 44dp, r-sm (12dp), --dim glyph, no box until pressed.
         val fullscreenBtn: @Composable () -> Unit = {
             if (canStream) {
-                IconButton(onClick = { fullscreen = !fullscreen }) {
-                    Text(
-                        if (fullscreen) "\u2921" else "\u2922",
-                        fontSize = 18.sp,
-                        modifier = Modifier.semantics {
+                Box(
+                    Modifier.size(44.dp)
+                        .clip(SubBarShape)
+                        .clickable(enabled = true) { fullscreen = !fullscreen }
+                        .semantics(mergeDescendants = true) {
                             contentDescription = if (fullscreen) "Exit fullscreen" else "Fullscreen"
+                            role = Role.Button
                         },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        CornersExpand,
+                        contentDescription = null,
+                        tint = Color(0xFFB0AEA5),
+                        modifier = Modifier.size(17.dp),
                     )
                 }
+            }
+        }
+        // design v2 .tconf-btn: 44dp box on --card-2 with the --ring inset, --accent-hi
+        // sliders glyph — never the Material "Tune" glyph (white bars, no box).
+        val displaySettingsBtn: @Composable () -> Unit = {
+            Box(
+                Modifier.size(44.dp)
+                    .clip(SubBarShape)
+                    .background(Color(0xFF232220), SubBarShape)
+                    .border(1.dp, Color(0x24B0AEA5), SubBarShape)
+                    .clickable(enabled = true) { showDisplayConfig = !showDisplayConfig }
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Display settings"
+                        role = Role.Button
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    SlidersIcon,
+                    contentDescription = null,
+                    tint = Color(0xFFD97B54),
+                    modifier = Modifier.size(18.dp),
+                )
             }
         }
         // Scroll speed is its own row with its own label on BOTH faces: shared
@@ -514,17 +670,18 @@ fun TerminalScreen(
                 titleBlock()
                 connChip()
             }
+            // design v2 .tchips: padding 4px 14px 12px 14px, gap 14px, and only
+            // .tconf gets margin-left:auto — [Térreo · Collapse] left, settings right.
             Row(
-                Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp),
+                Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 floorChip()
-                Spacer(Modifier.weight(1f))
                 fullscreenBtn()
+                Spacer(Modifier.weight(1f))
                 Box {
-                    IconButton(onClick = { showDisplayConfig = !showDisplayConfig }) {
-                        Icon(Icons.Filled.Tune, contentDescription = "Display settings")
-                    }
+                    displaySettingsBtn()
                     DropdownMenu(
                         expanded = showDisplayConfig,
                         onDismissRequest = { showDisplayConfig = false },
@@ -698,7 +855,10 @@ fun TerminalScreen(
                     expanded = chipOpen,
                     imeVisible = imeUp,
                     enabled = streamState == SocketState.OPEN && !locked,
-                    onToggle = { chipOpen = !chipOpen },
+                    onToggle = {
+                        if (chipOpen) chipManualClose = true
+                        chipOpen = !chipOpen
+                    },
                     onKey = { key ->
                         chipOpen = false
                         session.terminalStream.sendInput(key.bytes.toString(Charsets.UTF_8))

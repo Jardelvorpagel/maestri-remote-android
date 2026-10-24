@@ -194,6 +194,7 @@ fun ColumnScope.LiveFeedContent(
     val composeState by vm.composeState.collectAsState()
     val decisionPrompt by vm.decisionPrompt.collectAsState()
     val autoRetry by vm.autoRetry.collectAsState()
+    val waitingForSession by vm.waitingForSession.collectAsState()
     val relayError = relayState as? RelayState.Error
     // Chat display settings (same DataStore idiom as the terminal settings): text
     // steps 12/13/15 drive the message body; density drives list spacing and
@@ -306,6 +307,11 @@ fun ColumnScope.LiveFeedContent(
                 url.isBlank() -> LiveEmpty(
                     title = "No relay configured",
                     body = "Set the relay URL above — nothing connects until then. Token is optional, only for relays that require one.",
+                )
+                allRows.isEmpty() && waitingForSession && relayState is RelayState.Open -> LiveEmpty(
+                    title = "This terminal's session is not on the relay yet",
+                    body = "The relay is open for this terminal, but no Pi session has declared it. " +
+                        "It binds as soon as that session starts (or reconnect once it has).",
                 )
                 allRows.isEmpty() && relayState is RelayState.Open -> LiveEmpty(
                     title = "Waiting for events…",

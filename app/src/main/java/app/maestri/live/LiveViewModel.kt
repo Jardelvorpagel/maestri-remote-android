@@ -111,6 +111,12 @@ class LiveViewModel(
     private val store: PiRelayStore,
     private val clientFactory: (url: String, token: String) -> PiRelayClient = { url, token -> PiRelayClient(url, token) },
     private val scope: CoroutineScope? = null,
+    /**
+     * This screen's terminal id, sent as `?terminal=` so the relay serves THIS
+     * terminal's pi session instead of whatever single session it booted with.
+     * Blank keeps the legacy global stream.
+     */
+    private val terminalId: String = "",
 ) : ViewModel() {
 
     val url: StateFlow<String> = store.url
@@ -166,6 +172,10 @@ class LiveViewModel(
     private val _autoRetry = MutableStateFlow(false)
     val autoRetry: StateFlow<Boolean> = _autoRetry
 
+    private val _waitingForSession = MutableStateFlow(false)
+    /** Relay open, but no pi session bound to this terminal yet. */
+    val waitingForSession: StateFlow<Boolean> = _waitingForSession
+
     init {
         refreshComposeState()
     }
@@ -201,7 +211,7 @@ class LiveViewModel(
             disconnect()
         }
         _notice.value = null
-        val made = clientFactory(urlValue, store.token.value)
+        val made = clientFactory(withTerminalQuery(urlValue, terminalId), store.token.value)
         client = made
         _relayState.value = RelayState.Connecting
         collectJob = (scope ?: viewModelScope).launch {
@@ -215,6 +225,7 @@ class LiveViewModel(
             launch { made.approvals.collect { _approvals.value = it } }
             launch { made.decisionPrompt.collect { _decisionPrompt.value = it } }
             launch { made.autoRetry.collect { _autoRetry.value = it } }
+            launch { made.waitingForSession.collect { _waitingForSession.value = it } }
             launch {
                 made.sendOutcomes.collect { map ->
                     map.values.forEach { outcome ->
@@ -437,7 +448,7 @@ class LiveViewModel(
                 continue
             }
             markUploading(f.key, true)
-            val outcome = runCatching { uploader.upload(relayUrl, relayToken, f.name, f.bytes) }
+            val outcome = runCatching { uploader.upload(relayUrl, relayToken, f.name, f.bytes, terminalId) }
             markUploading(f.key, false)
             val attachment = outcome.getOrNull()
             if (outcome.isFailure || attachment == null || attachment.id.isBlank()) {
@@ -490,10 +501,11 @@ class LiveViewModel(
 
 class LiveViewModelFactory(
     private val store: PiRelayStore,
+    private val terminalId: String = "",
     private val clientFactory: (url: String, token: String) -> PiRelayClient = { url, token -> PiRelayClient(url, token) },
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return LiveViewModel(store, clientFactory) as T
+        return LiveViewModel(store, clientFactory, null, terminalId) as T
     }
 }

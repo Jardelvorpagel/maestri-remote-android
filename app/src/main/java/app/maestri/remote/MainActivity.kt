@@ -392,12 +392,27 @@ fun Root(session: WireSession, appLock: AppLockStore, updates: UpdateController)
                     val wsId = entry.arguments?.getString("wsId") ?: ""
                     val startView = entry.arguments?.getString("view")
                     LaunchedEffect(terminalId) { lastTerm = Triple(wsId, terminalId, terminalName) }
+                    // NavRestoreStore can cold-start straight ON this route, so the
+                    // back stack has nothing to pop and a bare popBackStack() is a
+                    // silent no-op — the button looks dead. Fall back to the
+                    // workspace canvas, with the workspaces list underneath it.
+                    val backFromTerminal: () -> Unit = {
+                        if (!nav.popBackStack()) {
+                            nav.navigate("workspaces") {
+                                popUpTo(nav.graph.id) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                            lastWs?.takeIf { it.first == wsId }?.second?.let {
+                                nav.navigate("canvas/${enc(wsId)}/${enc(it)}")
+                            }
+                        }
+                    }
                     TerminalScreen(
                         session = session,
                         terminalId = terminalId,
                         terminalName = terminalName,
                         wsId = wsId,
-                        onBack = { nav.popBackStack() },
+                        onBack = backFromTerminal,
                         startView = startView,
                         onEnterChat = { chatTerminalId, chatTerminalName ->
                             nav.navigate(ChatNav.route(wsId, chatTerminalId, chatTerminalName))

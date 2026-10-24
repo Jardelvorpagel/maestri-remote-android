@@ -25,8 +25,9 @@ class PiRelayUpload(
         token: String,
         filename: String,
         bytes: ByteArray,
+        terminalId: String = "",
     ): Attachment = withContext(Dispatchers.IO) {
-        val url = uploadUrlFor(relayUrl)
+        val url = uploadUrlFor(relayUrl, terminalId)
         relayLog("PiRelayUpload", "uploading name=$filename bytes=${bytes.size} url=$url")
         val response = try {
             okHttp.newCall(uploadRequest(url, token, filename, bytes)).execute()

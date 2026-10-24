@@ -82,6 +82,14 @@ class PiRelayClient(
     val autoRetry: StateFlow<Boolean> = _autoRetry.asStateFlow()
 
     /**
+     * The relay has this terminal's socket open but no pi session bound to it yet
+     * (the terminal's session has not declared itself). Distinct from Error: the
+     * transport is fine, there is simply nothing to serve, and never another's chat.
+     */
+    private val _waitingForSession = MutableStateFlow(false)
+    val waitingForSession: StateFlow<Boolean> = _waitingForSession.asStateFlow()
+
+    /**
      * Pi's own decision box, mirrored: the latest open prompt, null when closed
      * or never seen. The phone never answers these — no resolver in the API.
      */
@@ -98,6 +106,7 @@ class PiRelayClient(
     private var closedByUs = false
     private var queryFallback = false
     private var pendingResume: Long? = null
+    private var boundSessionId: String? = null
     private var helloSeen = false
     private val ackJobs = mutableMapOf<String, Job>()
 
@@ -126,6 +135,7 @@ class PiRelayClient(
         }
         _commandsSupported.value = null
         _decisionPrompt.value = null
+        _waitingForSession.value = false
         synchronized(lock) {
             socket?.close(1000, null)
             socket = null
@@ -281,6 +291,15 @@ class PiRelayClient(
         when (frame) {
             is RelayFrame.Hello -> {
                 synchronized(lock) { helloSeen = true }
+                // The relay re-bound this socket to another session (the terminal
+                // now runs a different pi session): the old transcript must go, and
+                // a resume from the old seq would be meaningless in the new one.
+                _waitingForSession.value = frame.waiting == "terminal"
+                if (frame.sessionId.isNotBlank() && frame.sessionId != boundSessionId) {
+                    boundSessionId = frame.sessionId
+                    synchronized(lock) { pendingResume = null }
+                    _events.value = emptyList()
+                }
                 frame.commands?.let { _commandsSupported.value = it }
                 relayLog(RELAY_LOG_TAG, "hello session=${frame.sessionId.take(8)} commands=${frame.commands}")
             }

@@ -171,6 +171,20 @@ class PiRelayCommandsTest {
     }
 
     @Test
+    fun terminalQuerySelectsTheSessionAndNothingElse() {
+        // no terminal -> the legacy global stream, untouched
+        assertEquals("ws://h:1/stream", withTerminalQuery("ws://h:1/stream", ""))
+        // existing query (e.g. a token fallback) keeps its separator
+        assertEquals("ws://h:1/stream?token=x&terminal=T-1", withTerminalQuery("ws://h:1/stream?token=x", "T-1"))
+        assertEquals("ws://h:1/stream?terminal=T-1", withTerminalQuery("ws://h:1/stream", "T-1"))
+        // ids never reach the query unencoded
+        assertEquals("ws://h:1/stream?terminal=A%26B", withTerminalQuery("ws://h:1/stream", "A&B"))
+        // uploads carry the same selector so the attachment lands in that session
+        assertEquals("http://h:1/upload?terminal=T-1", uploadUrlFor("ws://h:1/stream?token=x", "T-1"))
+        assertEquals("http://h:1/upload", uploadUrlFor("ws://h:1/stream", ""))
+    }
+
+    @Test
     fun uploadRequestAuthGate() {
         val anon = uploadRequest("http://h:1/upload", "", "f.txt", "data".toByteArray())
         assertNull(anon.header("Authorization"))

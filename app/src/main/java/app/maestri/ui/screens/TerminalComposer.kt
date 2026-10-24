@@ -1,7 +1,10 @@
 package app.maestri.ui.screens
 
 import android.net.Uri
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,7 +49,8 @@ import app.maestri.ui.Style.pillShape
 import app.maestri.ui.Style.softHalo
 
 private val ComposerFill = Color(0xFF10111A)
-private const val ComposerFillAlpha = 0.97f
+private const val ComposerFillAlpha = 0.96f
+private const val ComposerTrackAlpha = 0.88f
 private val ComposerRing = Color(0xFFA9B1D6).copy(alpha = 0.14f)
 private val ComposerIcon = Color(0xFFC3C7D6)
 private val ComposerMuted = Color(0xFF8B90A8)
@@ -120,13 +124,13 @@ fun TerminalComposer(
         Spacer(Modifier.height(8.dp))
         Row(
             Modifier
-                .background(ComposerFill.copy(alpha = ComposerFillAlpha), pillShape())
+                .background(ComposerFill.copy(alpha = ComposerTrackAlpha), pillShape())
                 .border(1.dp, ComposerRing, pillShape())
                 .padding(3.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            SegmentButton("Chat", chatSelected, onChat)
             SegmentButton("Terminal", !chatSelected, onRun)
+            SegmentButton("Chat", chatSelected, onChat)
         }
     }
 }
@@ -136,7 +140,7 @@ private fun AttachButton(enabled: Boolean, onPicked: (List<Uri>) -> Unit) {
     val context = LocalContext.current
     Box(
         Modifier
-            .size(34.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .clickable(enabled = enabled) {
                 val host = context as? HostRequests ?: return@clickable
@@ -148,7 +152,30 @@ private fun AttachButton(enabled: Boolean, onPicked: (List<Uri>) -> Unit) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text("+", fontSize = 19.sp, color = ComposerIcon)
+        Box(
+            Modifier.size(34.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.size(17.dp)) {
+                val cx = size.width / 2
+                val cy = size.height / 2
+                val half = size.width / 2
+                drawLine(
+                    ComposerIcon,
+                    Offset(cx - half, cy),
+                    Offset(cx + half, cy),
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    ComposerIcon,
+                    Offset(cx, cy - half),
+                    Offset(cx, cy + half),
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
     }
 }
 

@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -70,7 +69,6 @@ import androidx.compose.ui.unit.sp
 import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.TerminalThemes.TokyoNight
-import app.maestri.ui.Style.pillShape
 
 data class TerminalChipStatus(
     val label: String,
@@ -244,10 +242,10 @@ fun TerminalChip(
                 }
             }
 
-            val pill = pillShape()
+            val pill = CircleShape
             Row(
                 modifier = Modifier
-                    .defaultMinSize(minHeight = 48.dp)
+                    .size(48.dp)
                     .shadow(8.dp, pill)
                     .terminalFocusRing(pill)
                     .clip(pill)
@@ -263,10 +261,9 @@ fun TerminalChip(
                         role = Role.Button,
                         onClickLabel = "Open quick keys",
                         onClick = onToggle,
-                    )
-                    .padding(horizontal = 16.dp),
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterHorizontally),
             ) {
                 Box(
                     Modifier

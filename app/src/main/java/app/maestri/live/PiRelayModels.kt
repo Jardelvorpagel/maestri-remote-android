@@ -46,6 +46,8 @@ sealed interface RelayFrame {
         val replayFrom: Long?,
         val replayTo: Long?,
         val commands: Boolean? = null,
+        /** Set when the relay has the socket open but no session bound to this terminal yet. */
+        val waiting: String = "",
     ) : RelayFrame
 
     data class Event(val event: PiEvent) : RelayFrame
@@ -231,6 +233,7 @@ object PiRelayParser {
                 replayFrom = asLong(root["replayFrom"]),
                 replayTo = asLong(root["replayTo"]),
                 commands = asCommandFlag(root["commands"]) ?: asCommandFlag(root["commandsSupported"]),
+                waiting = root["waiting"] as? String ?: "",
             )
             "approval_request" -> parseApproval(root)?.let(RelayFrame::ApprovalRequest)
             "approval_resolved" -> parseApproval(root)?.let(RelayFrame::ApprovalResolved)
@@ -594,6 +597,22 @@ fun toolDecisionFrame(callId: String, decision: String, remember: String): Strin
     "{\"kind\":\"tool_decision\",\"callId\":\"${jsonEscape(callId)}\"," +
         "\"decision\":\"${jsonEscape(decision)}\",\"remember\":\"${jsonEscape(remember)}\"}"
 
+/**
+ * Terminal-scoped stream selector: `/stream?terminal=<id>` names the terminal whose
+ * Pi session this socket must serve. The relay answers with that terminal's own
+ * transcript; blank keeps the legacy global (boot-session) behavior.
+ */
+fun withTerminalQuery(url: String, terminalId: String): String {
+    if (terminalId.isBlank()) return url
+    val sep = if (url.contains("?")) "&" else "?"
+    val encoded = try {
+        java.net.URLEncoder.encode(terminalId, "UTF-8")
+    } catch (_: Exception) {
+        terminalId
+    }
+    return url + sep + "terminal=" + encoded
+}
+
 /** `ws(s)://host:port/<path>` → `http(s)://host:port/upload`, query stripped. */
 fun uploadUrlFor(relayUrl: String): String {
     var t = relayUrl.trim()
@@ -608,3 +627,7 @@ fun uploadUrlFor(relayUrl: String): String {
     val end = listOf(pathAt, queryAt).filter { it >= 0 }.minOrNull() ?: t.length
     return t.substring(0, end) + "/upload"
 }
+
+/** Upload keeps the terminal selector so the attachment lands in that session's chat. */
+fun uploadUrlFor(relayUrl: String, terminalId: String): String =
+    withTerminalQuery(uploadUrlFor(relayUrl), terminalId)
