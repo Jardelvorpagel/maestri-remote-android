@@ -40,16 +40,26 @@ fun isNewer(publishedVersionCode: Int, installedVersionCode: Int): Boolean =
  * the public internet — then the public releases URL. [pairedHost] is the host the app is
  * paired with; blank means no tailnet candidate.
  */
-fun manifestUrls(githubUrl: String, pairedHost: String?): List<String> {
-    val host = pairedHost?.trim()?.takeIf { it.isNotEmpty() }
-    return buildList {
-        host?.let { add("http://$it:$TAILNET_RELAY_PORT/release/latest.json") }
-        add(githubUrl)
-    }
+fun manifestUrls(
+    githubUrl: String,
+    pairedHost: String?,
+    tailnetHost: String? = TAILNET_HOST,
+): List<String> {
+    val hosts = listOfNotNull(pairedHost, tailnetHost)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+    return hosts.map { "http://$it:$TAILNET_RELAY_PORT/release/latest.json" } + githubUrl
 }
 
-/** The relay runs on this port on the paired host (see pi-relay's /release routes). */
+/** The relay runs on this port on the host (see pi-relay's /release routes). */
 const val TAILNET_RELAY_PORT = 7487
+
+/**
+ * The Mac's own Tailscale address: the one host a device paired over a LAN still reaches
+ * once it leaves the house, and the only cleartext exception the app ships with.
+ */
+const val TAILNET_HOST = "100.95.36.90"
 
 /** The manifest digest and the digest of the downloaded bytes must be the same one. */
 fun digestMatches(expected: String, actual: String): Boolean =

@@ -31,8 +31,22 @@ class UpdateClientTest {
     }
 
     @Test
-    fun withoutAPairedHostOnlyThePublicUrlRemains() {
-        assertEquals(listOf(UpdateClient.LATEST_URL), manifestUrls(UpdateClient.LATEST_URL, null))
-        assertEquals(listOf(UpdateClient.LATEST_URL), manifestUrls(UpdateClient.LATEST_URL, "   "))
+    fun aLanPairedDeviceStillGetsTheTailnetCandidate() {
+        val urls = manifestUrls(UpdateClient.LATEST_URL, "192.168.1.10")
+        assertEquals(
+            listOf(
+                "http://192.168.1.10:7487/release/latest.json",
+                "http://100.95.36.90:7487/release/latest.json",
+                UpdateClient.LATEST_URL,
+            ),
+            urls,
+        )
+    }
+
+    @Test
+    fun withoutAHostOnlyThePublicUrlRemains() {
+        val urls = manifestUrls(UpdateClient.LATEST_URL, "  ", tailnetHost = null)
+        assertEquals(listOf(UpdateClient.LATEST_URL), urls)
+        assertEquals(listOf(UpdateClient.LATEST_URL), manifestUrls(UpdateClient.LATEST_URL, null, null))
     }
 }
