@@ -34,6 +34,23 @@ data class ReleaseInfo(
 fun isNewer(publishedVersionCode: Int, installedVersionCode: Int): Boolean =
     publishedVersionCode > installedVersionCode
 
+/**
+ * Where to look for the manifest, in order: the relay on the user's own tailnet first —
+ * a device on Tailscale reaches its paired host whether or not it has a working route to
+ * the public internet — then the public releases URL. [pairedHost] is the host the app is
+ * paired with; blank means no tailnet candidate.
+ */
+fun manifestUrls(githubUrl: String, pairedHost: String?): List<String> {
+    val host = pairedHost?.trim()?.takeIf { it.isNotEmpty() }
+    return buildList {
+        host?.let { add("http://$it:$TAILNET_RELAY_PORT/release/latest.json") }
+        add(githubUrl)
+    }
+}
+
+/** The relay runs on this port on the paired host (see pi-relay's /release routes). */
+const val TAILNET_RELAY_PORT = 7487
+
 /** The manifest digest and the digest of the downloaded bytes must be the same one. */
 fun digestMatches(expected: String, actual: String): Boolean =
     actual.trim().equals(expected.trim(), ignoreCase = true)
@@ -51,6 +68,8 @@ class UpdateClient(
         .readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(120, TimeUnit.SECONDS)
         .build(),
+    /** Candidate manifests, evaluated per check so a pairing made later is honored. */
+    private val manifests: () -> List<String> = { listOf(LATEST_URL) },
 ) {
 
     /**
@@ -58,24 +77,31 @@ class UpdateClient(
      * A null is never an error the user sees: the check fails silently.
      */
     suspend fun latest(): ReleaseInfo? = withContext(Dispatchers.IO) {
-        runCatching {
-            client.newCall(Request.Builder().url(LATEST_URL).build()).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val body = resp.body.string()
-                val json = JSONObject(body)
-                ReleaseInfo(
-                    versionCode = json.getInt("versionCode"),
-                    versionName = json.optString("versionName"),
-                    apkUrl = json.getString("apkUrl"),
-                    sha256 = json.getString("sha256"),
-                    size = json.optLong("size"),
-                    publishedAt = json.optString("publishedAt"),
-                    notes = json.optString("notes"),
-                )
-            }
-        }.onFailure { Log.d("QAUpdate", "manifest fetch failed: ${it.javaClass.simpleName}: ${it.message}") }
-            .getOrNull()
+        for (url in manifests().distinct()) {
+            val info = fetch(url)
+            if (info != null) return@withContext info
+        }
+        null
     }
+
+    /** One manifest URL. A failure here is a log line, never a user-facing error. */
+    private suspend fun fetch(url: String): ReleaseInfo? = runCatching {
+        client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+            if (!resp.isSuccessful) return@use null
+            val json = JSONObject(resp.body.string())
+            ReleaseInfo(
+                versionCode = json.getInt("versionCode"),
+                versionName = json.optString("versionName"),
+                apkUrl = json.getString("apkUrl"),
+                sha256 = json.getString("sha256"),
+                size = json.optLong("size"),
+                publishedAt = json.optString("publishedAt"),
+                notes = json.optString("notes"),
+            )
+        }
+    }.onFailure {
+        Log.d("QAUpdate", "manifest fetch failed ($url): ${it.javaClass.simpleName}: ${it.message}")
+    }.getOrNull()
 
     /**
      * Downloads [release] into [target] and checks it against the manifest digest.

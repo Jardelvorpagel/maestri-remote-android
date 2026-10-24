@@ -2,7 +2,9 @@ package app.maestri.update
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UpdateControllerTest {
@@ -27,5 +29,12 @@ class UpdateControllerTest {
         }
         assertEquals(3, calls)
         assertNull(release)
+    }
+
+    @Test
+    fun aForegroundReturnChecksOncePerWindow() {
+        assertTrue(dueForCheck(lastCheckAt = 0L, now = 5_000L, windowMs = 15_000L))
+        assertFalse(dueForCheck(lastCheckAt = 5_000L, now = 10_000L, windowMs = 15_000L))
+        assertTrue(dueForCheck(lastCheckAt = 5_000L, now = 20_000L, windowMs = 15_000L))
     }
 }

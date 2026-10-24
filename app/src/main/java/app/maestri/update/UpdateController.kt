@@ -7,8 +7,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -33,6 +31,13 @@ import java.io.File
  * Runs [block] until it returns a value, up to [attempts] times, waiting [delayMs]
  * between the attempts. A null from the block means "this attempt failed".
  */
+/**
+ * Whether a foreground return should trigger a check: never more than once per
+ * [windowMs], and always when nothing has been checked yet.
+ */
+internal fun dueForCheck(lastCheckAt: Long, now: Long, windowMs: Long): Boolean =
+    lastCheckAt == 0L || now - lastCheckAt >= windowMs
+
 internal suspend fun <T : Any> retrying(
     attempts: Int,
     delayMs: Long,
@@ -69,6 +74,7 @@ class UpdateController(
     private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val main = Handler(Looper.getMainLooper())
     private val started = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val lastCheckAt = java.util.concurrent.atomic.AtomicLong(0L)
 
     /** The newer build found, if any. */
     private val _release = MutableStateFlow<ReleaseInfo?>(null)
@@ -111,12 +117,21 @@ class UpdateController(
         }
     }
 
+    /**
+     * A check for the moment the app comes back to the foreground, debounced so a quick
+     * app switch does not re-hit the network: the watch already covers the steady state.
+     */
+    fun checkSoon(now: Long = System.currentTimeMillis()) {
+        if (!dueForCheck(lastCheckAt.get(), now, RESUME_CHECK_WINDOW_MS)) return
+        lastCheckAt.set(now)
+        check()
+    }
+
     /** One check. Silent on every failure — the app never nags about its own network. */
     fun check() {
-        if (!hasNetwork()) {
-            Log.d(TAG, "check: offline, skipped")
-            return
-        }
+        // No connectivity gate: a VPN network (Tailscale) often reports no INTERNET
+        // capability while the paired host is perfectly reachable, and the request
+        // itself is the only honest test of whether the manifest can be fetched.
         scope.launch {
             val info = latestRelease()
             if (info == null) {
@@ -303,24 +318,13 @@ class UpdateController(
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    // -------------------------------------------------------------- helpers
-
-    private fun hasNetwork(): Boolean {
-        val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            ?: return false
-        return runCatching {
-            val network = cm.activeNetwork ?: return false
-            val caps = cm.getNetworkCapabilities(network) ?: return false
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-        }.getOrDefault(false)
-    }
-
     companion object {
         /** Intent extra: the notification asks the app to install the pending update. */
         const val EXTRA_INSTALL = "maestri.update.install"
 
         const val CHANNEL = "updates"
         const val CHECK_INTERVAL_MS = 30 * 60 * 1000L
+        private const val RESUME_CHECK_WINDOW_MS = 15_000L
         private const val CHECK_ATTEMPTS = 3
         private const val CHECK_RETRY_MS = 1_500L
         private const val TAG = "QAUpdate"

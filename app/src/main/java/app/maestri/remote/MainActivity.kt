@@ -12,6 +12,8 @@ import app.maestri.ui.settings.LocalAppLocked
 import app.maestri.ui.settings.applyRecentsBlanking
 import app.maestri.ui.settings.SettingsScreen
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Alignment
@@ -67,6 +69,7 @@ import app.maestri.ui.notificationsDestination
 import app.maestri.ui.screens.WorkspacesScreen
 import app.maestri.wire.DeepLinkBus
 import app.maestri.wire.session.WireSession
+import app.maestri.update.UpdateBanner
 import app.maestri.update.UpdateController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -258,6 +261,7 @@ fun Root(session: WireSession, appLock: AppLockStore, updates: UpdateController)
             DisposableEffect(Unit) {
                 val observer = LifecycleEventObserver { _, event ->
                     appForeground.value = event == Lifecycle.Event.ON_RESUME
+                    if (event == Lifecycle.Event.ON_RESUME) updates.checkSoon()
                 }
                 (activityContext as? ComponentActivity)?.lifecycle?.addObserver(observer)
                 router.start()
@@ -298,6 +302,7 @@ fun Root(session: WireSession, appLock: AppLockStore, updates: UpdateController)
             // v2 chrome: last-visited workspace/terminal feed the 3-tab spine targets.
             var lastWs by remember { mutableStateOf<Pair<String, String>?>(null) }
             var lastTerm by remember { mutableStateOf<Triple<String, String, String>?>(null) }
+            Box(Modifier.fillMaxSize()) {
             NavHost(navController = nav, startDestination = "workspaces") {
                 noteEditorRoute(session, onBack = { nav.popBackStack() })
                 composable("workspaces") {
@@ -463,6 +468,14 @@ fun Root(session: WireSession, appLock: AppLockStore, updates: UpdateController)
                     navigate = { r -> nav.navigate(r) },
                     pop = { nav.popBackStack() },
                 )
+            }
+            UpdateBanner(
+                updates,
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(start = 12.dp, end = 12.dp, top = 8.dp),
+            )
             }
             }
         }
