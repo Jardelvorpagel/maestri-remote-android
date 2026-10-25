@@ -152,6 +152,16 @@ class LiveViewModel(
     private val _pending = MutableStateFlow<List<LivePendingSend>>(emptyList())
     val pending: StateFlow<List<LivePendingSend>> = _pending
 
+    /**
+     * Attachment labels of sent turns, keyed by message text: a delivered
+     * `user_message` event carries no attachment ids, so the bubble looks the pills
+     * up by text (last 20 turns kept).
+     * shortcut: text correlation — uncaptioned attachments share the "" key;
+     * upgrade when the relay echoes attachmentIds on user_message.
+     */
+    private val _sentAttachments = MutableStateFlow<Map<String, List<LivePendingAttachment>>>(emptyMap())
+    val sentAttachments: StateFlow<Map<String, List<LivePendingAttachment>>> = _sentAttachments
+
     private val _composeState = MutableStateFlow<LiveComposeState>(
         LiveComposeState.Disabled("Connect the relay to send.")
     )
@@ -363,6 +373,10 @@ class LiveViewModel(
     private suspend fun enqueueText(text: String, attachments: List<LivePendingAttachment>) {
         val target = client ?: return
         val id = UUID.randomUUID().toString()
+        if (attachments.isNotEmpty()) {
+            val recent = (_sentAttachments.value - text).entries.toList().takeLast(19)
+            _sentAttachments.value = recent.associate { it.key to it.value } + (text to attachments)
+        }
         _pending.value = _pending.value + LivePendingSend(id, text, attachments, LiveSendStatus.SENDING, createdAtMs = System.currentTimeMillis())
         val sent = runCatching {
             target.sendMessage(text, attachments.mapNotNull { it.attachmentId }, id)

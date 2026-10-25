@@ -73,7 +73,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
-private sealed interface DisplayRow {
+internal sealed interface DisplayRow {
     data class Message(val event: PiEvent) : DisplayRow
     data class Tool(val call: PiEvent, val result: PiEvent?) : DisplayRow
     data class StatusLine(val event: PiEvent) : DisplayRow
@@ -188,6 +188,7 @@ fun ColumnScope.LiveFeedContent(
     val url by vm.url.collectAsState()
     val token by vm.token.collectAsState()
     val pending by vm.pending.collectAsState()
+    val sentAttachments by vm.sentAttachments.collectAsState()
     val decided by vm.decisions.collectAsState()
     val expiredSet by vm.expiredApprovals.collectAsState()
     val approvalsMap by vm.approvals.collectAsState()
@@ -237,6 +238,8 @@ fun ColumnScope.LiveFeedContent(
     val allRows = remember(rows, orphanApprovals, pending) {
         rows + orphanApprovals.map { DisplayRow.Approval(it) } + pending.map { DisplayRow.Pending(it) }
     }
+    // Consecutive tool runs collapse into one folded card (see IntelligentUi.groupFeedRows).
+    val renderItems = remember(allRows) { groupFeedRows(allRows) }
     val listState = rememberLazyListState()
 
     val atBottom by remember {
@@ -253,9 +256,9 @@ fun ColumnScope.LiveFeedContent(
     }
     vm.setFollowing(atBottom)
     val followingNow by rememberUpdatedState(following)
-    LaunchedEffect(allRows.size) {
-        if (allRows.isEmpty()) return@LaunchedEffect
-        if (followingNow) listState.scrollToItem(allRows.size - 1)
+    LaunchedEffect(renderItems.size) {
+        if (renderItems.isEmpty()) return@LaunchedEffect
+        if (followingNow) listState.scrollToItem(renderItems.size - 1)
     }
 
     Column(Modifier.fillMaxWidth().weight(1f)) {
@@ -331,32 +334,20 @@ fun ColumnScope.LiveFeedContent(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(listSpacing),
                 ) {
-                    items(allRows, key = { rowKey(it) }) { row ->
-                        when (row) {
-                            is DisplayRow.Message -> MessageRow(
-                                row.event,
+                    items(renderItems, key = { renderKey(it) }) { item ->
+                        when (item) {
+                            is FeedRenderItem.Single -> FeedRowView(
+                                row = item.row,
+                                vm = vm,
                                 bodySizeSp = chatTextSize,
                                 bubbleVertical = bubbleVertical,
-                            )
-                            is DisplayRow.Tool -> ToolRow(
-                                row.call,
-                                row.result,
-                                bubbleVertical = bubbleVertical,
                                 onOpenTerminal = onOpenTerminal,
+                                composerState = composeState,
+                                sentAttachments = sentAttachments,
                             )
-                            is DisplayRow.StatusLine -> StatusLineRow(row.event)
-                            is DisplayRow.Err -> ErrorRow(row.event)
-                            is DisplayRow.Unknown -> UnknownRow(row.event)
-                            is DisplayRow.Pending -> LivePendingRow(row.send) { vm.retry(row.send.clientMsgId) }
-                            is DisplayRow.Approval -> LiveApprovalCard(
-                                view = row.view,
-                                commandsReady = composeState is LiveComposeState.Ready,
-                                commandsReason = (composeState as? LiveComposeState.Disabled)?.reason,
-                                onApprove = { vm.decide(row.view.callId, approved = true, rememberSession = false) },
-                                onDeny = { vm.decide(row.view.callId, approved = false, rememberSession = false) },
-                                onAlways = { vm.decide(row.view.callId, approved = true, rememberSession = true) },
-                                onExpire = { vm.markApprovalExpired(row.view.callId) },
-                            )
+                            is FeedRenderItem.ToolGroup -> ToolGroupCard(group = item) { tool ->
+                                ToolRow(tool.call, tool.result, bubbleVertical, onOpenTerminal)
+                            }
                         }
                     }
                 }
@@ -365,7 +356,7 @@ fun ColumnScope.LiveFeedContent(
                 TextButton(
                     onClick = {
                         vm.resumeTail()
-                        scope.launch { listState.animateScrollToItem(allRows.size - 1) }
+                        scope.launch { listState.animateScrollToItem(renderItems.size - 1) }
                     },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -403,6 +394,54 @@ fun ColumnScope.LiveFeedContent(
             )
         }
     }
+}
+
+@Composable
+private fun FeedRowView(
+    row: DisplayRow,
+    vm: LiveViewModel,
+    bodySizeSp: Int,
+    bubbleVertical: Dp,
+    onOpenTerminal: (() -> Unit)?,
+    composerState: LiveComposeState,
+    sentAttachments: Map<String, List<LivePendingAttachment>>,
+) {
+    val composerReady = composerState is LiveComposeState.Ready
+    when (row) {
+        is DisplayRow.Message -> MessageRow(
+            row.event,
+            bodySizeSp = bodySizeSp,
+            bubbleVertical = bubbleVertical,
+            attachments = sentAttachments[row.event.text.orEmpty()].orEmpty(),
+            composerReady = composerReady,
+            onSendPrompt = vm::sendOption,
+        )
+        is DisplayRow.Tool -> ToolRow(
+            row.call,
+            row.result,
+            bubbleVertical = bubbleVertical,
+            onOpenTerminal = onOpenTerminal,
+        )
+        is DisplayRow.StatusLine -> StatusLineRow(row.event)
+        is DisplayRow.Err -> ErrorRow(row.event)
+        is DisplayRow.Unknown -> UnknownRow(row.event)
+        is DisplayRow.Pending -> LivePendingRow(row.send) { vm.retry(row.send.clientMsgId) }
+        is DisplayRow.Approval -> LiveApprovalCard(
+            view = row.view,
+            commandsReady = composerReady,
+            commandsReason = (composerState as? LiveComposeState.Disabled)?.reason,
+            onApprove = { vm.decide(row.view.callId, approved = true, rememberSession = false) },
+            onDeny = { vm.decide(row.view.callId, approved = false, rememberSession = false) },
+            onAlways = { vm.decide(row.view.callId, approved = true, rememberSession = true) },
+            onExpire = { vm.markApprovalExpired(row.view.callId) },
+        )
+    }
+}
+
+private fun renderKey(item: FeedRenderItem): String = when (item) {
+    is FeedRenderItem.Single -> rowKey(item.row)
+    is FeedRenderItem.ToolGroup ->
+        "g:${item.rows.firstOrNull()?.call?.seq}:${item.rows.lastOrNull()?.call?.seq}:${item.count}"
 }
 
 @Composable
@@ -670,6 +709,9 @@ private fun MessageRow(
     event: PiEvent,
     bodySizeSp: Int = ChatTextSizeStore.DEFAULT_SP,
     bubbleVertical: Dp = 8.dp,
+    attachments: List<LivePendingAttachment> = emptyList(),
+    composerReady: Boolean = false,
+    onSendPrompt: (String) -> Unit = {},
 ) {
     val colors = LocalMaestriColors.current
     val mine = event.kind == LiveKinds.USER_MESSAGE
@@ -699,11 +741,21 @@ private fun MessageRow(
                 }
             }
             Spacer(Modifier.height(2.dp))
-            Text(
-                event.text.orEmpty().ifBlank { "—" },
-                fontSize = bodySizeSp.sp,
-                color = if (mine) colors.bubbleMineText else MaterialTheme.colorScheme.onSurface,
-            )
+            val body = event.text.orEmpty()
+            if (mine) {
+                if (body.isNotBlank()) {
+                    Text(body, fontSize = bodySizeSp.sp, color = colors.bubbleMineText)
+                }
+                LiveAttachmentChips(attachments)
+            } else {
+                IntelligentMessageBody(
+                    text = body.ifBlank { "—" },
+                    bodySizeSp = bodySizeSp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    composerReady = composerReady,
+                    onSendPrompt = onSendPrompt,
+                )
+            }
         }
     }
 }
