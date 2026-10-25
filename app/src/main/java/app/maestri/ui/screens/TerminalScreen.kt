@@ -112,6 +112,8 @@ import app.maestri.live.MAX_STAGED_FILES
 import app.maestri.live.PiRelayUpload
 import app.maestri.live.formatAttachmentSize
 import app.maestri.live.stagePickedUris
+import app.maestri.live.voiceNoteStagedFile
+import app.maestri.live.rememberVoiceNote
 import app.maestri.ui.settings.TerminalFontStore
 import app.maestri.ui.settings.TerminalScrollSpeedStore
 import app.maestri.ui.settings.TerminalViewModeStore
@@ -256,6 +258,20 @@ fun TerminalScreen(
     // can hand the agent an id the host really knows.
     var stagedFiles by remember { mutableStateOf<List<LiveStagedFile>>(emptyList()) }
     var uploading by remember { mutableStateOf(false) }
+    // Voice memo: the take becomes one more staged attachment, so nothing new touches the
+    // upload path. The recorder, tick, cap and permission flow live in rememberVoiceNote.
+    val voice = rememberVoiceNote(
+        onClip = { name, bytes ->
+            if (inChat) {
+                liveVm.stageFiles(listOf(voiceNoteStagedFile(name, bytes)))
+            } else if (stagedFiles.size >= MAX_STAGED_FILES) {
+                notice = "Not attached — room for $MAX_STAGED_FILES max."
+            } else {
+                stagedFiles = stagedFiles + voiceNoteStagedFile(name, bytes)
+            }
+        },
+        onNotice = { notice = it },
+    )
     var seededFallback by remember { mutableStateOf(false) }
     // Capabilities up here: the renderer and the header both read them.
     val caps = session.serverInfo
@@ -754,7 +770,7 @@ fun TerminalScreen(
             val liveReady = liveComposeState is LiveComposeState.Ready
             val liveDisabledReason = (liveComposeState as? LiveComposeState.Disabled)?.reason
             val liveSending = livePending.any { it.status == LiveSendStatus.SENDING }
-            val liveCanSend = liveReady && (liveDraft.isNotBlank() || liveStaged.isNotEmpty())
+            val liveCanSend = liveReady && (liveDraft.isNotBlank() || liveStaged.isNotEmpty()) && !voice.recording
             val liveMeta = liveDisabledReason
                 ?: if (liveStaged.isNotEmpty())
                     "${liveStaged.size} file${if (liveStaged.size == 1) "" else "s"}"
@@ -783,6 +799,9 @@ fun TerminalScreen(
                     focusRequester = inputFocusRequester,
                     modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
                     attachEnabled = liveReady,
+                    recording = voice.recording,
+                    recordElapsedMs = voice.elapsedMs,
+                    onToggleRecord = voice::toggle,
                 )
             }
         } else {
@@ -893,8 +912,11 @@ fun TerminalScreen(
                 onSend = ::sendTyped,
                 onAttach = ::stageAttachments,
                 canSend = streamState == SocketState.OPEN && !locked &&
-                    (termInput.isNotBlank() || stagedFiles.isNotEmpty()) && !uploading,
+                    (termInput.isNotBlank() || stagedFiles.isNotEmpty()) && !uploading && !voice.recording,
                 busy = uploading,
+                recording = voice.recording,
+                recordElapsedMs = voice.elapsedMs,
+                onToggleRecord = voice::toggle,
                 meta = composerMeta,
                 chatSelected = inChat,
                 onChat = ::enterChatMode,

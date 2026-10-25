@@ -90,6 +90,9 @@ class UpdateController(
 
     init {
         ensureChannel()
+        // The APK used to live in cacheDir, which Android evicts under pressure — the
+        // installer then reads a truncated file ("problem parsing the package").
+        File(appContext.cacheDir, "updates").deleteRecursively()
     }
 
     sealed interface InstallState {
@@ -195,11 +198,9 @@ class UpdateController(
 
     private suspend fun install(info: ReleaseInfo) {
         val cached = apkFile(info)
-        val usable = cached.isFile && cached.length() > 0 && client.verify(cached, info.sha256)
-        if (usable) {
+        if (cached.isFile && cached.length() > 0 && client.verify(cached, info.sha256)) {
             Log.d(TAG, "install: cached APK matches the manifest digest")
-            _install.value = InstallState.Ready(info, cached)
-            openInstaller(cached)
+            handOff(info, cached)
             return
         }
         cached.delete()
@@ -212,8 +213,33 @@ class UpdateController(
             return
         }
         Log.d(TAG, "install: digest verified, opening the system installer")
-        _install.value = InstallState.Ready(info, cached)
-        openInstaller(cached)
+        handOff(info, cached)
+    }
+
+    /**
+     * The only door to the system installer: the bytes the installer is about to read
+     * must still be the bytes the manifest describes.
+     */
+    private suspend fun handOff(info: ReleaseInfo, file: File): Boolean {
+        val sized = info.size <= 0L || file.length() == info.size
+        if (!sized || !client.verify(file, info.sha256)) {
+            Log.w(TAG, "install: on-disk APK no longer matches the manifest, hand-off refused")
+            file.delete()
+            _install.value = InstallState.Failed(info)
+            return false
+        }
+        _install.value = InstallState.Ready(info, file)
+        openInstaller(file)
+        // filesDir never evicts, so an older release APK would sit there forever.
+        runCatching {
+            file.parentFile?.listFiles()?.forEach { sibling ->
+                if (sibling.name != file.name &&
+                    sibling.name.startsWith("maestri-remote-") &&
+                    sibling.name.endsWith(".apk")
+                ) sibling.delete()
+            }
+        }
+        return true
     }
 
     /**
@@ -224,9 +250,8 @@ class UpdateController(
         if (_install.value is InstallState.NeedsPermission &&
             appContext.packageManager.canRequestPackageInstalls()
         ) {
-            val file = (_install.value as InstallState.NeedsPermission).file
-            _install.value = InstallState.Ready(_release.value ?: return, file)
-            openInstaller(file)
+            val pending = _install.value as InstallState.NeedsPermission
+            scope.launch { handOff(pending.release, pending.file) }
             return
         }
         if (_install.value is InstallState.NeedsPermission) {
@@ -265,7 +290,7 @@ class UpdateController(
     }
 
     private fun apkFile(info: ReleaseInfo): File =
-        File(File(appContext.cacheDir, "updates"), "maestri-remote-${info.versionCode}.apk")
+        File(File(appContext.filesDir, "updates"), "maestri-remote-${info.versionCode}.apk")
 
     // -------------------------------------------------------------- notification
 

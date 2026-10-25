@@ -6,6 +6,8 @@
          ConnectivityManager throws instead of answering. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Voice memos are captured by MediaRecorder from the microphone. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- The update feature hands the downloaded APK to the SYSTEM installer; the app
          itself never installs anything (the user confirms in the system dialog). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />

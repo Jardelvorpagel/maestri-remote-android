@@ -30,17 +30,23 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.RecordButton
 import app.maestri.ui.Style.monoHud
 
 @Composable
-fun LiveComposerBar(vm: LiveViewModel) {
+fun LiveComposerBar(
+    vm: LiveViewModel,
+    recording: Boolean = false,
+    recordElapsedMs: Long = 0L,
+    onToggleRecord: (() -> Unit)? = null,
+) {
     val colors = LocalMaestriColors.current
     val draft by vm.draft.collectAsState()
     val staged by vm.staged.collectAsState()
     val composeState by vm.composeState.collectAsState()
     val disabledReason = (composeState as? LiveComposeState.Disabled)?.reason
     val ready = composeState is LiveComposeState.Ready
-    val canSend = ready && (draft.isNotBlank() || staged.isNotEmpty())
+    val canSend = ready && (draft.isNotBlank() || staged.isNotEmpty()) && !recording
     val onPicked = rememberLiveAttachHandler(vm)
 
     Column(
@@ -50,7 +56,19 @@ fun LiveComposerBar(vm: LiveViewModel) {
     ) {
         LiveStagedChips(files = staged, onRemove = { vm.removeStaged(it) })
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LiveAttachButton(enabled = ready, onPicked = onPicked)
+            LiveAttachButton(enabled = ready && !recording, onPicked = onPicked)
+            // The mic follows the attach button's gate: hidden while the face is not Ready,
+            // but still drawn during a take so it can always be stopped.
+            if (onToggleRecord != null && (ready || recording)) {
+                RecordButton(
+                    recording = recording,
+                    elapsedMs = recordElapsedMs,
+                    enabled = ready || recording,
+                    onClick = onToggleRecord,
+                    tint = colors.secondaryLabel,
+                    size = 44.dp,
+                )
+            }
             OutlinedTextField(
                 value = draft,
                 onValueChange = { vm.updateDraft(it) },

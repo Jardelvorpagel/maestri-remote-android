@@ -388,7 +388,20 @@ fun ColumnScope.LiveFeedContent(
                 onOption = { label -> vm.sendOption(label) },
             )
         }
-        if (showComposer) LiveComposerBar(vm)
+        if (showComposer) {
+            // Voice memo: the take becomes a staged file, so the chat path uploads it exactly
+            // like a picked attachment (vm.stageFiles owns the cap and its notice).
+            val voice = rememberVoiceNote(
+                onClip = { name, bytes -> vm.stageFiles(listOf(voiceNoteStagedFile(name, bytes))) },
+                onNotice = { vm.note(it) },
+            )
+            LiveComposerBar(
+                vm = vm,
+                recording = voice.recording,
+                recordElapsedMs = voice.elapsedMs,
+                onToggleRecord = voice::toggle,
+            )
+        }
     }
 }
 

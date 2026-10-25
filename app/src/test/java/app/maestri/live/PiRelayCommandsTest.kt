@@ -10,6 +10,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.Buffer
 import okio.ByteString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -192,6 +193,11 @@ class PiRelayCommandsTest {
 
         val authed = uploadRequest("http://h:1/upload", "tok", "f.txt", "data".toByteArray())
         assertEquals("Bearer tok", authed.header("Authorization"))
+
+        // The relay writes the request body verbatim, so the body must be the file itself.
+        val sent = Buffer()
+        anon.body!!.writeTo(sent)
+        assertEquals("data", sent.readUtf8())
     }
 
     @Test

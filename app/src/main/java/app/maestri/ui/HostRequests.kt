@@ -21,4 +21,7 @@ interface HostRequests {
 
     /** Asks for the notification permission; the answer comes back as a boolean. */
     fun requestNotificationPermission(onResult: (Boolean) -> Unit)
+
+    /** Asks for the microphone permission; the answer comes back as a boolean. */
+    fun requestRecordAudioPermission(onResult: (Boolean) -> Unit)
 }

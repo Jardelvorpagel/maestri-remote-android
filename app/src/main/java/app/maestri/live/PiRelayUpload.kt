@@ -3,7 +3,6 @@ package app.maestri.live
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -12,9 +11,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class UploadRejected(message: String, val sizeCapBytes: Long?) : Exception(message)
 
 /**
- * Relay attachment upload: POST `http(s)://same-host:port/upload`, multipart
- * `file` part plus an `X-Filename` header, same auth gate as the socket
- * (blank token → no `Authorization` header). Call [upload] off the main thread.
+ * Relay attachment upload: POST `http(s)://same-host:port/upload`, the file's raw bytes as the
+ * body plus an `X-Filename` header (the relay writes the body verbatim), same auth gate as the
+ * socket (blank token → no `Authorization` header). Call [upload] off the main thread.
  * Logs carry filename + byte count only — never contents, never the token.
  */
 class PiRelayUpload(
@@ -44,15 +43,12 @@ class PiRelayUpload(
     }
 }
 
-/** Upload POST builder: multipart file part, `X-Filename`, optional Bearer. */
+/** Upload POST builder: the file's raw bytes, `X-Filename`, optional Bearer. */
 fun uploadRequest(uploadUrl: String, token: String, filename: String, bytes: ByteArray): Request {
-    val body = MultipartBody.Builder().setType(MultipartBody.FORM)
-        .addFormDataPart("file", filename, bytes.toRequestBody("application/octet-stream".toMediaType()))
-        .build()
     val builder = Request.Builder()
         .url(uploadUrl)
         .header("X-Filename", filename)
-        .post(body)
+        .post(bytes.toRequestBody("application/octet-stream".toMediaType()))
     if (token.isNotBlank()) builder.header("Authorization", "Bearer $token")
     return builder.build()
 }

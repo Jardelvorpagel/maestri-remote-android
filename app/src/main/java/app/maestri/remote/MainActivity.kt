@@ -85,11 +85,13 @@ class MainActivity : FragmentActivity(), HostRequests {
     private companion object {
         const val REQUEST_CODE_BASE = 0x5100
         const val REQUEST_NOTIFICATION_PERMISSION = 0x5201
+        const val REQUEST_RECORD_AUDIO_PERMISSION = 0x5202
     }
 
     private var nextRequestCode = REQUEST_CODE_BASE
     private val pendingResults = mutableMapOf<Int, (Int, Intent?) -> Unit>()
     private var pendingPermission: ((Boolean) -> Unit)? = null
+    private var pendingRecordAudio: ((Boolean) -> Unit)? = null
 
     override fun pickDocuments(onPicked: (List<Uri>) -> Unit) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -125,6 +127,15 @@ class MainActivity : FragmentActivity(), HostRequests {
         )
     }
 
+    override fun requestRecordAudioPermission(onResult: (Boolean) -> Unit) {
+        pendingRecordAudio = onResult
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(android.Manifest.permission.RECORD_AUDIO),
+            REQUEST_RECORD_AUDIO_PERMISSION,
+        )
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         val callback = pendingResults.remove(requestCode) ?: return
@@ -137,10 +148,19 @@ class MainActivity : FragmentActivity(), HostRequests {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != REQUEST_NOTIFICATION_PERMISSION) return
-        val callback = pendingPermission
-        pendingPermission = null
-        callback?.invoke(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+        val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+        when (requestCode) {
+            REQUEST_NOTIFICATION_PERMISSION -> {
+                val callback = pendingPermission
+                pendingPermission = null
+                callback?.invoke(granted)
+            }
+            REQUEST_RECORD_AUDIO_PERMISSION -> {
+                val callback = pendingRecordAudio
+                pendingRecordAudio = null
+                callback?.invoke(granted)
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

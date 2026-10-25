@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import app.maestri.live.LiveStagedFile
 import app.maestri.ui.HostRequests
 import app.maestri.ui.Style.Palette
+import app.maestri.ui.Style.RecordButton
 import app.maestri.ui.Style.pillShape
 import app.maestri.ui.Style.softHalo
 
@@ -79,6 +80,9 @@ fun TerminalComposer(
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
     attachEnabled: Boolean = true,
+    recording: Boolean = false,
+    recordElapsedMs: Long = 0L,
+    onToggleRecord: (() -> Unit)? = null,
 ) {
     val fieldStyle = TextStyle(fontSize = 13.5.sp, color = ComposerText)
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -112,7 +116,17 @@ fun TerminalComposer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                AttachButton(enabled = attachEnabled && !busy, onPicked = onAttach)
+                AttachButton(enabled = attachEnabled && !busy && !recording, onPicked = onAttach)
+                // No handler means this face owns no recorder: draw no button at all rather
+                // than a dead one.
+                onToggleRecord?.let { toggle ->
+                    RecordButton(
+                        recording = recording,
+                        elapsedMs = recordElapsedMs,
+                        enabled = attachEnabled && !busy,
+                        onClick = toggle,
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 if (meta != null) {
                     Text(meta, fontSize = 11.5.sp, color = ComposerMuted)
