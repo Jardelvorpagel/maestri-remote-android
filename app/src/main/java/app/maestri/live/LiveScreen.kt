@@ -10,7 +10,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -202,13 +201,19 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
 /**
  * Relay feed body (settings, event list, decision banner, composer) with no
  * scaffold of its own: hosted by LiveScreen or by a terminal's Chat mode.
- * ColumnScope for the weight-bearing list box; the rendering lives here once,
- * never duplicated per host.
+ * [modifier] carries the host's sizing, and [endPadding] is the host's measured
+ * floating-composer height — the rendering lives here once, never per host.
  */
 @Composable
-fun ColumnScope.LiveFeedContent(
+fun LiveFeedContent(
     vm: LiveViewModel,
+    modifier: Modifier = Modifier.fillMaxSize(),
     showComposer: Boolean = true,
+    /**
+     * How much room the floating composer block needs at the bottom: measured by the host and fed
+     * back here so the last message clears the pill instead of hiding under it.
+     */
+    endPadding: Dp = 16.dp,
     /** Tap destination for tool rows: the chat face passes the Terminal face switch.
      * Null keeps the legacy expand-in-place, reachable only from the retired
      * standalone LiveScreen route. */
@@ -308,7 +313,7 @@ fun ColumnScope.LiveFeedContent(
     // whole chat surface, composer included), so this column stays transparent. The boot animation
     // still plays once per chat-face mount, over the message area.
     var booting by remember { mutableStateOf(true) }
-    Column(Modifier.fillMaxWidth().weight(1f)) {
+    Column(modifier) {
         // Persistent outage strip: the empty-state error card below only shows with
         // zero rows, but outages usually strike with history on screen — then the
         // only signal was the Connect button. This strip shows iff the relay is in
@@ -370,7 +375,7 @@ fun ColumnScope.LiveFeedContent(
                 else -> LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 16.dp),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = endPadding),
                     verticalArrangement = Arrangement.spacedBy(listSpacing),
                 ) {
                     items(renderItems, key = { renderKey(it) }) { item ->
@@ -392,39 +397,44 @@ fun ColumnScope.LiveFeedContent(
                     }
                 }
             }
-            GeminiLaunchOverlay(visible = booting) { booting = false }
-        }
-
-        // Below the list, never over it: the tail chip used to float on top of the last
-        // message and read as clipped text. It only costs a row while the tail is unfollowed.
-        if (allRows.isNotEmpty() && !following) {
-            Box(Modifier.fillMaxWidth().padding(bottom = 6.dp), contentAlignment = Alignment.Center) {
+            // Floating tail chip: the old "below the list, never over it" row cost a band of
+            // height and pushed the conversation up. It now hovers just above the composer, on its
+            // own 40 dp circle with no plate behind it — follow/unfollow and resumeTail unchanged.
+            if (allRows.isNotEmpty() && !following) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Gemini.SurfaceRaised, CircleShape)
-                        .clickable {
-                            vm.resumeTail()
-                            scope.launch { listState.animateScrollToItem(renderItems.size - 1) }
-                        }
-                        .semantics { contentDescription = "Scroll to the newest message" },
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = endPadding + 10.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("\u2193", fontSize = 18.sp, color = Gemini.TextStrong)
-                    if (newWhileAway > 0) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .size(16.dp)
-                                .background(Gemini.Accent, CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text("$newWhileAway", fontSize = 9.sp, color = Gemini.TextStrong)
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Gemini.SurfaceRaised, CircleShape)
+                            .clickable {
+                                vm.resumeTail()
+                                scope.launch { listState.animateScrollToItem(renderItems.size - 1) }
+                            }
+                            .semantics { contentDescription = "Scroll to the newest message" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("\u2193", fontSize = 18.sp, color = Gemini.TextStrong)
+                        if (newWhileAway > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(16.dp)
+                                    .background(Gemini.Accent, CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("$newWhileAway", fontSize = 9.sp, color = Gemini.TextStrong)
+                            }
                         }
                     }
                 }
             }
+            GeminiLaunchOverlay(visible = booting) { booting = false }
         }
 
         decisionPrompt?.takeIf { it.isOpen }?.let {
@@ -899,6 +909,15 @@ private fun MessageRow(
         }
     }
 }
+
+/** The air between the floating composer block and the message above it. */
+val ChatComposerGap = 8.dp
+
+/**
+ * How far the last message must sit from the bottom: the composer block's measured height plus one
+ * gap. Measured, never hardcoded — the block grows with staged chips and with the run-mode toggle.
+ */
+fun chatFeedEndPadding(composerBlockHeight: Dp): Dp = composerBlockHeight + ChatComposerGap
 
 /** Whether the feed carries an actual exchange yet: notices, tool rows and status lines do not. */
 internal fun hasConversation(rows: List<DisplayRow>): Boolean = rows.any { it is DisplayRow.Message }

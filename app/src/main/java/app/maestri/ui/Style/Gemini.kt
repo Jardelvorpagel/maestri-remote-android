@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -339,6 +340,19 @@ fun GeminiLaunchOverlay(visible: Boolean, onFinished: () -> Unit) {
 }
 
 /**
+ * The compact chat top bar, after the user's note that the model line ate too much of the header:
+ * the labels shrink, the tap area does not.
+ */
+object ChatHeaderMetrics {
+    val BarHeight = 48.dp
+    val ModelSp = 14.sp
+    val ThinkingSp = 13.sp
+    val ChevronSp = 12.sp
+    /** The trigger keeps a full-size target even though its text shrank. */
+    val MinTouchTarget = 48.dp
+}
+
+/**
  * The model / thinking trigger and its floating card, after the Gemini app: the trigger reads
  * `<model short> <thinking> ⌄` in two tones, the card lists the four models over a hairline
  * divider and the thinking-level accordion underneath.
@@ -357,6 +371,7 @@ fun GeminiModelSelector(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
+                .heightIn(min = ChatHeaderMetrics.MinTouchTarget)
                 .clip(RoundedCornerShape(16.dp))
                 .clickable { open = true }
                 .padding(horizontal = 6.dp, vertical = 4.dp),
@@ -364,16 +379,16 @@ fun GeminiModelSelector(
             Text(
                 GeminiCatalog.headerModel(preset),
                 fontFamily = FontFamily.SansSerif,
-                fontSize = 17.sp,
+                fontSize = ChatHeaderMetrics.ModelSp,
                 color = Gemini.Text,
             )
             Text(
                 " " + GeminiCatalog.headerThinking(preset),
                 fontFamily = FontFamily.SansSerif,
-                fontSize = 17.sp,
+                fontSize = ChatHeaderMetrics.ThinkingSp,
                 color = Gemini.TextMuted,
             )
-            Text(" \u2304", fontSize = 15.sp, color = Gemini.TextMuted)
+            Text(" \u2304", fontSize = ChatHeaderMetrics.ChevronSp, color = Gemini.TextMuted)
         }
         if (open) {
             Popup(

@@ -92,6 +92,11 @@ import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import app.maestri.ui.Style.Gemini
+import app.maestri.ui.Style.ChatHeaderMetrics
+import app.maestri.live.chatFeedEndPadding
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.mutableIntStateOf
 import app.maestri.ui.Style.drawAurora
 import androidx.compose.ui.draw.drawBehind
 import app.maestri.ui.Style.GeminiModelSelector
@@ -829,7 +834,7 @@ fun TerminalScreen(
                 // Screens 1-6: one clean black bar in chat mode — back, the model/thinking
                 // picker, then the relay state and the display settings. No TokyoNight chips.
                 Row(
-                    Modifier.fillMaxWidth().height(52.dp).background(Gemini.Canvas),
+                    Modifier.fillMaxWidth().height(ChatHeaderMetrics.BarHeight).background(Gemini.Canvas),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     backBtn()
@@ -886,33 +891,49 @@ fun TerminalScreen(
                     "${liveStaged.size} file${if (liveStaged.size == 1) "" else "s"}"
                 else null
             val liveOnAttach = rememberLiveAttachHandler(liveVm)
-            LiveFeedContent(
-                liveVm,
-                showComposer = false,
-                onOpenTerminal = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },
-            )
-            if (!fullscreen) {
-                TerminalComposer(
-                    placeholder = "Ask Maestri...",
-                    value = liveDraft,
-                    onChange = { liveVm.updateDraft(it) },
-                    onSend = { if (liveCanSend) liveVm.send() },
-                    onAttach = liveOnAttach,
-                    canSend = liveCanSend,
-                    busy = liveSending,
-                    meta = liveMeta,
-                    chatSelected = true,
-                    onChat = ::enterChatMode,
-                    onRun = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },
-                    staged = liveStaged,
-                    onRemoveStaged = { liveVm.removeStaged(it) },
-                    focusRequester = inputFocusRequester,
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
-                    attachEnabled = liveReady,
-                    recording = voice.recording,
-                    recordElapsedMs = voice.elapsedMs,
-                    onToggleRecord = voice::toggle,
+            // Gemini's chat layout: the feed keeps the full height under the header and the
+            // composer block floats over it, so the conversation slides behind the pill instead of
+            // being clipped above it. The block's real height is measured and handed back to the
+            // feed as its end padding — empty, with staged chips, with the keyboard up or with the
+            // run-mode toggle, the last message always clears it.
+            var composerHeightPx by remember { mutableIntStateOf(0) }
+            val density = LocalDensity.current
+            val composerHeight = with(density) { composerHeightPx.toDp() }
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                LiveFeedContent(
+                    liveVm,
+                    showComposer = false,
+                    endPadding = chatFeedEndPadding(composerHeight),
+                    onOpenTerminal = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },
                 )
+                if (!fullscreen) {
+                    TerminalComposer(
+                        placeholder = "Ask Maestri...",
+                        value = liveDraft,
+                        onChange = { liveVm.updateDraft(it) },
+                        onSend = { if (liveCanSend) liveVm.send() },
+                        onAttach = liveOnAttach,
+                        canSend = liveCanSend,
+                        busy = liveSending,
+                        meta = liveMeta,
+                        chatSelected = true,
+                        onChat = ::enterChatMode,
+                        onRun = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },
+                        staged = liveStaged,
+                        onRemoveStaged = { liveVm.removeStaged(it) },
+                        focusRequester = inputFocusRequester,
+                        modifier = Modifier
+                            // Measured before the margins are applied, so the feed clears the
+                            // whole block including the gap under the mode toggle.
+                            .onSizeChanged { composerHeightPx = it.height }
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                        attachEnabled = liveReady,
+                        recording = voice.recording,
+                        recordElapsedMs = voice.elapsedMs,
+                        onToggleRecord = voice::toggle,
+                    )
+                }
             }
         } else {
         if (pendingPrompt != null && !fullscreen && !imeUp) {
