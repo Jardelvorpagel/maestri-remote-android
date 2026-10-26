@@ -138,6 +138,19 @@ class LiveViewModel(
     private val _newWhileAway = MutableStateFlow(0)
     val newWhileAway: StateFlow<Int> = _newWhileAway
 
+    // The model/thinking picker: per terminal session (this VM is entry-scoped), seeded from the
+    // relay's own `model` / `thinking level` notices and overridden by the user's choice.
+    private val _gemini = MutableStateFlow(GeminiCatalog.Default)
+    val gemini: StateFlow<GeminiPreset> = _gemini
+
+    fun selectModel(modelId: String) {
+        _gemini.value = _gemini.value.copy(modelId = modelId)
+    }
+
+    fun selectThinking(thinkingId: String) {
+        _gemini.value = _gemini.value.copy(thinkingId = thinkingId)
+    }
+
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice
 
@@ -283,6 +296,12 @@ class LiveViewModel(
                     if (!wasFollowing && list.size > _events.value.size) {
                         _newWhileAway.value += list.size - _events.value.size
                     }
+                    // Notices carry the session's real model and thinking level: fold the new
+                    // ones in so the picker shows what the host is actually running.
+                    val previousSeq = _events.value.lastOrNull()?.seq
+                    list.filter { previousSeq == null || it.seq > previousSeq }
+                        .filter { it.kind == LiveKinds.NOTICE }
+                        .forEach { _gemini.value = GeminiCatalog.applyNotice(_gemini.value, it.text.orEmpty()) }
                     _events.value = list
                     list.lastOrNull()?.seq?.let { lastDeliveredSeq = it }
                     reconcilePending(list)

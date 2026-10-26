@@ -91,6 +91,7 @@ import app.maestri.wire.TerminalCard
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
+import app.maestri.ui.Style.GeminiModelSelector
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.TerminalThemes
@@ -852,6 +853,18 @@ fun TerminalScreen(
                     "${liveStaged.size} file${if (liveStaged.size == 1) "" else "s"}"
                 else null
             val liveOnAttach = rememberLiveAttachHandler(liveVm)
+            val gemini by liveVm.gemini.collectAsState()
+            // The model / thinking sub-bar, over the chat canvas like the reference's header trigger.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GeminiModelSelector(
+                    preset = gemini,
+                    onModel = liveVm::selectModel,
+                    onThinking = liveVm::selectThinking,
+                )
+            }
             LiveFeedContent(
                 liveVm,
                 showComposer = false,

@@ -70,6 +70,7 @@ import app.maestri.ui.Style.GeminiAiCaption
 import app.maestri.ui.Style.GeminiAurora
 import app.maestri.ui.Style.GeminiHero
 import app.maestri.ui.Style.GeminiLaunchOverlay
+import app.maestri.ui.Style.GeminiModelSelector
 import app.maestri.ui.Style.GeminiStar
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriRadii
@@ -148,6 +149,7 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
     val relayState by vm.relayState.collectAsState()
     val url by vm.url.collectAsState()
     val token by vm.token.collectAsState()
+    val gemini by vm.gemini.collectAsState()
     var showRelaySettings by remember { mutableStateOf(false) }
     Column(
         Modifier
@@ -173,6 +175,12 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
+            )
+            GeminiModelSelector(
+                preset = gemini,
+                onModel = vm::selectModel,
+                onThinking = vm::selectThinking,
+                modifier = Modifier.padding(end = 10.dp),
             )
             RelayChip(state = relayState, onClick = { showRelaySettings = true })
         }

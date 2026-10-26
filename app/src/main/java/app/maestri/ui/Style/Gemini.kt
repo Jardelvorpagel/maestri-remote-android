@@ -1,6 +1,8 @@
 package app.maestri.ui.Style
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -12,20 +14,29 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -34,11 +45,15 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import app.maestri.live.GeminiCatalog
+import app.maestri.live.GeminiPreset
 import kotlin.math.sin
 
 /**
@@ -59,6 +74,7 @@ object Gemini {
     val TextSecondary = Color(0xFFC4C7C5)
     val TextMuted = Color(0xFF8E918F)
     val Outline = Color(0xFF444746)
+    val Divider = Color(0xFF333538)
     val Accent = Color(0xFF2848A8)
     val AccentDeep = Color(0xFF1B3A8A)
     val StarBlue = Color(0xFF4285F4)
@@ -279,6 +295,151 @@ fun GeminiLaunchOverlay(visible: Boolean, onFinished: () -> Unit) {
                     color = Gemini.TextMuted.copy(alpha = rise.value),
                 )
             }
+        }
+    }
+}
+
+/**
+ * The model / thinking trigger and its floating card, after the Gemini app: the trigger reads
+ * `<model short> <thinking> ⌄` in two tones, the card lists the four models over a hairline
+ * divider and the thinking-level accordion underneath.
+ */
+@Composable
+fun GeminiModelSelector(
+    preset: GeminiPreset,
+    onModel: (String) -> Unit,
+    onThinking: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
+    var thinkingExpanded by remember { mutableStateOf(false) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    Box(modifier) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .clickable { open = true }
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+        ) {
+            Text(
+                GeminiCatalog.headerModel(preset),
+                fontFamily = FontFamily.SansSerif,
+                fontSize = 17.sp,
+                color = Gemini.Text,
+            )
+            Text(
+                " " + GeminiCatalog.headerThinking(preset),
+                fontFamily = FontFamily.SansSerif,
+                fontSize = 17.sp,
+                color = Gemini.TextMuted,
+            )
+            Text(" \u2304", fontSize = 15.sp, color = Gemini.TextMuted)
+        }
+        if (open) {
+            Popup(
+                onDismissRequest = { open = false },
+                offset = IntOffset(0, with(density) { 34.dp.roundToPx() }),
+                properties = PopupProperties(focusable = true),
+            ) {
+                Column(
+                    Modifier
+                        .width(300.dp)
+                        .background(Gemini.Surface, RoundedCornerShape(28.dp))
+                        .padding(vertical = 10.dp),
+                ) {
+                    GeminiCatalog.models.forEach { candidate ->
+                        GeminiPickerRow(
+                            title = candidate.title,
+                            subtitle = candidate.subtitle,
+                            selected = candidate.id == preset.modelId,
+                            onClick = {
+                                onModel(candidate.id)
+                                open = false
+                            },
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .padding(horizontal = 18.dp, vertical = 6.dp)
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Gemini.Divider),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { thinkingExpanded = !thinkingExpanded }
+                            .padding(horizontal = 18.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            "Thinking level",
+                            fontFamily = FontFamily.SansSerif,
+                            fontSize = 17.sp,
+                            color = Gemini.Text,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            if (thinkingExpanded) "\u2303" else "\u2304",
+                            fontSize = 15.sp,
+                            color = Gemini.TextSecondary,
+                        )
+                    }
+                    AnimatedVisibility(
+                        visible = thinkingExpanded,
+                        enter = expandVertically(),
+                        exit = shrinkVertically(),
+                    ) {
+                        Column {
+                            GeminiCatalog.thinking.forEach { level ->
+                                GeminiPickerRow(
+                                    title = level.title,
+                                    subtitle = level.subtitle,
+                                    selected = level.id == preset.thinkingId,
+                                    onClick = {
+                                        onThinking(level.id)
+                                        open = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One selectable line of the card: `✓` gutter, title, muted subtitle. */
+@Composable
+private fun GeminiPickerRow(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+    ) {
+        Box(Modifier.width(28.dp)) {
+            if (selected) {
+                Text("\u2713", fontSize = 16.sp, color = Gemini.Text)
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, fontFamily = FontFamily.SansSerif, fontSize = 17.sp, color = Gemini.Text)
+            Text(
+                subtitle,
+                fontFamily = FontFamily.SansSerif,
+                fontSize = 13.sp,
+                color = Gemini.TextMuted,
+                modifier = Modifier.padding(top = 1.dp),
+            )
         }
     }
 }
