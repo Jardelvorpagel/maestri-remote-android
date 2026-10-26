@@ -37,9 +37,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -293,13 +295,19 @@ fun LiveFeedContent(
     val atBottom by remember {
         derivedStateOf {
             val info = listState.layoutInfo
-            val total = info.totalItemsCount
-            if (total == 0) true
-            else {
-                val last = info.visibleItemsInfo.lastOrNull()
-                last != null && last.index >= total - 1 &&
-                    last.offset + last.size <= info.viewportEndOffset + 8
-            }
+            val last = info.visibleItemsInfo.lastOrNull()
+            feedAtTail(
+                totalItems = info.totalItemsCount,
+                lastVisibleIndex = last?.index,
+                lastVisibleBottomPx = last?.let { it.offset + it.size },
+                viewportEndOffsetPx = info.viewportEndOffset,
+            )
+        }
+    }
+    val viewportPx by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            info.viewportEndOffset - info.viewportStartOffset
         }
     }
     vm.setFollowing(atBottom)
@@ -307,6 +315,18 @@ fun LiveFeedContent(
     LaunchedEffect(renderItems.size) {
         if (renderItems.isEmpty()) return@LaunchedEffect
         if (followingNow) listState.scrollToItem(renderItems.size - 1)
+    }
+    // Opening the keyboard shrinks this viewport by the IME's height while the list keeps its top
+    // anchor, so a conversation sitting at the tail is pushed off it: the tail test then reads
+    // false, the floating chip comes up and no amount of tapping settled it — the newest row was
+    // below the edge, not the user away from it. Re-anchor instead of hiding the chip on an IME
+    // flag: the tail is re-established, the test agrees again, and a reader who really did scroll
+    // away is untouched (realign is gated on the follow state read before the flip).
+    var lastViewportPx by remember { mutableIntStateOf(0) }
+    val realignTail = following && lastViewportPx > 0 && lastViewportPx != viewportPx
+    SideEffect { lastViewportPx = viewportPx }
+    LaunchedEffect(realignTail) {
+        if (realignTail && renderItems.isNotEmpty()) listState.scrollToItem(renderItems.size - 1)
     }
 
     // The wash itself is painted by the screen behind this feed (TerminalScreen draws it over the
@@ -1150,4 +1170,25 @@ private fun UnknownRow(event: PiEvent) {
             modifier = Modifier.weight(1f),
         )
     }
+}
+
+/**
+ * Whether the newest row already sits at the bottom of what the reader can see — the single signal
+ * the floating tail chip is allowed to follow.
+ *
+ * A pure function of the scroll geometry because the failure it guards against only shows on a
+ * device: with the keyboard up the viewport shrinks by the IME's height and the newest row falls
+ * below the visible edge, which reads as "the reader scrolled away" when nothing was scrolled. The
+ * slack absorbs layout rounding, not a whole row.
+ */
+internal fun feedAtTail(
+    totalItems: Int,
+    lastVisibleIndex: Int?,
+    lastVisibleBottomPx: Int?,
+    viewportEndOffsetPx: Int,
+    slackPx: Int = 8,
+): Boolean {
+    if (totalItems == 0) return true
+    if (lastVisibleIndex == null || lastVisibleBottomPx == null) return false
+    return lastVisibleIndex >= totalItems - 1 && lastVisibleBottomPx <= viewportEndOffsetPx + slackPx
 }
