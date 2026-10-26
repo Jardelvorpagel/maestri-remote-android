@@ -69,6 +69,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.window.Dialog
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.DialogProperties
 import app.maestri.live.GeminiCatalog
 import app.maestri.live.GeminiPreset
@@ -467,10 +470,23 @@ private fun GeminiPickerRow(
     }
 }
 
-/** The strings the attachment sheet's accessibility surface announces. */
+/**
+ * The attachment sheet's contract surface: what its accessibility tree says and how dark its scrim
+ * is. Kept as plain constants so both are asserted off-device instead of living inside lambdas.
+ */
 object GeminiAttachmentSheetLabels {
-    const val Title = "Anexos"
-    const val Dismiss = "Fechar anexos"
+    /** The sheet container itself — the root of its subtree. */
+    const val Root = "Anexos"
+
+    /** The tap-to-dismiss target behind the sheet: the scrim, and nothing else. */
+    const val DismissTarget = "Fechar anexos"
+
+    /**
+     * Single-layer scrim alpha. Everything darkening the screen behind the sheet is this one Box:
+     * 185 also carried the platform Dialog dim (the theme's 0.6), which stacked to 0.84.
+     */
+    const val ScrimAlpha = 0.6f
+
     const val Photos = "Photos"
     const val Camera = "Camera"
     const val Files = "Files"
@@ -506,14 +522,22 @@ fun GeminiAttachmentSheet(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Box(Modifier.fillMaxSize()) {
+        // The dialog window dims the screen behind it on its own (the theme's windowDimAmount,
+        // 0.6): with our scrim on top that measured 0.84 on 185, which is exactly 1 - 0.4^2.
+        val dialogView = LocalView.current
+        val dialogWindow = (dialogView as? DialogWindowProvider)?.window
+            ?: (dialogView.parent as? DialogWindowProvider)?.window
+        SideEffect { dialogWindow?.setDimAmount(0f) }
+        Box(
+            Modifier.fillMaxSize().semantics { contentDescription = GeminiAttachmentSheetLabels.Root },
+        ) {
             Box(
                 Modifier.fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.6f * rise))
+                    .background(Color.Black.copy(alpha = GeminiAttachmentSheetLabels.ScrimAlpha * rise))
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                         onDismiss()
                     }
-                    .semantics { contentDescription = GeminiAttachmentSheetLabels.Dismiss },
+                    .semantics { contentDescription = GeminiAttachmentSheetLabels.DismissTarget },
             )
             Column(
                 Modifier.align(Alignment.BottomCenter)
@@ -522,9 +546,6 @@ fun GeminiAttachmentSheet(
                     .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                     .background(Gemini.Sheet)
                     .windowInsetsPadding(WindowInsets.navigationBars)
-                    .semantics(mergeDescendants = false) {
-                        contentDescription = GeminiAttachmentSheetLabels.Title
-                    }
                     .padding(top = 10.dp, bottom = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {

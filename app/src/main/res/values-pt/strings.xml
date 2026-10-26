@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Generic pt, so a pt-PT/regionless device does not fall back to the libraries' own
+         pt translation of "sheet" either. -->
+    <string name="close_sheet">Fechar</string>
+    <string name="m3c_bottom_sheet_dismiss_description">Fechar</string>
+</resources>

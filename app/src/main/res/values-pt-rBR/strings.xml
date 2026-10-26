@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- pt-BR variants of the same two library strings: without these the libraries' own
+         values-pt-rBR would win the locale match over our default entry. -->
+    <string name="close_sheet">Fechar</string>
+    <string name="m3c_bottom_sheet_dismiss_description">Fechar</string>
+</resources>

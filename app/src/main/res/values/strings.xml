@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Maestri Remote Android</string>
+    <!-- The bottom sheets Material still renders (Floors, Fichário rail) take their dismiss label
+         from the libraries, and both pt-BR renderings are machine translations of "sheet": the one
+         TalkBack actually read came from compose-ui's `close_sheet` ("Fechar planilha"), the other
+         from material3's `m3c_bottom_sheet_dismiss_description` ("Dispensar página inferior").
+         Overriding both here keeps a screen reader from announcing a spreadsheet. -->
+    <string name="close_sheet">Fechar</string>
+    <string name="m3c_bottom_sheet_dismiss_description">Fechar</string>
 </resources>
