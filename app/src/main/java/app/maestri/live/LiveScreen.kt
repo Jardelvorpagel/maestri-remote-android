@@ -47,6 +47,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -72,6 +74,7 @@ import app.maestri.ui.settings.ChatTextSizeStore
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 internal sealed interface DisplayRow {
@@ -791,47 +794,104 @@ private fun MessageRow(
     val colors = LocalMaestriColors.current
     val mine = event.kind == LiveKinds.USER_MESSAGE
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(if (mine) 0.86f else 0.92f)
-                .background(
-                    if (mine) colors.bubbleMine else colors.bubbleAgent,
-                    RoundedCornerShape(14.dp),
-                )
-                .border(1.dp, colors.hairline, RoundedCornerShape(14.dp))
-                .padding(horizontal = 12.dp, vertical = bubbleVertical),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (mine) "you" else (event.role?.takeIf { it.isNotBlank() }) ?: "assistant",
-                    style = monoHud(10, color = if (mine) colors.bubbleMineText.copy(alpha = 0.75f) else colors.secondaryLabel),
-                    modifier = Modifier.weight(1f),
-                )
-                val ts = formatTs(event.ts)
-                if (ts.isNotEmpty()) {
+        Column(modifier = Modifier.fillMaxWidth(if (mine) 0.86f else 0.92f)) {
+            // Reference reading style: an attachment is its own card ABOVE the typed bubble,
+            // never clipped inside the bubble it belongs to.
+            if (mine && attachments.isNotEmpty()) LiveAttachmentChips(attachments)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // The typed turn keeps its right-aligned bubble; the assistant answers
+                    // straight on the canvas, with no box around serif prose.
+                    .then(
+                        if (mine) {
+                            Modifier
+                                .background(colors.bubbleMine, RoundedCornerShape(14.dp))
+                                .border(1.dp, colors.hairline, RoundedCornerShape(14.dp))
+                                .padding(horizontal = 12.dp, vertical = bubbleVertical)
+                        } else {
+                            Modifier.padding(vertical = bubbleVertical)
+                        },
+                    ),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        ts,
-                        style = monoHud(10, color = if (mine) colors.bubbleMineText.copy(alpha = 0.6f) else colors.secondaryLabel),
+                        if (mine) "you" else (event.role?.takeIf { it.isNotBlank() }) ?: "assistant",
+                        style = monoHud(
+                            10,
+                            color = if (mine) {
+                                colors.bubbleMineText.copy(alpha = 0.75f)
+                            } else {
+                                colors.secondaryLabel
+                            },
+                        ),
+                        modifier = Modifier.weight(1f),
                     )
+                    val ts = formatTs(event.ts)
+                    if (ts.isNotEmpty()) {
+                        Text(
+                            ts,
+                            style = monoHud(
+                                10,
+                                color = if (mine) {
+                                    colors.bubbleMineText.copy(alpha = 0.6f)
+                                } else {
+                                    colors.secondaryLabel
+                                },
+                            ),
+                        )
+                    }
                 }
-            }
-            Spacer(Modifier.height(2.dp))
-            val body = event.text.orEmpty()
-            if (mine) {
-                if (body.isNotBlank()) {
-                    Text(body, fontSize = bodySizeSp.sp, color = colors.bubbleMineText)
+                Spacer(Modifier.height(2.dp))
+                val body = event.text.orEmpty()
+                if (mine) {
+                    if (body.isNotBlank()) {
+                        Text(body, fontSize = bodySizeSp.sp, color = colors.bubbleMineText)
+                    }
+                } else {
+                    IntelligentMessageBody(
+                        text = body.ifBlank { "—" },
+                        bodySizeSp = bodySizeSp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        composerReady = composerReady,
+                        onSendPrompt = onSendPrompt,
+                    )
+                    LiveCopyRow(text = body)
                 }
-                LiveAttachmentChips(attachments)
-            } else {
-                IntelligentMessageBody(
-                    text = body.ifBlank { "—" },
-                    bodySizeSp = bodySizeSp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    composerReady = composerReady,
-                    onSendPrompt = onSendPrompt,
-                )
             }
         }
+    }
+}
+
+/**
+ * Action row under an assistant turn. Copy only: share, thumbs and regenerate each need host
+ * or protocol support, and a dead icon in the reading surface is worse than none.
+ */
+@Composable
+private fun LiveCopyRow(text: String) {
+    if (text.isBlank()) return
+    val colors = LocalMaestriColors.current
+    val clip = LocalClipboardManager.current
+    var copied by remember(text) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (!copied) return@LaunchedEffect
+        delay(1600)
+        copied = false
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .padding(top = 2.dp)
+            .clip(pillShape())
+            .clickable {
+                clip.setText(AnnotatedString(text))
+                copied = true
+            }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        Text(if (copied) "\u2713" else "\u29C9", fontSize = 13.sp, color = colors.secondaryLabel)
+        Spacer(Modifier.width(6.dp))
+        Text(if (copied) "Copiado" else "Copiar", fontSize = 12.sp, color = colors.secondaryLabel)
     }
 }
 

@@ -19,15 +19,25 @@ import app.maestri.remote.R
  * HUD numerics (ring %, times, ids, shas, JSON) and code spans. Chrome stays on the system
  * sans — never put [Mono] on a nav title, tab label or button.
  *
- * [Serif] carries the large root titles at weight 500 ONLY (spec §4/§5.6; v2.1-modern
- * artifact .lnav .lt = 28px/1.1, Chat root inline 24px) — Workspaces, Feed, Usage, Floors,
- * Settings at 28 sp, Chat at 24 sp — and never terminal/HUD/data.
+ * [Serif] now carries TWO reading surfaces (2026-10-26, chat reading style): the large root
+ * titles at weight 500 (spec §4/§5.6; v2.1-modern artifact .lnav .lt = 28px/1.1, Chat root
+ * inline 24px) — Workspaces, Feed, Usage, Floors, Settings at 28 sp, Chat at 24 sp — and
+ * assistant prose in the chat feed, [SerifBodyStep] above the composer text with 1.5 leading. It stays off terminal/HUD/data,
+ * and off user turns: a typed message keeps the system sans of the composer it came from.
  */
 object MaestriType {
     val Mono: FontFamily = FontFamily(Font(R.font.maestri_mono))
     val MonoName: String = "JetBrains Mono NF"
 
     val Serif: FontFamily = FontFamily.Serif
+
+    /**
+     * Assistant prose in the feed: the platform serif (never a bundled font file), set two
+     * steps above the composer text — 15 → 17 sp at the default size — with 1.5 leading.
+     */
+    const val SerifBodyStep = 2
+    const val SerifBodyLeading = 1.5f
+
     val RootTitleSize = 28.sp
     val ChatTitleSize = 24.sp
     val RootTitleWeight = FontWeight.Medium

@@ -33,6 +33,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.Style.LocalMaestriColors
+import app.maestri.ui.Style.MaestriType
 
 // ----------------------------------------------------------------- models
 
@@ -213,8 +214,12 @@ private fun styleFor(marker: String): MdStyle = when (marker) {
 
 /**
  * Renders assistant prose as markdown: headings, lists with a hanging indent, quotes,
- * horizontally scrolling code fences and inline emphasis. Colors and fonts come from the
- * app tokens only, so the bubble keeps looking like the rest of the chat.
+ * horizontally scrolling code fences and inline emphasis.
+ *
+ * Typography follows the reading style of the reference (Claude chat): the platform serif at
+ * [MaestriType.SerifBodyStep] above the composer text, 1.5 leading and real space between
+ * blocks, so a long answer reads as a page instead of a status pill. Colors and families stay
+ * on the app tokens; user turns keep the system sans of their bubble.
  */
 @Composable
 fun MarkdownProse(
@@ -225,17 +230,23 @@ fun MarkdownProse(
 ) {
     val blocks = remember(text) { parseMarkdownBlocks(text) }
     if (blocks.isEmpty()) return
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    val proseSize = bodySizeSp + MaestriType.SerifBodyStep
+    val leading = (proseSize * MaestriType.SerifBodyLeading).sp
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         blocks.forEach { block ->
             when (block) {
                 is MdBlock.Heading -> Text(
                     inlineText(block.text, bodySizeSp, color),
-                    fontSize = (bodySizeSp + if (block.level == 1) 5 else if (block.level == 2) 3 else 1).sp,
+                    fontFamily = MaestriType.Serif,
+                    fontSize = (proseSize + if (block.level == 1) 5 else if (block.level == 2) 3 else 1).sp,
+                    lineHeight = leading,
                     color = color,
                 )
                 is MdBlock.Paragraph -> Text(
                     inlineText(block.text, bodySizeSp, color),
-                    fontSize = bodySizeSp.sp,
+                    fontFamily = MaestriType.Serif,
+                    fontSize = proseSize.sp,
+                    lineHeight = leading,
                     color = color,
                 )
                 is MdBlock.Bullets -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -243,13 +254,18 @@ fun MarkdownProse(
                         Row(Modifier.fillMaxWidth()) {
                             Text(
                                 if (block.ordered) "${index + 1}." else "•",
-                                fontSize = bodySizeSp.sp,
-                                color = color,
+                                fontFamily = MaestriType.Serif,
+                                fontSize = proseSize.sp,
+                                lineHeight = leading,
+                                color = color.copy(alpha = 0.7f),
                                 modifier = Modifier.widthIn(min = 22.dp),
                             )
                             Text(
                                 inlineText(item, bodySizeSp, color),
-                                fontSize = bodySizeSp.sp,
+                                fontFamily = MaestriType.Serif,
+                                fontSize = proseSize.sp,
+                                lineHeight = leading,
+                                color = color,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
@@ -265,7 +281,9 @@ fun MarkdownProse(
                     Spacer(Modifier.width(8.dp))
                     Text(
                         inlineText(block.text, bodySizeSp, color.copy(alpha = 0.85f)),
-                        fontSize = bodySizeSp.sp,
+                        fontFamily = MaestriType.Serif,
+                        fontSize = proseSize.sp,
+                        lineHeight = leading,
                         color = color.copy(alpha = 0.85f),
                     )
                 }
@@ -301,7 +319,7 @@ private fun inlineText(text: String, bodySizeSp: Int, color: Color): AnnotatedSt
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
                             background = colors.cardSunken,
-                            fontSize = (bodySizeSp - 0.5f).sp,
+                            fontSize = (bodySizeSp + MaestriType.SerifBodyStep - 0.5f).sp,
                         ),
                     ) { append(span.text) }
                     else -> withStyle(

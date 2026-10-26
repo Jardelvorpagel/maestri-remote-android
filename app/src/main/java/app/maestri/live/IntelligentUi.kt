@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -260,8 +262,10 @@ internal fun toolGroupState(run: List<DisplayRow.Tool>): ToolGroupState {
 }
 
 /**
- * Compact collapsed stand-in for a run of tool calls: one header line with count,
- * tool summary and overall state; tapping unfolds the individual [rowContent] rows.
+ * Collapsed stand-in for a run of tool calls, drawn as the reference's status line: muted
+ * small text, a spinner while the run is still going and a trailing chevron that turns down
+ * when the rows unfold. No card chrome on the header — the activity line should read as a
+ * quiet aside, not as content.
  */
 @Composable
 internal fun ToolGroupCard(
@@ -275,41 +279,48 @@ internal fun ToolGroupCard(
         ToolGroupState.ERROR -> colors.errorText
         ToolGroupState.RUNNING -> colors.warning
     }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(colors.canvasSurface, cardShape())
-            .border(1.dp, colors.hairline, cardShape())
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(pillShape())
+                .clickable { expanded = !expanded }
+                .padding(vertical = 6.dp),
         ) {
-            Text(if (expanded) "▾" else "▸", fontSize = 11.sp, color = colors.secondaryLabel)
-            Spacer(Modifier.width(6.dp))
+            if (group.state == ToolGroupState.RUNNING) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(13.dp),
+                    strokeWidth = 1.5.dp,
+                    color = colors.secondaryLabel,
+                )
+            } else {
+                Box(Modifier.size(7.dp).background(stateColor, CircleShape))
+            }
+            Spacer(Modifier.width(8.dp))
             Text(
-                "${group.count} tool calls",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                "(${group.summary})",
-                fontSize = 12.sp,
+                "${group.count} tool calls · ${group.summary}",
+                fontSize = 13.sp,
                 color = colors.secondaryLabel,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            Box(Modifier.size(7.dp).background(stateColor, CircleShape))
             Spacer(Modifier.width(6.dp))
-            Text(group.state.name.lowercase(), style = monoHud(10, color = colors.secondaryLabel))
+            Text(
+                "\u203A",
+                fontSize = 16.sp,
+                color = colors.secondaryLabel,
+                modifier = Modifier.rotate(if (expanded) 90f else 0f),
+            )
         }
         if (expanded) {
             Column(
-                Modifier.fillMaxWidth().padding(top = 8.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .background(colors.canvasSurface, cardShape())
+                    .border(1.dp, colors.hairline, cardShape())
+                    .padding(10.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 group.rows.forEach { rowContent(it) }

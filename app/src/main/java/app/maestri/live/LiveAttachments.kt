@@ -13,12 +13,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,15 +29,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.HostRequests
 import app.maestri.ui.Style.LocalMaestriColors
-import app.maestri.ui.Style.monoHud
+import app.maestri.ui.Style.cardShape
+import app.maestri.ui.Style.controlShape
 import app.maestri.ui.Style.pillShape
 import java.util.UUID
 
@@ -166,24 +169,18 @@ fun LiveStagedChips(files: List<LiveStagedFile>, onRemove: (String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         files.forEach { file ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                LiveFileChip(
-                    name = file.name,
-                    sizeBytes = file.sizeBytes,
-                    trailing = when {
-                        file.uploading -> "…"
-                        file.attachmentId != null -> "✓"
-                        else -> "×"
-                    },
-                    onTrail = { onRemove(file.key) },
-                )
-            }
-            if (file.mime.startsWith("image/") && file.bytes.isNotEmpty()) {
-                LiveInlineImage(bytes = file.bytes, contentDescription = file.name)
-            }
+            LiveAttachmentCard(
+                name = file.name,
+                mime = file.mime,
+                sizeBytes = file.sizeBytes,
+                bytes = file.bytes,
+                trailing = when {
+                    file.uploading -> "\u22EF"
+                    file.attachmentId != null -> "\u2713"
+                    else -> "\u00D7"
+                },
+                onTrail = { onRemove(file.key) },
+            )
         }
     }
 }
@@ -196,78 +193,135 @@ fun LiveAttachmentChips(attachments: List<LivePendingAttachment>) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         attachments.forEach { attachment ->
-            LiveFileChip(
+            LiveAttachmentCard(
                 name = attachment.name,
+                mime = attachment.mime,
                 sizeBytes = attachment.sizeBytes,
-                trailing = null,
-                onTrail = null,
+                bytes = attachment.bytes,
             )
-            if (attachment.mime.startsWith("image/") && attachment.bytes != null && attachment.bytes.isNotEmpty()) {
-                LiveInlineImage(bytes = attachment.bytes, contentDescription = attachment.name)
-            }
         }
     }
 }
 
+/** 'Imagem · JPG' — the kind and extension the reference puts under the file name. */
+fun attachmentKindLabel(name: String, mime: String): String {
+    val ext = name.substringAfterLast('.', "")
+        .uppercase()
+        .takeIf { it.isNotEmpty() && it.length <= 5 && it.all { c -> c.isLetterOrDigit() } }
+    val kind = when {
+        mime.startsWith("image/") -> "Imagem"
+        mime.startsWith("audio/") -> "Áudio"
+        mime.startsWith("video/") -> "Vídeo"
+        mime.startsWith("text/") || mime == "application/json" -> "Texto"
+        else -> "Arquivo"
+    }
+    return if (ext == null) kind else "$kind · $ext"
+}
+
+/**
+ * The single attachment presentation, used by a delivered/pending turn and by the composer's
+ * staged rows: rounded card, thumbnail plate (the real image when the bytes decode, a kind
+ * glyph otherwise), bold file name and a muted kind/size line. [trailing] is the staged-state
+ * glyph the composer needs; [onTrail] makes it the remove action.
+ */
 @Composable
-private fun LiveFileChip(
+fun LiveAttachmentCard(
     name: String,
+    mime: String,
     sizeBytes: Long,
-    trailing: String?,
-    onTrail: (() -> Unit)?,
+    bytes: ByteArray? = null,
+    trailing: String? = null,
+    onTrail: (() -> Unit)? = null,
 ) {
     val colors = LocalMaestriColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .heightIn(min = 32.dp)
-            .background(colors.cardSunken, pillShape())
-            .border(1.dp, colors.hairline, pillShape())
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .fillMaxWidth()
+            .background(colors.canvasSurface, cardShape())
+            .border(1.dp, colors.hairline, cardShape())
+            .padding(10.dp),
     ) {
-        Text(
-            name,
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(formatAttachmentSize(sizeBytes), style = monoHud(10, color = colors.secondaryLabel))
+        AttachmentPlate(bytes = bytes, mime = mime, description = name)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                name,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                attachmentKindLabel(name, mime) + " · " + formatAttachmentSize(sizeBytes),
+                fontSize = 12.sp,
+                color = colors.secondaryLabel,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         if (trailing != null) {
-            Spacer(Modifier.width(6.dp))
-            val mod = if (onTrail != null) Modifier.clickable { onTrail() } else Modifier
-            Text(trailing, fontSize = 13.sp, color = colors.secondaryLabel, modifier = mod)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                trailing,
+                fontSize = 15.sp,
+                color = colors.secondaryLabel,
+                modifier = if (onTrail != null) {
+                    Modifier.clickable { onTrail() }.padding(horizontal = 4.dp, vertical = 6.dp)
+                } else {
+                    Modifier
+                },
+            )
         }
     }
 }
 
+/** The card's left plate: the image itself when it decodes, otherwise the kind's glyph. */
 @Composable
-fun LiveInlineImage(bytes: ByteArray, contentDescription: String?) {
-    var bitmap by remember(bytes) {
-        mutableStateOf(
-            runCatching {
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-                var sample = 1
-                while (bounds.outWidth / sample > 512 || bounds.outHeight / sample > 512) sample *= 2
-                val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
-            }.getOrNull()
-        )
+private fun AttachmentPlate(bytes: ByteArray?, mime: String, description: String) {
+    val colors = LocalMaestriColors.current
+    val bitmap = remember(bytes) { decodeDownsampled(bytes, maxSide = 160) }
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(controlShape())
+            .background(colors.accentSoft),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = description,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Text(kindGlyph(mime), fontSize = 20.sp, color = colors.accent)
+        }
     }
-    bitmap?.let { image ->
-        Image(
-            bitmap = image,
-            contentDescription = contentDescription,
-            contentScale = ContentScale.FillWidth,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 220.dp)
-                .clip(RoundedCornerShape(8.dp)),
-        )
-    }
+}
+
+private fun kindGlyph(mime: String): String = when {
+    mime.startsWith("image/") -> "\u25A3"
+    mime.startsWith("audio/") -> "\u266A"
+    mime.startsWith("video/") -> "\u25B6"
+    mime.startsWith("text/") || mime == "application/json" -> "\u2261"
+    else -> "\u25A4"
+}
+
+/** Downsampled bitmap for a plate or a preview; null when the bytes are not a decodable image. */
+private fun decodeDownsampled(bytes: ByteArray?, maxSide: Int = 512): ImageBitmap? {
+    if (bytes == null || bytes.isEmpty()) return null
+    return runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (bounds.outWidth / sample > maxSide || bounds.outHeight / sample > maxSide) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
+    }.getOrNull()
 }
 
 @Composable

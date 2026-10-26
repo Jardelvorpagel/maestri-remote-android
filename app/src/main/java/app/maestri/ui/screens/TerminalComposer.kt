@@ -42,10 +42,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.maestri.live.LiveStagedChips
 import app.maestri.live.LiveStagedFile
 import app.maestri.ui.HostRequests
+import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.RecordButton
+import app.maestri.ui.Style.containerShape
 import app.maestri.ui.Style.pillShape
 import app.maestri.ui.Style.softHalo
 
@@ -85,17 +88,37 @@ fun TerminalComposer(
     onToggleRecord: (() -> Unit)? = null,
 ) {
     val fieldStyle = TextStyle(fontSize = 13.5.sp, color = ComposerText)
+    val colors = LocalMaestriColors.current
+    // Chrome only: the chat face wears the reading-style pill — design-system container radius,
+    // hairline border, flat on the canvas — while the terminal face keeps its haloed panel,
+    // which belongs to the pty surface. Geometry, order and behaviour are identical in both.
+    val shellShape = if (chatSelected) containerShape() else panelShape
+    val shellBorder = if (chatSelected) colors.hairline else ComposerRing
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .softHalo(radius = 26.dp, elevation = 14.dp)
-                .background(ComposerFill.copy(alpha = ComposerFillAlpha), panelShape)
-                .border(1.dp, ComposerRing, panelShape)
+                .then(
+                    if (chatSelected) {
+                        Modifier
+                    } else {
+                        Modifier.softHalo(radius = 26.dp, elevation = 14.dp)
+                    },
+                )
+                .background(ComposerFill.copy(alpha = ComposerFillAlpha), shellShape)
+                .border(1.dp, shellBorder, shellShape)
                 .padding(start = 12.dp, end = 12.dp, top = 13.dp, bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            if (staged.isNotEmpty()) TerminalStagedChips(staged, onRemoveStaged)
+            // The chat face stages attachments as the same cards the feed uses; the pty face
+            // keeps its compact chips.
+            if (staged.isNotEmpty()) {
+                if (chatSelected) {
+                    LiveStagedChips(files = staged, onRemove = onRemoveStaged)
+                } else {
+                    TerminalStagedChips(staged, onRemoveStaged)
+                }
+            }
             Box(Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 1.dp)) {
                 if (value.isEmpty()) {
                     Text(placeholder, fontSize = 13.5.sp, color = ComposerMuted, maxLines = 1)

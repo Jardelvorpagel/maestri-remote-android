@@ -1,6 +1,7 @@
 package app.maestri.live
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -8,15 +9,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,6 +26,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -31,8 +38,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.RecordButton
+import app.maestri.ui.Style.containerShape
 import app.maestri.ui.Style.monoHud
 
+/**
+ * The chat face's composer, shaped like the reference: one rounded container that holds the
+ * field on top and the controls inside it — attach and mic on the left, a round send button
+ * trailing. Behaviour is unchanged: the mic stays TAP-to-record (hold-to-speak does not exist
+ * in this app, so the placeholder says "toque", not "segure").
+ */
 @Composable
 fun LiveComposerBar(
     vm: LiveViewModel,
@@ -55,43 +69,55 @@ fun LiveComposerBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         LiveStagedChips(files = staged, onRemove = { vm.removeStaged(it) })
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LiveAttachButton(enabled = ready && !recording, onPicked = onPicked)
-            // The mic follows the attach button's gate: hidden while the face is not Ready,
-            // but still drawn during a take so it can always be stopped.
-            if (onToggleRecord != null && (ready || recording)) {
-                RecordButton(
-                    recording = recording,
-                    elapsedMs = recordElapsedMs,
-                    enabled = ready || recording,
-                    onClick = onToggleRecord,
-                    tint = colors.secondaryLabel,
-                    size = 44.dp,
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.canvasSurface, containerShape())
+                .border(1.dp, colors.hairline, containerShape())
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
+                if (draft.isEmpty()) {
+                    Text(
+                        "Responda ao Maestro ou toque para falar",
+                        fontSize = 15.sp,
+                        color = colors.secondaryLabel,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                BasicTextField(
+                    value = draft,
+                    onValueChange = { vm.updateDraft(it) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = ready,
+                    singleLine = true,
+                    textStyle = TextStyle(fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(colors.accent),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(
+                        onSend = { if (canSend) vm.send() },
+                    ),
                 )
             }
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { vm.updateDraft(it) },
-                placeholder = { Text("Message Pi…", fontSize = 13.sp) },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                enabled = ready,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(
-                    onSend = { if (canSend) vm.send() },
-                ),
-            )
-            Button(
-                onClick = { vm.send() },
-                enabled = canSend,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = colors.accent,
-                    contentColor = colors.onAccent,
-                    disabledContainerColor = colors.cardSunken,
-                    disabledContentColor = colors.secondaryLabel,
-                ),
-            ) {
-                Text("Send", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                LiveAttachButton(enabled = ready && !recording, onPicked = onPicked)
+                // The mic follows the attach button's gate: hidden while the face is not Ready,
+                // but still drawn during a take so it can always be stopped.
+                if (onToggleRecord != null && (ready || recording)) {
+                    Spacer(Modifier.width(6.dp))
+                    RecordButton(
+                        recording = recording,
+                        elapsedMs = recordElapsedMs,
+                        enabled = ready || recording,
+                        onClick = onToggleRecord,
+                        tint = colors.secondaryLabel,
+                        size = 44.dp,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                SendPillButton(enabled = canSend, onClick = { vm.send() })
             }
         }
         if (disabledReason != null) {
@@ -104,6 +130,28 @@ fun LiveComposerBar(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+/** Round trailing send: the pill's only filled control, so the eye lands on it. */
+@Composable
+private fun SendPillButton(enabled: Boolean, onClick: () -> Unit) {
+    val colors = LocalMaestriColors.current
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(if (enabled) colors.accent else colors.cardSunken, CircleShape)
+            .clickable(enabled = enabled) { onClick() }
+            .semantics { contentDescription = "Send" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "\u2191",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (enabled) colors.onAccent else colors.secondaryLabel,
+        )
     }
 }
 
