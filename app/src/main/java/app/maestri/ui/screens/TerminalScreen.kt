@@ -92,6 +92,8 @@ import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import app.maestri.ui.Style.Gemini
+import app.maestri.ui.Style.drawAurora
+import androidx.compose.ui.draw.drawBehind
 import app.maestri.ui.Style.GeminiModelSelector
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriType
@@ -539,6 +541,10 @@ fun TerminalScreen(
     // prompt composer (Chat face) above the keyboard. Closed keyboard → zero inset → identical.
     Column(
         Modifier.fillMaxSize().background(if (inChat) Gemini.Canvas else TerminalThemes.TokyoNight.background)
+            // The chat face's wash covers the WHOLE surface — header, feed, composer and mode
+            // toggle — so no edge of it can show. Drawn behind the column's children, gated to the
+            // chat face so the terminal keeps its own background untouched.
+            .drawBehind { if (inChat) drawAurora(progress = 1f) }
             .statusBarsPadding()
             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
     ) {

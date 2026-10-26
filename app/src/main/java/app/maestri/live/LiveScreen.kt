@@ -67,7 +67,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import app.maestri.ui.Style.Gemini
 import app.maestri.ui.Style.GeminiAiCaption
-import app.maestri.ui.Style.GeminiAurora
 import app.maestri.ui.Style.GeminiHero
 import app.maestri.ui.Style.GeminiLaunchOverlay
 import app.maestri.ui.Style.GeminiModelSelector
@@ -305,10 +304,11 @@ fun ColumnScope.LiveFeedContent(
         if (followingNow) listState.scrollToItem(renderItems.size - 1)
     }
 
-    // The Gemini canvas: pure black, with the indigo wash under the feed. The boot animation
-    // plays once per chat-face mount, over the message area.
+    // The wash itself is painted by the screen behind this feed (TerminalScreen draws it over the
+    // whole chat surface, composer included), so this column stays transparent. The boot animation
+    // still plays once per chat-face mount, over the message area.
     var booting by remember { mutableStateOf(true) }
-    Column(Modifier.fillMaxWidth().weight(1f).background(Gemini.Canvas)) {
+    Column(Modifier.fillMaxWidth().weight(1f)) {
         // Persistent outage strip: the empty-state error card below only shows with
         // zero rows, but outages usually strike with history on screen — then the
         // only signal was the Connect button. This strip shows iff the relay is in
@@ -343,20 +343,16 @@ fun ColumnScope.LiveFeedContent(
         }
 
         Box(Modifier.weight(1f)) {
-            GeminiAurora(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxHeight(0.62f),
-            )
             when {
                 url.isBlank() -> LiveEmpty(
                     title = "No relay configured",
                     body = "Tap the relay chip in the header to set the URL — nothing connects until then. Token is optional, only for relays that require one.",
                 )
-                allRows.isEmpty() && waitingForSession && relayState is RelayState.Open -> LiveEmpty(
-                    title = "This terminal's session is not on the relay yet",
-                    body = "The relay is open for this terminal, but no Pi session has declared it. " +
-                        "It binds as soon as that session starts (or reconnect once it has).",
+                // Bound-but-empty reads as the same hero as a fresh chat: a bare paragraph over the
+                // wash photographed as text on a blue rectangle. The relay wording is the caption.
+                allRows.isEmpty() && waitingForSession && relayState is RelayState.Open -> GeminiHero(
+                    caption = "This terminal's session is not on the relay yet — it binds as soon as " +
+                        "that Pi session starts (or reconnect once it has).",
                 )
                 // The hero is the empty CONVERSATION state: the relay always opens with a
                 // `run started session …` notice, which on 182 pushed the hero off screen.

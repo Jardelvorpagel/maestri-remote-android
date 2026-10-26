@@ -75,7 +75,6 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.DialogProperties
 import app.maestri.live.GeminiCatalog
 import app.maestri.live.GeminiPreset
-import kotlin.math.sin
 
 /**
  * The Gemini-app reading surface: pure OLED black, the indigo aurora under the composer, the
@@ -169,80 +168,84 @@ private fun sparklePath(center: Offset, r: Float): Path = Path().apply {
 }
 
 /**
- * The indigo wash the reference keeps under the composer: a vertical fade into the deep blue
- * plus a radial bloom, with a slow digital band sweeping across it.
- *
- * [progress] 0..1 scales the whole thing in (launch); 1f is the resting empty-state look.
+ * The indigo wash, as data: (position from the top 0..1, alpha) per layer. Two vertical alpha ramps
+ * — the deep indigo base and a lighter blue lift at the bottom — plus one radial bloom. The stops
+ * are spaced so that a 1600 px column never jumps more than 3/255 between adjacent rows (asserted in
+ * AuroraWashTest), which is what stops the wash from reading as a pasted rectangle.
  */
-@Composable
-fun GeminiAurora(
-    modifier: Modifier = Modifier,
-    progress: Float = 1f,
-    animate: Boolean = true,
-) {
-    val glow = rememberInfiniteTransition(label = "gemini-aurora")
-    val sweep by glow.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(4200, easing = LinearEasing)),
-        label = "gemini-sweep",
+internal object AuroraWash {
+    val Deep = listOf(
+        0.00f to 0.00f,
+        0.26f to 0.00f,
+        0.38f to 0.02f,
+        0.48f to 0.05f,
+        0.58f to 0.10f,
+        0.68f to 0.17f,
+        0.78f to 0.25f,
+        0.88f to 0.34f,
+        0.95f to 0.42f,
+        1.00f to 0.50f,
     )
-    Canvas(modifier.fillMaxWidth()) {
-        drawAurora(progress, if (animate) sweep else 0.35f)
+    val Lift = listOf(
+        0.00f to 0.00f,
+        0.62f to 0.00f,
+        0.74f to 0.03f,
+        0.84f to 0.07f,
+        0.92f to 0.12f,
+        1.00f to 0.18f,
+    )
+    const val BloomAlpha = 0.12f
+    const val BloomRadius = 0.95f
+
+    /** Linear stop lookup, the same interpolation Brush.verticalGradient uses. */
+    fun sample(stops: List<Pair<Float, Float>>, at: Float): Float {
+        if (stops.isEmpty()) return 0f
+        val x = at.coerceIn(0f, 1f)
+        if (x <= stops.first().first) return stops.first().second
+        for (i in 1 until stops.size) {
+            val (p1, a1) = stops[i]
+            if (x <= p1) {
+                val (p0, a0) = stops[i - 1]
+                val span = (p1 - p0).takeIf { it > 0f } ?: return a1
+                return a0 + (a1 - a0) * ((x - p0) / span)
+            }
+        }
+        return stops.last().second
     }
+
+    /** Every layer's alpha at [at], in draw order. */
+    fun alphasAt(at: Float): List<Float> = listOf(sample(Deep, at), sample(Lift, at))
 }
 
-private fun DrawScope.drawAurora(progress: Float, sweep: Float) {
+/**
+ * Draws the wash over whatever surface it is given: a continuous indigo ramp from pure black at the
+ * top to the deep blue at the bottom, with one soft radial bloom low on the screen. No band, no scan
+ * lines, no hard edge — the tablet read those as stripes and as a blue rectangle.
+ *
+ * [progress] 0..1 scales the whole thing in (launch); 1f is the resting look.
+ */
+@Composable
+fun GeminiAurora(modifier: Modifier = Modifier, progress: Float = 1f) {
+    Canvas(modifier) { drawAurora(progress) }
+}
+
+/** The same wash, for hosts that paint it themselves (the chat screen paints the full surface). */
+internal fun DrawScope.drawAurora(progress: Float = 1f) {
     if (progress <= 0f) return
+    val p = progress.coerceIn(0f, 1f)
     val h = size.height
     val w = size.width
-    val p = progress.coerceIn(0f, 1f)
-    // Four gentle stops, the first two at zero alpha: on 182 the wash began at 0.45 with a
-    // visible horizontal cut where the box started, so the gradient now fades in from the top.
-    drawRect(
-        Brush.verticalGradient(
-            0f to Color.Transparent,
-            0.30f to Color.Transparent,
-            0.55f to Gemini.AuroraDeep.copy(alpha = 0.18f * p),
-            0.80f to Gemini.AuroraDeep.copy(alpha = 0.55f * p),
-            1f to Gemini.AuroraTop.copy(alpha = 0.90f * p),
-        ),
-    )
+    val deep = AuroraWash.Deep.map { stop -> stop.first to Gemini.AuroraDeep.copy(alpha = stop.second * p) }
+    val lift = AuroraWash.Lift.map { stop -> stop.first to Gemini.AuroraTop.copy(alpha = stop.second * p) }
+    drawRect(Brush.verticalGradient(*deep.toTypedArray()))
+    drawRect(Brush.verticalGradient(*lift.toTypedArray()))
     drawRect(
         Brush.radialGradient(
-            listOf(Gemini.StarBlue.copy(alpha = 0.26f * p), Color.Transparent),
-            center = Offset(w / 2f, h * 1.05f),
-            radius = w * 0.95f,
+            listOf(Gemini.StarBlue.copy(alpha = AuroraWash.BloomAlpha * p), Color.Transparent),
+            center = Offset(w / 2f, h),
+            radius = w * AuroraWash.BloomRadius,
         ),
     )
-    // The digital wave: a soft diagonal band crossing the wash, twice per cycle.
-    val band = ((sweep * 1.8f) % 1f) * (w * 1.6f) - w * 0.3f
-    drawRect(
-        Brush.linearGradient(
-            listOf(
-                Color.Transparent,
-                Gemini.StarBlue.copy(alpha = 0.16f * p),
-                Gemini.StarGreen.copy(alpha = 0.10f * p),
-                Color.Transparent,
-            ),
-            start = Offset(band - w * 0.35f, h),
-            end = Offset(band + w * 0.35f, h * 0.35f),
-        ),
-    )
-    // Scan lines keep the sweep reading as digital light rather than a soft blob.
-    for (i in 0 until 3) {
-        val y = h * (0.62f + 0.12f * i)
-        val shift = (sin((sweep * 6.28318f) + i) * 0.5f + 0.5f) * w
-        drawRect(
-            Brush.linearGradient(
-                listOf(Color.Transparent, Gemini.StarBlue.copy(alpha = 0.10f * p), Color.Transparent),
-                start = Offset(shift - w * 0.4f, y),
-                end = Offset(shift + w * 0.4f, y),
-            ),
-            topLeft = Offset(0f, y),
-            size = androidx.compose.ui.geometry.Size(w, 1.2f),
-        )
-    }
 }
 
 /**
@@ -305,7 +308,17 @@ fun GeminiLaunchOverlay(visible: Boolean, onFinished: () -> Unit) {
         onFinished()
     }
     AnimatedVisibility(visible = visible, exit = fadeOut(tween(420))) {
-        Box(Modifier.fillMaxSize().background(Gemini.Canvas)) {
+        // The veil fades out over its last fifth instead of ending on a black edge: the chat
+        // surface underneath carries the wash, and a hard cut between them photographed as a seam.
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    0f to Gemini.Canvas,
+                    0.78f to Gemini.Canvas,
+                    1f to Color.Transparent,
+                ),
+            ),
+        ) {
             Box(Modifier.fillMaxSize()) {
                 GeminiAurora(modifier = Modifier.fillMaxSize(), progress = rise.value)
             }
