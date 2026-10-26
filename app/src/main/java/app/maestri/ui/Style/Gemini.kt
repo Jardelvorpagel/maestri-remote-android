@@ -27,13 +27,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
@@ -59,6 +55,21 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import app.maestri.live.GeminiCatalog
 import app.maestri.live.GeminiPreset
 import kotlin.math.sin
@@ -456,12 +467,30 @@ private fun GeminiPickerRow(
     }
 }
 
+/** The strings the attachment sheet's accessibility surface announces. */
+object GeminiAttachmentSheetLabels {
+    const val Title = "Anexos"
+    const val Dismiss = "Fechar anexos"
+    const val Photos = "Photos"
+    const val Camera = "Camera"
+    const val Files = "Files"
+    val tiles = listOf(Photos, Camera, Files)
+}
+
+/** The three tile glyphs, drawn as line art instead of font characters. */
+internal enum class AttachmentIconKind { Photos, Camera, Files }
+
 /**
- * The `+` sheet, after the Gemini app: a #131314 panel with a drag handle, three equal tiles
- * (Photos / Camera / Files) and two prompt shortcuts underneath. Tiles only launch what the host
- * can actually do; every action closes the sheet first so the picker is never behind it.
+ * The `+` sheet, after the Gemini app: a #131314 panel docked flush to the bottom edge, 28 dp
+ * corners on the top only, a drag handle, three equal tiles (Photos / Camera / Files) and two
+ * prompt shortcuts underneath. Tiles only launch what the host can actually do; every action closes
+ * the sheet first so the picker is never behind it.
+ *
+ * Hand-rolled on a Dialog rather than ModalBottomSheet: the Material sheet caps itself at
+ * `BottomSheetDefaults.SheetMaxWidth` (640 dp) and labels its scrim with Material's own translated
+ * string, which on a tablet read as a floating 640 dp panel over an undimmed chat, announcing
+ * "Fechar planilha".
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GeminiAttachmentSheet(
     onPhotos: () -> Unit,
@@ -470,77 +499,188 @@ fun GeminiAttachmentSheet(
     onPrompt: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    val rise by animateFloatAsState(if (shown) 1f else 0f, tween(durationMillis = 220), label = "sheet")
+    Dialog(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Gemini.Sheet,
-        scrimColor = Color.Black.copy(alpha = 0.55f),
-        dragHandle = {
-            Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(width = 36.dp, height = 4.dp).background(Gemini.TextMuted, RoundedCornerShape(2.dp)))
-            }
-        },
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                AttachmentTile("\u25A3", "Photos", Modifier.weight(1f)) {
-                    onDismiss()
-                    onPhotos()
-                }
-                AttachmentTile("\u25CE", "Camera", Modifier.weight(1f)) {
-                    onDismiss()
-                    onCamera()
-                }
-                AttachmentTile("\u2261", "Files", Modifier.weight(1f)) {
-                    onDismiss()
-                    onFiles()
-                }
-            }
-            Spacer(Modifier.height(20.dp))
-            AttachmentAction(
-                glyph = "\u29C9",
-                title = "Canvas",
-                subtitle = "Build an interactive widget in chat",
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier.fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f * rise))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                        onDismiss()
+                    }
+                    .semantics { contentDescription = GeminiAttachmentSheetLabels.Dismiss },
+            )
+            Column(
+                Modifier.align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .graphicsLayer { translationY = (1f - rise) * size.height }
+                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                    .background(Gemini.Sheet)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .semantics(mergeDescendants = false) {
+                        contentDescription = GeminiAttachmentSheetLabels.Title
+                    }
+                    .padding(top = 10.dp, bottom = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                onDismiss()
-                onPrompt(
-                    "Build me an interactive widget for this chat: reply with a single `ui-html` " +
-                        "fenced block (self-contained HTML + CSS + JS, no network) and one short line " +
-                        "saying what it does.",
-                )
-            }
-            AttachmentAction(
-                glyph = "\u25A4",
-                title = "Visual card",
-                subtitle = "Summarize with metrics and quick actions",
-            ) {
-                onDismiss()
-                onPrompt(
-                    "Summarize this conversation as a `ui` card: a headline, up to four metrics and " +
-                        "two quick actions, in one fenced `ui` JSON block.",
-                )
+                Box(Modifier.size(width = 36.dp, height = 4.dp).background(Gemini.TextMuted, RoundedCornerShape(2.dp)))
+                Column(
+                    Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(top = 18.dp, start = 16.dp, end = 16.dp),
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AttachmentTile(AttachmentIconKind.Photos, GeminiAttachmentSheetLabels.Photos, Modifier.weight(1f)) {
+                            onDismiss()
+                            onPhotos()
+                        }
+                        AttachmentTile(AttachmentIconKind.Camera, GeminiAttachmentSheetLabels.Camera, Modifier.weight(1f)) {
+                            onDismiss()
+                            onCamera()
+                        }
+                        AttachmentTile(AttachmentIconKind.Files, GeminiAttachmentSheetLabels.Files, Modifier.weight(1f)) {
+                            onDismiss()
+                            onFiles()
+                        }
+                    }
+                    Spacer(Modifier.height(20.dp))
+                    AttachmentAction(
+                        glyph = "\u29C9",
+                        title = "Canvas",
+                        subtitle = "Build an interactive widget in chat",
+                    ) {
+                        onDismiss()
+                        onPrompt(
+                            "Build me an interactive widget for this chat: reply with a single `ui-html` " +
+                                "fenced block (self-contained HTML + CSS + JS, no network) and one short line " +
+                                "saying what it does.",
+                        )
+                    }
+                    AttachmentAction(
+                        glyph = "\u25A4",
+                        title = "Visual card",
+                        subtitle = "Summarize with metrics and quick actions",
+                    ) {
+                        onDismiss()
+                        onPrompt(
+                            "Summarize this conversation as a `ui` card: a headline, up to four metrics and " +
+                                "two quick actions, in one fenced `ui` JSON block.",
+                        )
+                    }
+                }
             }
         }
     }
 }
 
-/** One of the three equal rounded tiles: glyph on top, 14 sp label below. */
+/** One of the three equal tiles: line-art glyph on top, 14 sp label below. */
 @Composable
-private fun AttachmentTile(glyph: String, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun AttachmentTile(
+    kind: AttachmentIconKind,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = modifier
-            .aspectRatio(1f)
+            .height(96.dp)
             .background(Gemini.Surface, RoundedCornerShape(22.dp))
             .clickable { onClick() }
             .padding(8.dp),
     ) {
-        Text(glyph, fontSize = 26.sp, color = Gemini.Text)
-        Spacer(Modifier.height(8.dp))
+        AttachmentIcon(kind)
+        Spacer(Modifier.height(10.dp))
         Text(label, fontFamily = FontFamily.SansSerif, fontSize = 14.sp, color = Gemini.Text)
+    }
+}
+
+/**
+ * The tile glyphs, drawn the way GeminiStar is: paths on a 24 dp canvas, 1.6 dp round strokes.
+ * No icon dependency and no bundled asset, and they read as icons instead of boxed characters.
+ */
+@Composable
+private fun AttachmentIcon(kind: AttachmentIconKind, tint: Color = Gemini.TextSecondary) {
+    Canvas(Modifier.size(24.dp)) {
+        val stroke = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        val w = size.width
+        val h = size.height
+        when (kind) {
+            AttachmentIconKind.Photos -> {
+                drawRoundRect(
+                    tint,
+                    topLeft = Offset(w * 0.08f, h * 0.16f),
+                    size = Size(w * 0.84f, h * 0.68f),
+                    cornerRadius = CornerRadius(w * 0.10f),
+                    style = stroke,
+                )
+                drawCircle(tint, radius = w * 0.085f, center = Offset(w * 0.35f, h * 0.37f), style = stroke)
+                drawPath(
+                    Path().apply {
+                        moveTo(w * 0.13f, h * 0.78f)
+                        lineTo(w * 0.40f, h * 0.50f)
+                        lineTo(w * 0.58f, h * 0.68f)
+                        lineTo(w * 0.70f, h * 0.57f)
+                        lineTo(w * 0.87f, h * 0.78f)
+                    },
+                    tint,
+                    style = stroke,
+                )
+            }
+            AttachmentIconKind.Camera -> {
+                drawRoundRect(
+                    tint,
+                    topLeft = Offset(w * 0.06f, h * 0.28f),
+                    size = Size(w * 0.88f, h * 0.52f),
+                    cornerRadius = CornerRadius(w * 0.12f),
+                    style = stroke,
+                )
+                drawPath(
+                    Path().apply {
+                        moveTo(w * 0.32f, h * 0.28f)
+                        lineTo(w * 0.38f, h * 0.17f)
+                        lineTo(w * 0.62f, h * 0.17f)
+                        lineTo(w * 0.68f, h * 0.28f)
+                    },
+                    tint,
+                    style = stroke,
+                )
+                drawCircle(tint, radius = w * 0.145f, center = Offset(w * 0.50f, h * 0.545f), style = stroke)
+            }
+            AttachmentIconKind.Files -> {
+                drawPath(
+                    Path().apply {
+                        moveTo(w * 0.28f, h * 0.20f)
+                        lineTo(w * 0.60f, h * 0.20f)
+                        lineTo(w * 0.74f, h * 0.34f)
+                        lineTo(w * 0.74f, h * 0.72f)
+                    },
+                    tint,
+                    style = stroke,
+                )
+                drawRoundRect(
+                    tint,
+                    topLeft = Offset(w * 0.24f, h * 0.28f),
+                    size = Size(w * 0.50f, h * 0.56f),
+                    cornerRadius = CornerRadius(w * 0.06f),
+                    style = stroke,
+                )
+                drawPath(
+                    Path().apply {
+                        moveTo(w * 0.40f, h * 0.46f)
+                        lineTo(w * 0.58f, h * 0.46f)
+                        moveTo(w * 0.40f, h * 0.60f)
+                        lineTo(w * 0.58f, h * 0.60f)
+                    },
+                    tint,
+                    style = stroke,
+                )
+            }
+        }
     }
 }
 
