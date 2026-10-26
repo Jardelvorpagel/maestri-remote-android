@@ -92,6 +92,9 @@ import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import app.maestri.ui.Style.Gemini
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.runtime.mutableFloatStateOf
 import app.maestri.ui.Style.ChatHeaderMetrics
 import app.maestri.live.chatFeedEndPadding
 import androidx.compose.ui.platform.LocalDensity
@@ -893,20 +896,31 @@ fun TerminalScreen(
             val liveOnAttach = rememberLiveAttachHandler(liveVm)
             // Gemini's chat layout: the feed keeps the full height under the header and the
             // composer block floats over it, so the conversation slides behind the pill instead of
-            // being clipped above it. The block's real height is measured and handed back to the
-            // feed as its end padding — empty, with staged chips, with the keyboard up or with the
-            // run-mode toggle, the last message always clears it.
-            var composerHeightPx by remember { mutableIntStateOf(0) }
+            // being clipped above it.
+            //
+            // The reserve is the distance from the feed's bottom edge to the block's TOP edge, both
+            // read in root coordinates — not the block's own height. 189 measured the height, and a
+            // staged chip grew the block 205 px while the reserve grew only 175 px. A top edge
+            // cannot come up short: staged chips, the pill and the mode toggle all live inside the
+            // block, so every one of them moves that edge.
+            var blockTopPx by remember { mutableFloatStateOf(0f) }
+            var feedBottomPx by remember { mutableFloatStateOf(0f) }
             val density = LocalDensity.current
-            val composerHeight = with(density) { composerHeightPx.toDp() }
-            Box(Modifier.fillMaxWidth().weight(1f)) {
+            val blockTop = with(density) { (feedBottomPx - blockTopPx).coerceAtLeast(0f).toDp() }
+            Box(
+                Modifier.fillMaxWidth().weight(1f)
+                    .onGloballyPositioned { feedBottomPx = it.positionInRoot().y + it.size.height },
+            ) {
                 LiveFeedContent(
                     liveVm,
                     showComposer = false,
-                    endPadding = chatFeedEndPadding(composerHeight),
+                    endPadding = chatFeedEndPadding(blockTop),
                     onOpenTerminal = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },
                 )
-                if (!fullscreen) {
+                if (!fullscreen) Box(
+                    Modifier.align(Alignment.BottomCenter)
+                        .onGloballyPositioned { blockTopPx = it.positionInRoot().y },
+                ) {
                     TerminalComposer(
                         placeholder = "Ask Maestri...",
                         value = liveDraft,
@@ -922,12 +936,7 @@ fun TerminalScreen(
                         staged = liveStaged,
                         onRemoveStaged = { liveVm.removeStaged(it) },
                         focusRequester = inputFocusRequester,
-                        modifier = Modifier
-                            // Measured before the margins are applied, so the feed clears the
-                            // whole block including the gap under the mode toggle.
-                            .onSizeChanged { composerHeightPx = it.height }
-                            .align(Alignment.BottomCenter)
-                            .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
                         attachEnabled = liveReady,
                         recording = voice.recording,
                         recordElapsedMs = voice.elapsedMs,

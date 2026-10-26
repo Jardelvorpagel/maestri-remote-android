@@ -914,10 +914,19 @@ private fun MessageRow(
 val ChatComposerGap = 8.dp
 
 /**
- * How far the last message must sit from the bottom: the composer block's measured height plus one
- * gap. Measured, never hardcoded — the block grows with staged chips and with the run-mode toggle.
+ * How far the last message must sit from the bottom of the feed: the distance from that bottom edge
+ * to the TOP of the floating block, plus one gap.
+ *
+ * It is that distance and not the block's own height on purpose. The block is bottom-anchored, so
+ * the two are equal while everything inside it is accounted for — and when it is not (189 measured a
+ * chip row that grew the block 205 px while the reserve grew 175 px), reading the top edge is the
+ * fact that cannot be got wrong: whatever the chips, the pill, the toggle or a future row add, the
+ * edge moves with them.
  */
-fun chatFeedEndPadding(composerBlockHeight: Dp): Dp = composerBlockHeight + ChatComposerGap
+fun chatFeedEndPadding(blockTopOffset: Dp): Dp = blockTopOffset + ChatComposerGap
+
+/** The visible breathing room: what the feed reserves minus what the block actually occupies. */
+fun chatClearance(reserve: Dp, blockHeight: Dp): Dp = reserve - blockHeight
 
 /** Whether the feed carries an actual exchange yet: notices, tool rows and status lines do not. */
 internal fun hasConversation(rows: List<DisplayRow>): Boolean = rows.any { it is DisplayRow.Message }
