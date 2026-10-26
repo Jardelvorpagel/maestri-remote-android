@@ -23,10 +23,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
@@ -63,6 +70,8 @@ import kotlin.math.sin
  */
 object Gemini {
     val Canvas = Color(0xFF000000)
+    /** The attachment sheet sits one step above the canvas. */
+    val Sheet = Color(0xFF131314)
     val AuroraDeep = Color(0xFF081238)
     val AuroraTop = Color(0xFF0D1B4C)
     /** Bubbles, the composer pill and the active mode pill. */
@@ -174,17 +183,20 @@ private fun DrawScope.drawAurora(progress: Float, sweep: Float) {
     val h = size.height
     val w = size.width
     val p = progress.coerceIn(0f, 1f)
+    // Four gentle stops, the first two at zero alpha: on 182 the wash began at 0.45 with a
+    // visible horizontal cut where the box started, so the gradient now fades in from the top.
     drawRect(
         Brush.verticalGradient(
             0f to Color.Transparent,
-            0.45f to Gemini.AuroraDeep.copy(alpha = 0.25f * p),
-            0.78f to Gemini.AuroraDeep.copy(alpha = 0.7f * p),
-            1f to Gemini.AuroraTop.copy(alpha = 0.95f * p),
+            0.30f to Color.Transparent,
+            0.55f to Gemini.AuroraDeep.copy(alpha = 0.18f * p),
+            0.80f to Gemini.AuroraDeep.copy(alpha = 0.55f * p),
+            1f to Gemini.AuroraTop.copy(alpha = 0.90f * p),
         ),
     )
     drawRect(
         Brush.radialGradient(
-            listOf(Gemini.StarBlue.copy(alpha = 0.30f * p), Color.Transparent),
+            listOf(Gemini.StarBlue.copy(alpha = 0.26f * p), Color.Transparent),
             center = Offset(w / 2f, h * 1.05f),
             radius = w * 0.95f,
         ),
@@ -439,6 +451,120 @@ private fun GeminiPickerRow(
                 fontSize = 13.sp,
                 color = Gemini.TextMuted,
                 modifier = Modifier.padding(top = 1.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The `+` sheet, after the Gemini app: a #131314 panel with a drag handle, three equal tiles
+ * (Photos / Camera / Files) and two prompt shortcuts underneath. Tiles only launch what the host
+ * can actually do; every action closes the sheet first so the picker is never behind it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GeminiAttachmentSheet(
+    onPhotos: () -> Unit,
+    onCamera: () -> Unit,
+    onFiles: () -> Unit,
+    onPrompt: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Gemini.Sheet,
+        scrimColor = Color.Black.copy(alpha = 0.55f),
+        dragHandle = {
+            Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(width = 36.dp, height = 4.dp).background(Gemini.TextMuted, RoundedCornerShape(2.dp)))
+            }
+        },
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                AttachmentTile("\u25A3", "Photos", Modifier.weight(1f)) {
+                    onDismiss()
+                    onPhotos()
+                }
+                AttachmentTile("\u25CE", "Camera", Modifier.weight(1f)) {
+                    onDismiss()
+                    onCamera()
+                }
+                AttachmentTile("\u2261", "Files", Modifier.weight(1f)) {
+                    onDismiss()
+                    onFiles()
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            AttachmentAction(
+                glyph = "\u29C9",
+                title = "Canvas",
+                subtitle = "Build an interactive widget in chat",
+            ) {
+                onDismiss()
+                onPrompt(
+                    "Build me an interactive widget for this chat: reply with a single `ui-html` " +
+                        "fenced block (self-contained HTML + CSS + JS, no network) and one short line " +
+                        "saying what it does.",
+                )
+            }
+            AttachmentAction(
+                glyph = "\u25A4",
+                title = "Visual card",
+                subtitle = "Summarize with metrics and quick actions",
+            ) {
+                onDismiss()
+                onPrompt(
+                    "Summarize this conversation as a `ui` card: a headline, up to four metrics and " +
+                        "two quick actions, in one fenced `ui` JSON block.",
+                )
+            }
+        }
+    }
+}
+
+/** One of the three equal rounded tiles: glyph on top, 14 sp label below. */
+@Composable
+private fun AttachmentTile(glyph: String, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = modifier
+            .aspectRatio(1f)
+            .background(Gemini.Surface, RoundedCornerShape(22.dp))
+            .clickable { onClick() }
+            .padding(8.dp),
+    ) {
+        Text(glyph, fontSize = 26.sp, color = Gemini.Text)
+        Spacer(Modifier.height(8.dp))
+        Text(label, fontFamily = FontFamily.SansSerif, fontSize = 14.sp, color = Gemini.Text)
+    }
+}
+
+/** The Gemini action row: glyph, title, muted subtitle. */
+@Composable
+private fun AttachmentAction(glyph: String, title: String, subtitle: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 12.dp),
+    ) {
+        Box(Modifier.width(40.dp), contentAlignment = Alignment.Center) {
+            Text(glyph, fontSize = 19.sp, color = Gemini.TextSecondary)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, fontFamily = FontFamily.SansSerif, fontSize = 16.sp, color = Gemini.Text)
+            Text(
+                subtitle,
+                fontFamily = FontFamily.SansSerif,
+                fontSize = 13.sp,
+                color = Gemini.TextMuted,
+                modifier = Modifier.padding(top = 2.dp),
             )
         }
     }

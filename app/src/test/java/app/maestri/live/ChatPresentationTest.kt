@@ -47,4 +47,31 @@ class ChatPresentationTest {
         assertTrue(showsTurnBubble(body = "olha o print", attachmentCount = 1))
         assertTrue(showsTurnBubble(body = "", attachmentCount = 0))
     }
+
+    private fun event(kind: String, text: String? = null) = PiEvent(
+        v = 1,
+        seq = 1,
+        sessionId = "s",
+        entryId = "e",
+        ts = "",
+        kind = kind,
+        role = null,
+        text = text,
+        tool = null,
+    )
+
+    @Test
+    fun noticesAloneAreNotAConversation() {
+        val rows = listOf(
+            DisplayRow.StatusLine(event(LiveKinds.RUN_START, "run started session x")),
+            DisplayRow.StatusLine(event(LiveKinds.NOTICE, "model google/3.8-flash")),
+        )
+        assertFalse(hasConversation(rows))
+        assertFalse(hasConversation(emptyList()))
+    }
+
+    @Test
+    fun aMessageIsAConversation() {
+        assertTrue(hasConversation(listOf(DisplayRow.Message(event(LiveKinds.ASSISTANT_MESSAGE, "oi")))))
+    }
 }

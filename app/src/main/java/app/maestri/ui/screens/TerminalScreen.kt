@@ -91,6 +91,7 @@ import app.maestri.wire.TerminalCard
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
+import app.maestri.ui.Style.Gemini
 import app.maestri.ui.Style.GeminiModelSelector
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriType
@@ -237,6 +238,8 @@ fun TerminalScreen(
         key = "live-$terminalId",
         factory = LiveViewModelFactory(relayStore, terminalId),
     )
+    // The model / thinking picker lives in the chat top bar, so its state is read here.
+    val geminiPreset by liveVm.gemini.collectAsState()
     val fontSp by fontStore.sizeSp.collectAsState()
     // Chat-face display settings: own text steps (12/13/15) and density, same
     // DataStore idiom as the terminal settings above.
@@ -535,7 +538,7 @@ fun TerminalScreen(
     // consumes it here. One shared fix lifting the terminal input line + rail AND the agent
     // prompt composer (Chat face) above the keyboard. Closed keyboard → zero inset → identical.
     Column(
-        Modifier.fillMaxSize().background(TerminalThemes.TokyoNight.background)
+        Modifier.fillMaxSize().background(if (inChat) Gemini.Canvas else TerminalThemes.TokyoNight.background)
             .statusBarsPadding()
             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
     ) {
@@ -753,83 +756,107 @@ fun TerminalScreen(
                 ) { Text("+") }
             }
         }
-        if (!chromeTight && !fullscreen) {
-            Row(
-                Modifier.fillMaxWidth().height(50.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                backBtn()
-                titleBlock()
-                // The terminal stream has no meaning on the chat face; the relay state does.
-                if (inChat) relayChip() else connChip()
-            }
-            // design v2 .tchips: padding 4px 14px 12px 14px, gap 14px, and only
-            // .tconf gets margin-left:auto — [Térreo · Collapse] left, settings right.
-            Row(
-                Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                floorChip()
-                fullscreenBtn()
-                Spacer(Modifier.weight(1f))
-                Box {
-                    displaySettingsBtn()
-                    DropdownMenu(
-                        expanded = showDisplayConfig,
-                        onDismissRequest = { showDisplayConfig = false },
-                        modifier = Modifier.width(248.dp),
-                        containerColor = TerminalThemes.TokyoNight.panel,
-                    ) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (inChat) {
-                                Text("Text size · $chatTextSize", fontSize = 12.sp)
-                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                    ChatTextSizeStore.STEPS.forEachIndexed { index, size ->
-                                        SegmentedButton(
-                                            selected = chatTextSize == size,
-                                            onClick = {
-                                                chatTextSizeStore.setSize(size)
-                                                showDisplayConfig = false
-                                            },
-                                            shape = SegmentedButtonDefaults.itemShape(index, ChatTextSizeStore.STEPS.size),
-                                        ) { Text("$size") }
-                                    }
+        // The display-settings button and its menu, shared by the terminal chips row and the
+        // single Gemini top bar the chat face wears.
+        val settingsBox: @Composable () -> Unit = {
+            Box {
+                displaySettingsBtn()
+                DropdownMenu(
+                    expanded = showDisplayConfig,
+                    onDismissRequest = { showDisplayConfig = false },
+                    modifier = Modifier.width(248.dp),
+                    containerColor = TerminalThemes.TokyoNight.panel,
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (inChat) {
+                            Text("Text size · $chatTextSize", fontSize = 12.sp)
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                ChatTextSizeStore.STEPS.forEachIndexed { index, size ->
+                                    SegmentedButton(
+                                        selected = chatTextSize == size,
+                                        onClick = {
+                                            chatTextSizeStore.setSize(size)
+                                            showDisplayConfig = false
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(index, ChatTextSizeStore.STEPS.size),
+                                    ) { Text("$size") }
                                 }
-                                Text("Density", fontSize = 12.sp)
-                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                    val densities = listOf("Roomy" to false, "Compact" to true)
-                                    densities.forEachIndexed { index, (label, compact) ->
-                                        SegmentedButton(
-                                            selected = chatCompact == compact,
-                                            onClick = {
-                                                chatDensityStore.setCompact(compact)
-                                                showDisplayConfig = false
-                                            },
-                                            shape = SegmentedButtonDefaults.itemShape(index, densities.size),
-                                        ) { Text(label) }
-                                    }
-                                }
-                                scrollSpeedRow()
-                            } else {
-                                Text("Font size · $fontSp", fontSize = 12.sp)
-                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                    val sizes = listOf(TerminalFontStore.MIN_SP, 13, TerminalFontStore.MAX_SP).distinct()
-                                    sizes.forEachIndexed { index, size ->
-                                        SegmentedButton(
-                                            selected = fontSp == size,
-                                            onClick = {
-                                                fontStore.setSize(size)
-                                                showDisplayConfig = false
-                                            },
-                                            shape = SegmentedButtonDefaults.itemShape(index, sizes.size),
-                                        ) { Text("$size") }
-                                    }
-                                }
-                                scrollSpeedRow()
                             }
+                            Text("Density", fontSize = 12.sp)
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                val densities = listOf("Roomy" to false, "Compact" to true)
+                                densities.forEachIndexed { index, (label, compact) ->
+                                    SegmentedButton(
+                                        selected = chatCompact == compact,
+                                        onClick = {
+                                            chatDensityStore.setCompact(compact)
+                                            showDisplayConfig = false
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(index, densities.size),
+                                    ) { Text(label) }
+                                }
+                            }
+                            scrollSpeedRow()
+                        } else {
+                            Text("Font size · $fontSp", fontSize = 12.sp)
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                val sizes = listOf(TerminalFontStore.MIN_SP, 13, TerminalFontStore.MAX_SP).distinct()
+                                sizes.forEachIndexed { index, size ->
+                                    SegmentedButton(
+                                        selected = fontSp == size,
+                                        onClick = {
+                                            fontStore.setSize(size)
+                                            showDisplayConfig = false
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(index, sizes.size),
+                                    ) { Text("$size") }
+                                }
+                            }
+                            scrollSpeedRow()
                         }
                     }
+                }
+            }
+        }
+        if (!chromeTight && !fullscreen) {
+            if (inChat) {
+                // Screens 1-6: one clean black bar in chat mode — back, the model/thinking
+                // picker, then the relay state and the display settings. No TokyoNight chips.
+                Row(
+                    Modifier.fillMaxWidth().height(52.dp).background(Gemini.Canvas),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    backBtn()
+                    GeminiModelSelector(
+                        preset = geminiPreset,
+                        onModel = liveVm::selectModel,
+                        onThinking = liveVm::selectThinking,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    relayChip()
+                    settingsBox()
+                }
+            } else {
+                Row(
+                    Modifier.fillMaxWidth().height(50.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    backBtn()
+                    titleBlock()
+                    connChip()
+                }
+                // design v2 .tchips: padding 4px 14px 12px 14px, gap 14px, and only
+                // .tconf gets margin-left:auto — [Térreo · Collapse] left, settings right.
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    floorChip()
+                    fullscreenBtn()
+                    Spacer(Modifier.weight(1f))
+                    settingsBox()
                 }
             }
         }
@@ -853,18 +880,6 @@ fun TerminalScreen(
                     "${liveStaged.size} file${if (liveStaged.size == 1) "" else "s"}"
                 else null
             val liveOnAttach = rememberLiveAttachHandler(liveVm)
-            val gemini by liveVm.gemini.collectAsState()
-            // The model / thinking sub-bar, over the chat canvas like the reference's header trigger.
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                GeminiModelSelector(
-                    preset = gemini,
-                    onModel = liveVm::selectModel,
-                    onThinking = liveVm::selectThinking,
-                )
-            }
             LiveFeedContent(
                 liveVm,
                 showComposer = false,

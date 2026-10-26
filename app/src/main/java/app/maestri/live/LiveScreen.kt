@@ -358,7 +358,9 @@ fun ColumnScope.LiveFeedContent(
                     body = "The relay is open for this terminal, but no Pi session has declared it. " +
                         "It binds as soon as that session starts (or reconnect once it has).",
                 )
-                allRows.isEmpty() && relayState is RelayState.Open -> GeminiHero(
+                // The hero is the empty CONVERSATION state: the relay always opens with a
+                // `run started session …` notice, which on 182 pushed the hero off screen.
+                !hasConversation(allRows) && relayState is RelayState.Open -> GeminiHero(
                     caption = "The stream is open. New Pi activity lands here.",
                 )
                 allRows.isEmpty() && relayError != null -> LiveEmpty(
@@ -901,6 +903,9 @@ private fun MessageRow(
         }
     }
 }
+
+/** Whether the feed carries an actual exchange yet: notices, tool rows and status lines do not. */
+internal fun hasConversation(rows: List<DisplayRow>): Boolean = rows.any { it is DisplayRow.Message }
 
 /** Whether a turn needs bubble chrome at all: an attachment-only turn is just its card. */
 internal fun showsTurnBubble(body: String, attachmentCount: Int): Boolean =

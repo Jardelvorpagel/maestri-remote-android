@@ -24,6 +24,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,9 +47,13 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.live.LiveStagedChips
+import app.maestri.live.rememberImagePick
+import app.maestri.live.rememberPhotoCapture
+import app.maestri.live.rememberDocumentPick
 import app.maestri.live.LiveStagedFile
 import app.maestri.ui.HostRequests
 import app.maestri.ui.Style.Gemini
+import app.maestri.ui.Style.GeminiAttachmentSheet
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.RecordButton
@@ -88,6 +96,10 @@ fun TerminalComposer(
     recordElapsedMs: Long = 0L,
     onToggleRecord: (() -> Unit)? = null,
 ) {
+    val pickPhotos = rememberImagePick(onAttach)
+    val capturePhoto = rememberPhotoCapture(onAttach)
+    val pickFiles = rememberDocumentPick(onAttach)
+    var sheetOpen by remember { mutableStateOf(false) }
     val fieldStyle = if (chatSelected) {
         TextStyle(fontSize = 15.sp, color = Gemini.Text)
     } else {
@@ -152,7 +164,13 @@ fun TerminalComposer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                AttachButton(enabled = attachEnabled && !busy && !recording, onPicked = onAttach)
+                AttachButton(
+                    enabled = attachEnabled && !busy && !recording,
+                    onPicked = onAttach,
+                    // On the chat face the + opens the Gemini sheet; the pty face keeps the
+                    // straight document picker it has always had.
+                    onOpenSheet = if (chatSelected) ({ sheetOpen = true }) else null,
+                )
                 // No handler means this face owns no recorder: draw no button at all rather
                 // than a dead one.
                 onToggleRecord?.let { toggle ->
@@ -171,6 +189,15 @@ fun TerminalComposer(
                 SendButton(enabled = canSend, busy = busy, chatSelected = chatSelected, onSend = onSend)
             }
         }
+        if (sheetOpen) {
+            GeminiAttachmentSheet(
+                onPhotos = pickPhotos,
+                onCamera = capturePhoto,
+                onFiles = pickFiles,
+                onPrompt = { prompt -> onChange(prompt) },
+                onDismiss = { sheetOpen = false },
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Row(
             Modifier
@@ -186,13 +213,22 @@ fun TerminalComposer(
 }
 
 @Composable
-private fun AttachButton(enabled: Boolean, onPicked: (List<Uri>) -> Unit) {
+private fun AttachButton(
+    enabled: Boolean,
+    onPicked: (List<Uri>) -> Unit,
+    onOpenSheet: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     Box(
         Modifier
             .size(48.dp)
             .clip(CircleShape)
             .clickable(enabled = enabled) {
+                val sheet = onOpenSheet
+                if (sheet != null) {
+                    sheet()
+                    return@clickable
+                }
                 val host = context as? HostRequests ?: return@clickable
                 runCatching { host.pickDocuments { uris -> if (uris.isNotEmpty()) onPicked(uris) } }
             }

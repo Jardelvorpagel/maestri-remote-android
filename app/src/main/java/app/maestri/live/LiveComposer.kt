@@ -22,6 +22,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -38,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.Style.Gemini
+import app.maestri.ui.Style.GeminiAttachmentSheet
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.RecordButton
 import app.maestri.ui.Style.containerShape
@@ -64,6 +68,10 @@ fun LiveComposerBar(
     val ready = composeState is LiveComposeState.Ready
     val canSend = ready && (draft.isNotBlank() || staged.isNotEmpty()) && !recording
     val onPicked = rememberLiveAttachHandler(vm)
+    val pickPhotos = rememberImagePick(onPicked)
+    val capturePhoto = rememberPhotoCapture(onPicked)
+    val pickFiles = rememberDocumentPick(onPicked)
+    var sheetOpen by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -104,7 +112,7 @@ fun LiveComposerBar(
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                LiveAttachButton(enabled = ready && !recording, onPicked = onPicked)
+                LiveAttachButton(enabled = ready && !recording, onOpenSheet = { sheetOpen = true })
                 // The mic follows the attach button's gate: hidden while the face is not Ready,
                 // but still drawn during a take so it can always be stopped.
                 if (onToggleRecord != null && (ready || recording)) {
@@ -130,6 +138,15 @@ fun LiveComposerBar(
                 color = colors.secondaryLabel,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (sheetOpen) {
+            GeminiAttachmentSheet(
+                onPhotos = pickPhotos,
+                onCamera = capturePhoto,
+                onFiles = pickFiles,
+                onPrompt = { prompt -> vm.updateDraft(prompt) },
+                onDismiss = { sheetOpen = false },
             )
         }
     }

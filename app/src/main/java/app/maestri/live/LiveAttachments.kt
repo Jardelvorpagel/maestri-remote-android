@@ -1,9 +1,13 @@
 package app.maestri.live
 
+import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -134,9 +138,128 @@ fun stagePickedUris(context: Context, uris: List<Uri>): Pair<List<LiveStagedFile
     return staged to unreadable
 }
 
+/** The chosen files of a picker result: multiple items first, the single URI second. */
+fun pickedUris(data: Intent?): List<Uri> {
+    val clip = data?.clipData
+    return when {
+        clip != null -> (0 until clip.itemCount).map { clip.getItemAt(it).uri }
+        data?.data != null -> listOf(data.data!!)
+        else -> emptyList()
+    }
+}
+
 @Composable
-fun LiveAttachButton(enabled: Boolean, onPicked: (List<Uri>) -> Unit) {
+private fun launchPicking(
+    intent: () -> Intent?,
+    onPicked: (List<Uri>) -> Unit,
+): () -> Unit {
     val context = LocalContext.current
+    val host = context as? HostRequests ?: context.findActivity() as? HostRequests
+    return {
+        runCatching {
+            val built = intent()
+            if (host == null || built == null) {
+                Log.d("QAFeed", "attach: no host or no intent for the picker")
+            } else {
+                host.launchForResult(built) { code, data ->
+                    if (code == android.app.Activity.RESULT_OK) {
+                        val uris = pickedUris(data)
+                        if (uris.isNotEmpty()) onPicked(uris)
+                    }
+                }
+            }
+        }.onFailure { Log.d("QAFeed", "attach launch failed: ${it.javaClass.simpleName}: ${it.message}", it) }
+    }
+}
+
+/** Photos: the document picker narrowed to images, multiple allowed, like the reference's tile. */
+@Composable
+fun rememberImagePick(onPicked: (List<Uri>) -> Unit): () -> Unit = launchPicking(
+    intent = {
+        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+    },
+    onPicked = onPicked,
+)
+
+/** Files: the existing all-types picker. */
+@Composable
+fun rememberDocumentPick(onPicked: (List<Uri>) -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val host = context as? HostRequests ?: context.findActivity() as? HostRequests
+    return {
+        runCatching {
+            host?.pickDocuments { uris -> if (uris.isNotEmpty()) onPicked(uris) }
+                ?: Log.d("QAFeed", "attach: no host for the document picker")
+        }.onFailure { Log.d("QAFeed", "attach launch failed: ${it.javaClass.simpleName}: ${it.message}", it) }
+    }
+}
+
+/**
+ * Camera: the system capture intent writing to a fresh MediaStore image row, so no FileProvider
+ * path is involved and the result is a real content URI the picker path can read. With no camera
+ * app installed the tile degrades to the image picker instead of a dead intent.
+ */
+@Composable
+fun rememberPhotoCapture(onPicked: (List<Uri>) -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val host = context as? HostRequests ?: context.findActivity() as? HostRequests
+    return {
+        val capture = runCatching { Intent(MediaStore.ACTION_IMAGE_CAPTURE) }.getOrNull()
+        val resolvable = capture != null && capture.resolveActivity(context.packageManager) != null
+        if (!resolvable) {
+            Log.d("QAFeed", "camera: no capture activity, falling back to the image picker")
+        }
+        var target: Uri? = null
+        if (resolvable) {
+            target = runCatching {
+                context.contentResolver.insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, "maestri-" + System.currentTimeMillis() + ".jpg")
+                        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    },
+                )
+            }.getOrNull()
+        }
+        val intent = if (target != null) capture!!.putExtra(MediaStore.EXTRA_OUTPUT, target) else {
+            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "image/*"
+            }
+        }
+        runCatching {
+            host?.launchForResult(intent) { code, data ->
+                val taken = target.takeIf { code == android.app.Activity.RESULT_OK }
+                if (taken != null) {
+                    onPicked(listOf(taken))
+                } else {
+                    target?.let { stale -> runCatching { context.contentResolver.delete(stale, null, null) } }
+                    if (code == android.app.Activity.RESULT_OK) {
+                        val uris = pickedUris(data)
+                        if (uris.isNotEmpty()) onPicked(uris)
+                    }
+                }
+            } ?: Log.d("QAFeed", "camera: no host for the capture intent")
+        }.onFailure { Log.d("QAFeed", "camera launch failed: ${it.javaClass.simpleName}: ${it.message}", it) }
+    }
+}
+
+/** The activity behind a themed context wrapper. */
+private fun Context.findActivity(): android.app.Activity? {
+    var current: Context? = this
+    while (current is android.content.ContextWrapper) {
+        if (current is android.app.Activity) return current
+        current = current.baseContext
+    }
+    return null
+}
+
+@Composable
+fun LiveAttachButton(enabled: Boolean, onOpenSheet: () -> Unit) {
     val colors = LocalMaestriColors.current
     Box(
         modifier = Modifier
@@ -144,18 +267,7 @@ fun LiveAttachButton(enabled: Boolean, onPicked: (List<Uri>) -> Unit) {
             .clip(pillShape())
             .background(colors.canvasSurface, pillShape())
             .border(1.dp, colors.hairline, pillShape())
-            .clickable(enabled = enabled) {
-                val host = context as? HostRequests
-                if (host == null) {
-                    android.util.Log.d("QAFeed", "attach: no host for the document picker")
-                    return@clickable
-                }
-                runCatching {
-                    host.pickDocuments { uris -> if (uris.isNotEmpty()) onPicked(uris) }
-                }.onFailure {
-                    android.util.Log.d("QAFeed", "attach launch failed: ${it.javaClass.simpleName}: ${it.message}", it)
-                }
-            },
+            .clickable(enabled = enabled) { onOpenSheet() },
         contentAlignment = Alignment.Center,
     ) {
         Text("+", fontSize = 20.sp, color = colors.secondaryLabel)
