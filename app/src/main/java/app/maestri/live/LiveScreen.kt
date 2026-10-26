@@ -1,5 +1,6 @@
 package app.maestri.live
 
+import android.util.Log
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -41,7 +44,6 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -54,6 +56,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -316,17 +319,28 @@ fun LiveFeedContent(
         if (renderItems.isEmpty()) return@LaunchedEffect
         if (followingNow) listState.scrollToItem(renderItems.size - 1)
     }
-    // Opening the keyboard shrinks this viewport by the IME's height while the list keeps its top
-    // anchor, so a conversation sitting at the tail is pushed off it: the tail test then reads
-    // false, the floating chip comes up and no amount of tapping settled it — the newest row was
-    // below the edge, not the user away from it. Re-anchor instead of hiding the chip on an IME
-    // flag: the tail is re-established, the test agrees again, and a reader who really did scroll
-    // away is untouched (realign is gated on the follow state read before the flip).
-    var lastViewportPx by remember { mutableIntStateOf(0) }
-    val realignTail = following && lastViewportPx > 0 && lastViewportPx != viewportPx
-    SideEffect { lastViewportPx = viewportPx }
-    LaunchedEffect(realignTail) {
-        if (realignTail && renderItems.isNotEmpty()) listState.scrollToItem(renderItems.size - 1)
+    // Opening the keyboard leaves the list on its top anchor, so a conversation sitting at the tail
+    // is pushed off it: the tail test then reads false, the floating chip comes up, and nothing
+    // re-anchors — the newest row was below the edge, not the reader away from it. Re-anchoring is
+    // driven by the IME inset itself, the one value that provably moves: 191 keyed it on the feed's
+    // own viewport size and the device pass showed a list that never moved, so that value was not
+    // the one changing (or the effect re-keyed itself away before it could scroll — which is why the
+    // decision below lives in a plain remembered object, not in composition state, and the scroll runs
+    // on a scope that outlives recomposition).
+    val imeBottomPx = WindowInsets.ime.getBottom(LocalDensity.current)
+    val realignState = remember { TailRealignState() }
+    val tailScope = rememberCoroutineScope()
+    SideEffect {
+        val realign = realignState.decision(imeBottomPx, following)
+        val line = "viewportEnd=${listState.layoutInfo.viewportEndOffset}" +
+            " viewport=${viewportPx}px items=${renderItems.size}" +
+            " following=$following atTail=$atBottom imeBottom=${imeBottomPx}px" +
+            " realign=$realign"
+        if (realignState.lastLine != line) {
+            realignState.lastLine = line
+            Log.d("MaestriTail", line)
+        }
+        if (realign && renderItems.isNotEmpty()) tailScope.launch { listState.scrollToItem(renderItems.size - 1) }
     }
 
     // The wash itself is painted by the screen behind this feed (TerminalScreen draws it over the
@@ -1192,3 +1206,26 @@ internal fun feedAtTail(
     if (lastVisibleIndex == null || lastVisibleBottomPx == null) return false
     return lastVisibleIndex >= totalItems - 1 && lastVisibleBottomPx <= viewportEndOffsetPx + slackPx
 }
+
+/**
+ * The re-anchor decision, as a plain state machine over the trigger value the screen feeds it.
+ *
+ * Deliberately not composition state: a `mutableStateOf` written from a SideEffect invalidates the
+ * composition that read it, and a `LaunchedEffect` keyed on that value is cancelled on the very
+ * recomposition it caused — the scroll request is dropped before the layout pass consumes it. That
+ * is what 191 shipped, and the device pass showed a list that never moved.
+ */
+internal class TailRealignState(private var lastTriggerPx: Int = NOT_SEEN_TRIGGER) {
+
+    /** Last diagnostic line printed, so the tag logs one line per change and never spams logcat. */
+    var lastLine: String? = null
+
+    /** True on the frame the trigger moved while the reader was following — once per change. */
+    fun decision(triggerPx: Int, following: Boolean): Boolean {
+        val fire = lastTriggerPx != NOT_SEEN_TRIGGER && lastTriggerPx != triggerPx && following
+        lastTriggerPx = triggerPx
+        return fire
+    }
+}
+
+internal const val NOT_SEEN_TRIGGER = Int.MIN_VALUE
