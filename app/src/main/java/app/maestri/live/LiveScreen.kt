@@ -327,15 +327,21 @@ fun LiveFeedContent(
     // the one changing (or the effect re-keyed itself away before it could scroll — which is why the
     // decision below lives in a plain remembered object, not in composition state, and the scroll runs
     // on a scope that outlives recomposition).
-    val imeBottomPx = WindowInsets.ime.getBottom(LocalDensity.current)
+    val density = LocalDensity.current
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
+    val padPx = with(density) { endPadding.roundToPx() }
     val realignState = remember { TailRealignState() }
     val tailScope = rememberCoroutineScope()
     SideEffect {
-        val realign = realignState.decision(imeBottomPx, following)
+        // Both values matter and neither subsumes the other: the inset moves when the keyboard opens,
+        // the reserve moves when a staged chip row grows the block. The scroll must run AFTER the
+        // block geometry has settled, or it lands the newest row against a reserve the list is no
+        // longer using — which is what the 192 pass caught in the chip case (1.3 dp instead of 24).
+        val realign = realignState.decision(imeBottomPx, padPx, following)
         val line = "viewportEnd=${listState.layoutInfo.viewportEndOffset}" +
             " viewport=${viewportPx}px items=${renderItems.size}" +
             " following=$following atTail=$atBottom imeBottom=${imeBottomPx}px" +
-            " realign=$realign"
+            " pad=${padPx}px realign=$realign"
         if (realignState.lastLine != line) {
             realignState.lastLine = line
             Log.d("MaestriTail", line)
@@ -1215,16 +1221,26 @@ internal fun feedAtTail(
  * recomposition it caused — the scroll request is dropped before the layout pass consumes it. That
  * is what 191 shipped, and the device pass showed a list that never moved.
  */
-internal class TailRealignState(private var lastTriggerPx: Int = NOT_SEEN_TRIGGER) {
+internal class TailRealignState(
+    private var lastInsetPx: Int = NOT_SEEN_TRIGGER,
+    private var lastReservePx: Int = NOT_SEEN_TRIGGER,
+) {
 
     /** Last diagnostic line printed, so the tag logs one line per change and never spams logcat. */
     var lastLine: String? = null
 
-    /** True on the frame the trigger moved while the reader was following — once per change. */
-    fun decision(triggerPx: Int, following: Boolean): Boolean {
-        val fire = lastTriggerPx != NOT_SEEN_TRIGGER && lastTriggerPx != triggerPx && following
-        lastTriggerPx = triggerPx
-        return fire
+    /**
+     * True on the frame either trigger moved while the reader was following — once per change. The
+     * inset covers the keyboard, the reserve covers a staged chip row growing the block; a scroll
+     * fired before the reserve settles applies the old padding and leaves the newest row where the
+     * device pass measured it, 1.3 dp above the chip.
+     */
+    fun decision(insetPx: Int, reservePx: Int, following: Boolean): Boolean {
+        val seen = lastInsetPx != NOT_SEEN_TRIGGER
+        val moved = lastInsetPx != insetPx || lastReservePx != reservePx
+        lastInsetPx = insetPx
+        lastReservePx = reservePx
+        return seen && moved && following
     }
 }
 

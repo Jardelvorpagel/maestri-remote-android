@@ -40,6 +40,18 @@ class ChatLayoutTest {
     }
 
     @Test
+    fun theTallChipBlockGetsTheSameGapAsTheShortOnes() {
+        // 443 px of block at 2.25 px/dp — the state that read 1.3 dp on 192 while 237 px read 24.0.
+        // A reserve that only holds for short blocks is what let that through.
+        val tallBlock = 196.9.dp
+        assertEquals(tallBlock + ChatComposerGap, chatFeedEndPadding(tallBlock))
+        assertEquals(ChatComposerGap, chatClearance(chatFeedEndPadding(tallBlock), tallBlock))
+        assertTrue(chatFeedEndPadding(tallBlock) > chatFeedEndPadding(plain))
+        // the reserve must grow by exactly the block's growth, chip row included
+        assertEquals(tallBlock - plain, chatFeedEndPadding(tallBlock) - chatFeedEndPadding(plain))
+    }
+
+    @Test
     fun theCompactHeaderShrinksTheTextNotTheTarget() {
         assertEquals(48.dp, ChatHeaderMetrics.BarHeight)
         assertEquals(14f, ChatHeaderMetrics.ModelSp.value, 0f)
