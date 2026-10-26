@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -51,6 +53,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
@@ -61,6 +65,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import app.maestri.ui.Style.Gemini
+import app.maestri.ui.Style.GeminiAiCaption
+import app.maestri.ui.Style.GeminiAurora
+import app.maestri.ui.Style.GeminiHero
+import app.maestri.ui.Style.GeminiLaunchOverlay
+import app.maestri.ui.Style.GeminiStar
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriRadii
 import app.maestri.ui.Style.Motion
@@ -259,6 +269,13 @@ fun ColumnScope.LiveFeedContent(
     }
     // Consecutive tool runs collapse into one folded card (see IntelligentUi.groupFeedRows).
     val renderItems = remember(allRows) { groupFeedRows(allRows) }
+    // The reference prints its AI caption under the newest answer only.
+    val lastAnswerKey = remember(renderItems) {
+        renderItems.lastOrNull { item ->
+            item is FeedRenderItem.Single &&
+                (item.row as? DisplayRow.Message)?.event?.kind == LiveKinds.ASSISTANT_MESSAGE
+        }?.let { renderKey(it) }
+    }
     val listState = rememberLazyListState()
 
     val atBottom by remember {
@@ -280,7 +297,10 @@ fun ColumnScope.LiveFeedContent(
         if (followingNow) listState.scrollToItem(renderItems.size - 1)
     }
 
-    Column(Modifier.fillMaxWidth().weight(1f)) {
+    // The Gemini canvas: pure black, with the indigo wash under the feed. The boot animation
+    // plays once per chat-face mount, over the message area.
+    var booting by remember { mutableStateOf(true) }
+    Column(Modifier.fillMaxWidth().weight(1f).background(Gemini.Canvas)) {
         // Persistent outage strip: the empty-state error card below only shows with
         // zero rows, but outages usually strike with history on screen — then the
         // only signal was the Connect button. This strip shows iff the relay is in
@@ -315,6 +335,11 @@ fun ColumnScope.LiveFeedContent(
         }
 
         Box(Modifier.weight(1f)) {
+            GeminiAurora(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxHeight(0.62f),
+            )
             when {
                 url.isBlank() -> LiveEmpty(
                     title = "No relay configured",
@@ -325,9 +350,8 @@ fun ColumnScope.LiveFeedContent(
                     body = "The relay is open for this terminal, but no Pi session has declared it. " +
                         "It binds as soon as that session starts (or reconnect once it has).",
                 )
-                allRows.isEmpty() && relayState is RelayState.Open -> LiveEmpty(
-                    title = "Waiting for events…",
-                    body = "The stream is open. New Pi activity lands here.",
+                allRows.isEmpty() && relayState is RelayState.Open -> GeminiHero(
+                    caption = "The stream is open. New Pi activity lands here.",
                 )
                 allRows.isEmpty() && relayError != null -> LiveEmpty(
                     title = "Relay error",
@@ -353,6 +377,7 @@ fun ColumnScope.LiveFeedContent(
                                 onOpenTerminal = onOpenTerminal,
                                 composerState = composeState,
                                 sentAttachments = sentAttachments,
+                                showFooter = renderKey(item) == lastAnswerKey,
                             )
                             is FeedRenderItem.ToolGroup -> ToolGroupCard(group = item) { tool ->
                                 ToolRow(tool.call, tool.result, bubbleVertical, onOpenTerminal)
@@ -361,25 +386,37 @@ fun ColumnScope.LiveFeedContent(
                     }
                 }
             }
+            GeminiLaunchOverlay(visible = booting) { booting = false }
         }
 
         // Below the list, never over it: the tail chip used to float on top of the last
         // message and read as clipped text. It only costs a row while the tail is unfollowed.
         if (allRows.isNotEmpty() && !following) {
             Box(Modifier.fillMaxWidth().padding(bottom = 6.dp), contentAlignment = Alignment.Center) {
-                TextButton(
-                    onClick = {
-                        vm.resumeTail()
-                        scope.launch { listState.animateScrollToItem(renderItems.size - 1) }
-                    },
+                Box(
                     modifier = Modifier
-                        .heightIn(min = Rhythm.TouchTarget.dp)
-                        .background(colors.canvasChromeElevated, pillShape())
-                        .border(1.dp, colors.hairline, pillShape()),
-                    contentPadding = PaddingValues(horizontal = 14.dp),
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Gemini.SurfaceRaised, CircleShape)
+                        .clickable {
+                            vm.resumeTail()
+                            scope.launch { listState.animateScrollToItem(renderItems.size - 1) }
+                        }
+                        .semantics { contentDescription = "Scroll to the newest message" },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    val label = if (newWhileAway > 0) "$newWhileAway new · resume" else "Resume tail"
-                    Text(label, style = monoHud(11, color = MaterialTheme.colorScheme.onSurface))
+                    Text("\u2193", fontSize = 18.sp, color = Gemini.TextStrong)
+                    if (newWhileAway > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(16.dp)
+                                .background(Gemini.Accent, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("$newWhileAway", fontSize = 9.sp, color = Gemini.TextStrong)
+                        }
+                    }
                 }
             }
         }
@@ -426,6 +463,7 @@ private fun FeedRowView(
     onOpenTerminal: (() -> Unit)?,
     composerState: LiveComposeState,
     sentAttachments: Map<String, List<LivePendingAttachment>>,
+    showFooter: Boolean = false,
 ) {
     val composerReady = composerState is LiveComposeState.Ready
     when (row) {
@@ -436,6 +474,7 @@ private fun FeedRowView(
             attachments = sentAttachments[row.event.text.orEmpty()].orEmpty(),
             composerReady = composerReady,
             onSendPrompt = vm::sendOption,
+            showFooter = showFooter,
         )
         is DisplayRow.Tool -> ToolRow(
             row.call,
@@ -574,13 +613,12 @@ private fun rowKey(row: DisplayRow): String = when (row) {
 
 @Composable
 private fun LiveEmpty(title: String, body: String) {
-    val colors = LocalMaestriColors.current
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-        Text(body, fontSize = 13.sp, color = colors.secondaryLabel)
+        Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Gemini.Text)
+        Text(body, fontSize = 13.sp, color = Gemini.TextMuted)
     }
 }
 
@@ -790,12 +828,21 @@ private fun MessageRow(
     attachments: List<LivePendingAttachment> = emptyList(),
     composerReady: Boolean = false,
     onSendPrompt: (String) -> Unit = {},
+    showFooter: Boolean = false,
 ) {
     val colors = LocalMaestriColors.current
     val mine = event.kind == LiveKinds.USER_MESSAGE
     val body = event.text.orEmpty()
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
-        Column(modifier = Modifier.fillMaxWidth(if (mine) 0.86f else 0.92f)) {
+        // The typed bubble hugs its text (Gemini's "oi" is a small pill) up to a readable cap;
+        // the answer column keeps the full measure.
+        Column(
+            modifier = if (mine) {
+                Modifier.widthIn(max = 560.dp)
+            } else {
+                Modifier.fillMaxWidth(0.92f)
+            },
+        ) {
             // Reference reading style: an attachment is its own card ABOVE the typed bubble,
             // never clipped inside the bubble it belongs to.
             if (mine && attachments.isNotEmpty()) LiveAttachmentChips(attachments)
@@ -805,61 +852,41 @@ private fun MessageRow(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // The typed turn keeps its right-aligned bubble; the assistant answers
-                    // straight on the canvas, with no box around serif prose.
+                    // Gemini reading style: the typed turn is a charcoal pill (24 dp, no border),
+                    // the answer sits straight on the black canvas. No label or timestamp row —
+                    // the reference has none, and "you" above a bubble was clutter.
                     .then(
                         if (mine) {
                             Modifier
-                                .background(colors.bubbleMine, RoundedCornerShape(14.dp))
-                                .border(1.dp, colors.hairline, RoundedCornerShape(14.dp))
-                                .padding(horizontal = 12.dp, vertical = bubbleVertical)
+                                .background(Gemini.Surface, RoundedCornerShape(24.dp))
+                                .padding(horizontal = 16.dp, vertical = bubbleVertical)
                         } else {
                             Modifier.padding(vertical = bubbleVertical)
                         },
                     ),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (mine) "you" else (event.role?.takeIf { it.isNotBlank() }) ?: "assistant",
-                        style = monoHud(
-                            10,
-                            color = if (mine) {
-                                colors.bubbleMineText.copy(alpha = 0.75f)
-                            } else {
-                                colors.secondaryLabel
-                            },
-                        ),
-                        modifier = Modifier.weight(1f),
-                    )
-                    val ts = formatTs(event.ts)
-                    if (ts.isNotEmpty()) {
-                        Text(
-                            ts,
-                            style = monoHud(
-                                10,
-                                color = if (mine) {
-                                    colors.bubbleMineText.copy(alpha = 0.6f)
-                                } else {
-                                    colors.secondaryLabel
-                                },
-                            ),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(2.dp))
                 if (mine) {
                     if (body.isNotBlank()) {
-                        Text(body, fontSize = bodySizeSp.sp, color = colors.bubbleMineText)
+                        Text(body, fontSize = bodySizeSp.sp, color = Gemini.Text)
                     }
                 } else {
                     IntelligentMessageBody(
                         text = body.ifBlank { "—" },
                         bodySizeSp = bodySizeSp,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = Gemini.Text,
                         composerReady = composerReady,
                         onSendPrompt = onSendPrompt,
                     )
                     LiveCopyRow(text = body)
+                    if (showFooter) {
+                        Text(
+                            GeminiAiCaption,
+                            fontFamily = FontFamily.SansSerif,
+                            fontSize = 12.sp,
+                            color = Gemini.TextMuted,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
                 }
             }
             }
@@ -878,7 +905,6 @@ internal fun showsTurnBubble(body: String, attachmentCount: Int): Boolean =
 @Composable
 private fun LiveCopyRow(text: String) {
     if (text.isBlank()) return
-    val colors = LocalMaestriColors.current
     val clip = LocalClipboardManager.current
     var copied by remember(text) { mutableStateOf(false) }
     LaunchedEffect(copied) {
@@ -895,11 +921,13 @@ private fun LiveCopyRow(text: String) {
                 clip.setText(AnnotatedString(text))
                 copied = true
             }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = 6.dp, vertical = 6.dp),
     ) {
-        Text(if (copied) "\u2713" else "\u29C9", fontSize = 13.sp, color = colors.secondaryLabel)
+        GeminiStar(size = 13.dp)
+        Spacer(Modifier.width(8.dp))
+        Text(if (copied) "\u2713" else "\u29C9", fontSize = 13.sp, color = Gemini.TextSecondary)
         Spacer(Modifier.width(6.dp))
-        Text(if (copied) "Copiado" else "Copiar", fontSize = 12.sp, color = colors.secondaryLabel)
+        Text(if (copied) "Copiado" else "Copiar", fontSize = 12.sp, color = Gemini.TextSecondary)
     }
 }
 

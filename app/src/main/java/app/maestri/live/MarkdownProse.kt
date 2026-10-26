@@ -33,7 +33,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.Style.LocalMaestriColors
-import app.maestri.ui.Style.MaestriType
+import app.maestri.ui.Style.Gemini
 
 // ----------------------------------------------------------------- models
 
@@ -223,10 +223,10 @@ private val ProseMaxWidth = 740.dp
  * Renders assistant prose as markdown: headings, lists with a hanging indent, quotes,
  * horizontally scrolling code fences and inline emphasis.
  *
- * Typography follows the reading style of the reference (Claude chat): the platform serif at
- * [MaestriType.SerifBodyStep] above the composer text, 1.5 leading and real space between
- * blocks, so a long answer reads as a page instead of a status pill. Colors and families stay
- * on the app tokens; user turns keep the system sans of their bubble.
+ * Typography follows the Gemini app (2026-10-27): clean sans one step above the composer text,
+ * 1.5 leading, white medium headings, hollow-circle bullets and a raised grey pill for inline
+ * code. Assistant prose is [Gemini.Text] on the black canvas; user turns keep their charcoal
+ * bubble.
  */
 @Composable
 fun MarkdownProse(
@@ -237,21 +237,28 @@ fun MarkdownProse(
 ) {
     val blocks = remember(text) { parseMarkdownBlocks(text) }
     if (blocks.isEmpty()) return
-    val proseSize = bodySizeSp + MaestriType.SerifBodyStep
-    val leading = (proseSize * MaestriType.SerifBodyLeading).sp
+    val proseSize = bodySizeSp + 1
+    val leading = (proseSize * 1.5f).sp
     Column(modifier.widthIn(max = ProseMaxWidth).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         blocks.forEach { block ->
             when (block) {
                 is MdBlock.Heading -> Text(
-                    inlineText(block.text, bodySizeSp, color),
-                    fontFamily = MaestriType.Serif,
-                    fontSize = (proseSize + if (block.level == 1) 5 else if (block.level == 2) 3 else 1).sp,
+                    inlineText(block.text, bodySizeSp, Gemini.TextStrong),
+                    fontFamily = FontFamily.SansSerif,
+                    fontStyle = FontStyle.Normal,
+                    fontWeight = if (block.level == 1) FontWeight.Medium else FontWeight.Normal,
+                    fontSize = when (block.level) {
+                        1 -> 22.sp
+                        2 -> 20.sp
+                        else -> 18.sp
+                    },
                     lineHeight = leading,
-                    color = color,
+                    color = Gemini.TextStrong,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
                 )
                 is MdBlock.Paragraph -> Text(
                     inlineText(block.text, bodySizeSp, color),
-                    fontFamily = MaestriType.Serif,
+                    fontFamily = FontFamily.SansSerif,
                     fontSize = proseSize.sp,
                     lineHeight = leading,
                     color = color,
@@ -260,16 +267,16 @@ fun MarkdownProse(
                     block.items.forEachIndexed { index, item ->
                         Row(Modifier.fillMaxWidth()) {
                             Text(
-                                if (block.ordered) "${index + 1}." else "•",
-                                fontFamily = MaestriType.Serif,
-                                fontSize = proseSize.sp,
+                                if (block.ordered) "${index + 1}." else "\u25CB",
+                                fontFamily = FontFamily.SansSerif,
+                                fontSize = if (block.ordered) proseSize.sp else (proseSize - 1).sp,
                                 lineHeight = leading,
-                                color = color.copy(alpha = 0.7f),
-                                modifier = Modifier.widthIn(min = 22.dp),
+                                color = Gemini.TextSecondary,
+                                modifier = Modifier.widthIn(min = 28.dp),
                             )
                             Text(
                                 inlineText(item, bodySizeSp, color),
-                                fontFamily = MaestriType.Serif,
+                                fontFamily = FontFamily.SansSerif,
                                 fontSize = proseSize.sp,
                                 lineHeight = leading,
                                 color = color,
@@ -288,7 +295,7 @@ fun MarkdownProse(
                     Spacer(Modifier.width(8.dp))
                     Text(
                         inlineText(block.text, bodySizeSp, color.copy(alpha = 0.85f)),
-                        fontFamily = MaestriType.Serif,
+                        fontFamily = FontFamily.SansSerif,
                         fontSize = proseSize.sp,
                         lineHeight = leading,
                         color = color.copy(alpha = 0.85f),
@@ -297,7 +304,7 @@ fun MarkdownProse(
                 is MdBlock.Code -> Box(
                     Modifier
                         .fillMaxWidth()
-                        .background(LocalMaestriColors.current.codeSurface, RoundedCornerShape(8.dp))
+                        .background(Gemini.SurfaceRaised, RoundedCornerShape(12.dp))
                         .horizontalScroll(rememberScrollState())
                         .padding(8.dp),
                 ) {
@@ -325,13 +332,15 @@ private fun inlineText(text: String, bodySizeSp: Int, color: Color): AnnotatedSt
                     MdStyle.CODE in span.styles -> withStyle(
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
-                            background = colors.cardSunken,
-                            fontSize = (bodySizeSp + MaestriType.SerifBodyStep - 0.5f).sp,
+                            background = Gemini.SurfaceRaised,
+                            color = Gemini.Text,
+                            fontSize = (bodySizeSp + 0.5f).sp,
                         ),
                     ) { append(span.text) }
                     else -> withStyle(
                         SpanStyle(
                             fontWeight = if (MdStyle.BOLD in span.styles) FontWeight.SemiBold else null,
+                            color = if (MdStyle.BOLD in span.styles) Gemini.TextStrong else Color.Unspecified,
                             fontStyle = if (MdStyle.ITALIC in span.styles) FontStyle.Italic else null,
                             textDecoration = if (MdStyle.STRIKE in span.styles) TextDecoration.LineThrough else null,
                         ),

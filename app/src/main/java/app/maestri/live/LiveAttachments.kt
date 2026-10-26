@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.maestri.ui.HostRequests
+import app.maestri.ui.Style.Gemini
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.cardShape
 import app.maestri.ui.Style.controlShape
@@ -238,8 +239,8 @@ fun LiveAttachmentCard(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.canvasSurface, cardShape())
-            .border(1.dp, colors.hairline, cardShape())
+            .background(Gemini.Surface, cardShape())
+            .border(1.dp, Gemini.Outline.copy(alpha = 0.6f), cardShape())
             .padding(10.dp),
     ) {
         AttachmentPlate(bytes = bytes, mime = mime, description = name)
@@ -249,7 +250,7 @@ fun LiveAttachmentCard(
                 name,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = Gemini.Text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -257,7 +258,7 @@ fun LiveAttachmentCard(
             Text(
                 attachmentKindLabel(name, mime) + " · " + formatAttachmentSize(sizeBytes),
                 fontSize = 12.sp,
-                color = colors.secondaryLabel,
+                color = Gemini.TextMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -287,7 +288,7 @@ private fun AttachmentPlate(bytes: ByteArray?, mime: String, description: String
         modifier = Modifier
             .size(56.dp)
             .clip(controlShape())
-            .background(colors.accentSoft),
+            .background(Gemini.SurfaceRaised),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
@@ -298,7 +299,7 @@ private fun AttachmentPlate(bytes: ByteArray?, mime: String, description: String
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
-            Text(kindGlyph(mime), fontSize = 20.sp, color = colors.accent)
+            Text(kindGlyph(mime), fontSize = 20.sp, color = Gemini.TextSecondary)
         }
     }
 }

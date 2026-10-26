@@ -1,0 +1,284 @@
+package app.maestri.ui.Style
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlin.math.sin
+
+/**
+ * The Gemini-app reading surface: pure OLED black, the indigo aurora under the composer, the
+ * four-point sparkle and the royal-blue controls. Scoped to the chat face and its composer —
+ * the rest of the app keeps its own chrome tokens.
+ */
+object Gemini {
+    val Canvas = Color(0xFF000000)
+    val AuroraDeep = Color(0xFF081238)
+    val AuroraTop = Color(0xFF0D1B4C)
+    /** Bubbles, the composer pill and the active mode pill. */
+    val Surface = Color(0xFF1E1F22)
+    /** Inline code, the scroll-to-bottom button. */
+    val SurfaceRaised = Color(0xFF282A2E)
+    val Text = Color(0xFFE3E3E3)
+    val TextStrong = Color(0xFFFFFFFF)
+    val TextSecondary = Color(0xFFC4C7C5)
+    val TextMuted = Color(0xFF8E918F)
+    val Outline = Color(0xFF444746)
+    val Accent = Color(0xFF2848A8)
+    val AccentDeep = Color(0xFF1B3A8A)
+    val StarBlue = Color(0xFF4285F4)
+    val StarGreen = Color(0xFF34A853)
+    val StarYellow = Color(0xFFFBBC05)
+    val StarRed = Color(0xFFEA4335)
+}
+
+/** The hero line of an empty chat. One constant: the reference's wording, change it here. */
+const val GeminiHeroPrompt = "What can I help with, Jardel?"
+
+/** The assistant footer the reference puts under the last answer. */
+const val GeminiAiCaption = "Maestri is AI and can make mistakes."
+
+/** Distance the shimmer travels before it reaches the text; larger than any phone width. */
+private const val SHIMMER_SPAN = 900f
+
+private val StarBrush = listOf(Gemini.StarBlue, Gemini.StarGreen, Gemini.StarYellow, Gemini.StarRed)
+
+/**
+ * The four-point sparkle: concave sides between four tips, painted with the four Google colors.
+ * [pulse] adds the slow breathing turn; [scaleIn] plays the one-shot settle for a launch.
+ */
+@Composable
+fun GeminiStar(
+    size: Dp,
+    modifier: Modifier = Modifier,
+    pulse: Boolean = true,
+    scaleIn: Boolean = false,
+) {
+    val settle = remember { Animatable(if (scaleIn) 0.55f else 1f) }
+    LaunchedEffect(scaleIn) {
+        if (scaleIn) settle.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 90f))
+    }
+    val breath = rememberInfiniteTransition(label = "gemini-star")
+    val wave by breath.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Reverse),
+        label = "gemini-breath",
+    )
+    Canvas(modifier.size(size)) {
+        val grow = settle.value * if (pulse) 0.94f + 0.06f else 1f
+        val spin = if (pulse) (wave - 0.5f) * 10f else 0f
+        val r = (size.toPx() / 2f) * grow
+        val path = sparklePath(Offset(this.size.width / 2f, this.size.height / 2f), r)
+        rotate(spin) {
+            drawPath(
+                path,
+                Brush.linearGradient(
+                    StarBrush,
+                    start = Offset(0f, 0f),
+                    end = Offset(this.size.width, this.size.height),
+                ),
+            )
+        }
+    }
+}
+
+/** Four concave-sided points: the Gemini sparkle outline. */
+private fun sparklePath(center: Offset, r: Float): Path = Path().apply {
+    val c = r * 0.22f
+    moveTo(center.x, center.y - r)
+    quadraticTo(center.x + c, center.y - c, center.x + r, center.y)
+    quadraticTo(center.x + c, center.y + c, center.x, center.y + r)
+    quadraticTo(center.x - c, center.y + c, center.x - r, center.y)
+    quadraticTo(center.x - c, center.y - c, center.x, center.y - r)
+    close()
+}
+
+/**
+ * The indigo wash the reference keeps under the composer: a vertical fade into the deep blue
+ * plus a radial bloom, with a slow digital band sweeping across it.
+ *
+ * [progress] 0..1 scales the whole thing in (launch); 1f is the resting empty-state look.
+ */
+@Composable
+fun GeminiAurora(
+    modifier: Modifier = Modifier,
+    progress: Float = 1f,
+    animate: Boolean = true,
+) {
+    val glow = rememberInfiniteTransition(label = "gemini-aurora")
+    val sweep by glow.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(4200, easing = LinearEasing)),
+        label = "gemini-sweep",
+    )
+    Canvas(modifier.fillMaxWidth()) {
+        drawAurora(progress, if (animate) sweep else 0.35f)
+    }
+}
+
+private fun DrawScope.drawAurora(progress: Float, sweep: Float) {
+    if (progress <= 0f) return
+    val h = size.height
+    val w = size.width
+    val p = progress.coerceIn(0f, 1f)
+    drawRect(
+        Brush.verticalGradient(
+            0f to Color.Transparent,
+            0.45f to Gemini.AuroraDeep.copy(alpha = 0.25f * p),
+            0.78f to Gemini.AuroraDeep.copy(alpha = 0.7f * p),
+            1f to Gemini.AuroraTop.copy(alpha = 0.95f * p),
+        ),
+    )
+    drawRect(
+        Brush.radialGradient(
+            listOf(Gemini.StarBlue.copy(alpha = 0.30f * p), Color.Transparent),
+            center = Offset(w / 2f, h * 1.05f),
+            radius = w * 0.95f,
+        ),
+    )
+    // The digital wave: a soft diagonal band crossing the wash, twice per cycle.
+    val band = ((sweep * 1.8f) % 1f) * (w * 1.6f) - w * 0.3f
+    drawRect(
+        Brush.linearGradient(
+            listOf(
+                Color.Transparent,
+                Gemini.StarBlue.copy(alpha = 0.16f * p),
+                Gemini.StarGreen.copy(alpha = 0.10f * p),
+                Color.Transparent,
+            ),
+            start = Offset(band - w * 0.35f, h),
+            end = Offset(band + w * 0.35f, h * 0.35f),
+        ),
+    )
+    // Scan lines keep the sweep reading as digital light rather than a soft blob.
+    for (i in 0 until 3) {
+        val y = h * (0.62f + 0.12f * i)
+        val shift = (sin((sweep * 6.28318f) + i) * 0.5f + 0.5f) * w
+        drawRect(
+            Brush.linearGradient(
+                listOf(Color.Transparent, Gemini.StarBlue.copy(alpha = 0.10f * p), Color.Transparent),
+                start = Offset(shift - w * 0.4f, y),
+                end = Offset(shift + w * 0.4f, y),
+            ),
+            topLeft = Offset(0f, y),
+            size = androidx.compose.ui.geometry.Size(w, 1.2f),
+        )
+    }
+}
+
+/**
+ * Empty-state hero: the sparkle above a slowly shimmering prompt, over the aurora.
+ * [caption] is the app's own line about what will land here, kept in the reference's muted tone.
+ */
+@Composable
+fun GeminiHero(caption: String?, modifier: Modifier = Modifier) {
+    val shimmer = rememberInfiniteTransition(label = "gemini-hero")
+    val shift by shimmer.animateFloat(
+        initialValue = -SHIMMER_SPAN,
+        targetValue = SHIMMER_SPAN * 2f,
+        animationSpec = infiniteRepeatable(tween(3400, easing = LinearEasing)),
+        label = "gemini-shimmer",
+    )
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+            modifier = Modifier.padding(horizontal = 32.dp),
+        ) {
+            GeminiStar(size = 52.dp, scaleIn = true)
+            Text(
+                GeminiHeroPrompt,
+                style = TextStyle(
+                    fontFamily = FontFamily.SansSerif,
+                    fontSize = 28.sp,
+                    lineHeight = 34.sp,
+                    textAlign = TextAlign.Center,
+                    brush = Brush.linearGradient(
+                        listOf(Gemini.Text, Gemini.TextStrong, Gemini.Text),
+                        start = Offset(shift - 220f, 0f),
+                        end = Offset(shift, 0f),
+                    ),
+                ),
+            )
+            if (caption != null) {
+                Text(
+                    caption,
+                    fontFamily = FontFamily.SansSerif,
+                    fontSize = 13.sp,
+                    color = Gemini.TextMuted,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The launch moment: black canvas, the aurora rising in, the sparkle settling with its first
+ * turn, then the whole overlay fades off the live feed. Runs once per chat-face mount.
+ */
+@Composable
+fun GeminiLaunchOverlay(visible: Boolean, onFinished: () -> Unit) {
+    val rise = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        rise.animateTo(1f, tween(900))
+        kotlinx.coroutines.delay(650)
+        onFinished()
+    }
+    AnimatedVisibility(visible = visible, exit = fadeOut(tween(420))) {
+        Box(Modifier.fillMaxSize().background(Gemini.Canvas)) {
+            Box(Modifier.fillMaxSize()) {
+                GeminiAurora(modifier = Modifier.fillMaxSize(), progress = rise.value)
+            }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                GeminiStar(size = 64.dp, scaleIn = true)
+            }
+            Box(Modifier.fillMaxSize().padding(bottom = 96.dp), contentAlignment = Alignment.BottomCenter) {
+                Text(
+                    "Maestri",
+                    fontFamily = FontFamily.SansSerif,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Gemini.TextMuted.copy(alpha = rise.value),
+                )
+            }
+        }
+    }
+}

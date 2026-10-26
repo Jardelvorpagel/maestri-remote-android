@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import app.maestri.live.LiveStagedChips
 import app.maestri.live.LiveStagedFile
 import app.maestri.ui.HostRequests
+import app.maestri.ui.Style.Gemini
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.RecordButton
@@ -87,13 +88,17 @@ fun TerminalComposer(
     recordElapsedMs: Long = 0L,
     onToggleRecord: (() -> Unit)? = null,
 ) {
-    val fieldStyle = TextStyle(fontSize = 13.5.sp, color = ComposerText)
+    val fieldStyle = if (chatSelected) {
+        TextStyle(fontSize = 15.sp, color = Gemini.Text)
+    } else {
+        TextStyle(fontSize = 13.5.sp, color = ComposerText)
+    }
     val colors = LocalMaestriColors.current
-    // Chrome only: the chat face wears the reading-style pill — design-system container radius,
-    // hairline border, flat on the canvas — while the terminal face keeps its haloed panel,
-    // which belongs to the pty surface. Geometry, order and behaviour are identical in both.
-    val shellShape = if (chatSelected) containerShape() else panelShape
-    val shellBorder = if (chatSelected) colors.hairline else ComposerRing
+    // Chrome only: the chat face wears the Gemini pill — #1E1F22 at 32 dp with no border, flat on
+    // the black canvas — while the terminal face keeps its haloed panel, which belongs to the pty
+    // surface. Geometry, order and behaviour are identical in both.
+    val shellShape = if (chatSelected) RoundedCornerShape(32.dp) else panelShape
+    val shellBorder = if (chatSelected) Gemini.Surface else ComposerRing
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Column(
             Modifier
@@ -105,8 +110,11 @@ fun TerminalComposer(
                         Modifier.softHalo(radius = 26.dp, elevation = 14.dp)
                     },
                 )
-                .background(ComposerFill.copy(alpha = ComposerFillAlpha), shellShape)
-                .border(1.dp, shellBorder, shellShape)
+                .background(
+                    if (chatSelected) Gemini.Surface else ComposerFill.copy(alpha = ComposerFillAlpha),
+                    shellShape,
+                )
+                .then(if (chatSelected) Modifier else Modifier.border(1.dp, shellBorder, shellShape))
                 .padding(start = 12.dp, end = 12.dp, top = 13.dp, bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
@@ -121,7 +129,12 @@ fun TerminalComposer(
             }
             Box(Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 1.dp)) {
                 if (value.isEmpty()) {
-                    Text(placeholder, fontSize = 13.5.sp, color = ComposerMuted, maxLines = 1)
+                    Text(
+                        placeholder,
+                        fontSize = if (chatSelected) 15.sp else 13.5.sp,
+                        color = if (chatSelected) Gemini.TextMuted else ComposerMuted,
+                        maxLines = 1,
+                    )
                 }
                 BasicTextField(
                     value = value,
@@ -129,7 +142,7 @@ fun TerminalComposer(
                     modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                     textStyle = fieldStyle,
                     singleLine = true,
-                    cursorBrush = SolidColor(Palette.ComposerAccent),
+                    cursorBrush = SolidColor(if (chatSelected) Gemini.Accent else Palette.ComposerAccent),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { if (canSend) onSend() }),
                 )
@@ -155,7 +168,7 @@ fun TerminalComposer(
                     Text(meta, fontSize = 11.5.sp, color = ComposerMuted)
                     Spacer(Modifier.width(8.dp))
                 }
-                SendButton(enabled = canSend, busy = busy, onSend = onSend)
+                SendButton(enabled = canSend, busy = busy, chatSelected = chatSelected, onSend = onSend)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -217,13 +230,14 @@ private fun AttachButton(enabled: Boolean, onPicked: (List<Uri>) -> Unit) {
 }
 
 @Composable
-private fun SendButton(enabled: Boolean, busy: Boolean, onSend: () -> Unit) {
+private fun SendButton(enabled: Boolean, busy: Boolean, chatSelected: Boolean = false, onSend: () -> Unit) {
     Box(
         Modifier
             .size(36.dp)
             .clip(CircleShape)
             .background(
-                Palette.ComposerAccent.copy(alpha = if (enabled) 1f else 0.3f),
+                (if (chatSelected) Gemini.Accent else Palette.ComposerAccent)
+                    .copy(alpha = if (enabled) 1f else 0.3f),
                 CircleShape,
             )
             .clickable(enabled = enabled) { onSend() }
@@ -247,7 +261,10 @@ private fun SegmentButton(label: String, selected: Boolean, onClick: () -> Unit)
         Modifier
             .height(28.dp)
             .clip(pillShape())
-            .background(if (selected) SegmentOn else Color.Transparent, pillShape())
+            // Gemini's Chat | Task: the active pill is charcoal with a thin grey edge, the
+            // inactive label is plain text on the track.
+            .background(if (selected) Gemini.Surface else Color.Transparent, pillShape())
+            .border(1.dp, if (selected) Gemini.Outline else Color.Transparent, pillShape())
             .clickable(onClick = onClick)
             .padding(horizontal = 15.dp)
             .semantics {
@@ -260,7 +277,7 @@ private fun SegmentButton(label: String, selected: Boolean, onClick: () -> Unit)
             label,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            color = if (selected) SegmentOnText else SegmentOffText,
+            color = if (selected) Gemini.Text else Gemini.TextMuted,
         )
     }
 }

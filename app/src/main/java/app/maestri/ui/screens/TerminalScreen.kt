@@ -859,7 +859,7 @@ fun TerminalScreen(
             )
             if (!fullscreen) {
                 TerminalComposer(
-                    placeholder = "Message Pi…",
+                    placeholder = "Ask Maestri...",
                     value = liveDraft,
                     onChange = { liveVm.updateDraft(it) },
                     onSend = { if (liveCanSend) liveVm.send() },

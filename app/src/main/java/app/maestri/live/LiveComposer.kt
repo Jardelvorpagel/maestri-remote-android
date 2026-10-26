@@ -26,6 +26,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.maestri.ui.Style.Gemini
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.RecordButton
 import app.maestri.ui.Style.containerShape
@@ -70,19 +72,19 @@ fun LiveComposerBar(
     ) {
         LiveStagedChips(files = staged, onRemove = { vm.removeStaged(it) })
         Column(
+            // The Gemini pill: one #1E1F22 container at 32 dp, no border, controls inside it.
             modifier = Modifier
                 .fillMaxWidth()
-                .background(colors.canvasSurface, containerShape())
-                .border(1.dp, colors.hairline, containerShape())
+                .background(Gemini.Surface, RoundedCornerShape(32.dp))
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
                 if (draft.isEmpty()) {
                     Text(
-                        "Responda ao Maestro ou toque para falar",
+                        "Ask Maestri...",
                         fontSize = 15.sp,
-                        color = colors.secondaryLabel,
+                        color = Gemini.TextMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -93,8 +95,8 @@ fun LiveComposerBar(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = ready,
                     singleLine = true,
-                    textStyle = TextStyle(fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface),
-                    cursorBrush = SolidColor(colors.accent),
+                    textStyle = TextStyle(fontSize = 15.sp, color = Gemini.Text),
+                    cursorBrush = SolidColor(Gemini.Accent),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(
                         onSend = { if (canSend) vm.send() },
@@ -112,7 +114,7 @@ fun LiveComposerBar(
                         elapsedMs = recordElapsedMs,
                         enabled = ready || recording,
                         onClick = onToggleRecord,
-                        tint = colors.secondaryLabel,
+                        tint = Gemini.TextSecondary,
                         size = 44.dp,
                     )
                 }
@@ -136,12 +138,11 @@ fun LiveComposerBar(
 /** Round trailing send: the pill's only filled control, so the eye lands on it. */
 @Composable
 private fun SendPillButton(enabled: Boolean, onClick: () -> Unit) {
-    val colors = LocalMaestriColors.current
     Box(
         modifier = Modifier
             .size(40.dp)
             .clip(CircleShape)
-            .background(if (enabled) colors.accent else colors.cardSunken, CircleShape)
+            .background(if (enabled) Gemini.Accent else Gemini.SurfaceRaised, CircleShape)
             .clickable(enabled = enabled) { onClick() }
             .semantics { contentDescription = "Send" },
         contentAlignment = Alignment.Center,
@@ -150,7 +151,7 @@ private fun SendPillButton(enabled: Boolean, onClick: () -> Unit) {
             "\u2191",
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
-            color = if (enabled) colors.onAccent else colors.secondaryLabel,
+            color = if (enabled) Gemini.TextStrong else Gemini.TextMuted,
         )
     }
 }
@@ -164,13 +165,13 @@ fun LivePendingRow(row: LivePendingSend, onRetry: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth(0.86f)
                 .background(
-                    if (failed) colors.warning.copy(alpha = 0.12f) else colors.bubbleMine,
-                    RoundedCornerShape(14.dp),
+                    if (failed) colors.warning.copy(alpha = 0.12f) else Gemini.Surface,
+                    RoundedCornerShape(24.dp),
                 )
                 .border(
                     1.dp,
-                    if (failed) colors.warning.copy(alpha = 0.45f) else colors.hairline,
-                    RoundedCornerShape(14.dp),
+                    if (failed) colors.warning.copy(alpha = 0.45f) else Color.Transparent,
+                    RoundedCornerShape(24.dp),
                 )
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
@@ -179,7 +180,7 @@ fun LivePendingRow(row: LivePendingSend, onRetry: () -> Unit) {
                     if (failed) "failed — not sent" else "sending…",
                     style = monoHud(
                         10,
-                        color = if (failed) colors.warning else colors.bubbleMineText.copy(alpha = 0.75f),
+                        color = if (failed) colors.warning else Gemini.TextSecondary,
                     ),
                     modifier = Modifier.weight(1f),
                 )
@@ -199,7 +200,7 @@ fun LivePendingRow(row: LivePendingSend, onRetry: () -> Unit) {
                 Text(
                     row.text,
                     fontSize = 13.5.sp,
-                    color = if (failed) MaterialTheme.colorScheme.onSurface else colors.bubbleMineText,
+                    color = if (failed) MaterialTheme.colorScheme.onSurface else Gemini.Text,
                 )
             }
             LiveAttachmentChips(attachments = row.attachments)
