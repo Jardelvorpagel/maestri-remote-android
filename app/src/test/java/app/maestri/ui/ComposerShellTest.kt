@@ -10,11 +10,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.pow
 
-/** The 188 split: only the chat pill goes transparent, and its text still reads over the wash. */
+/** The 188 split: the chat pill keeps an opaque surface, the pty pill its own panel. */
 class ComposerShellTest {
-
-    // The brightest part of the wash the pill floats on (187's measured bottom row).
-    private val washBottom = Color(0xFF0D1B3E)
 
     private fun channel(value: Float): Double {
         val c = value.toDouble()
@@ -31,9 +28,10 @@ class ComposerShellTest {
     }
 
     @Test
-    fun theChatPillHasNoFillAndAHairline() {
-        assertEquals(Color.Transparent, composerShellFill(chat = true))
-        assertEquals(0f, composerShellFill(chat = true).alpha, 0f)
+    fun theChatPillKeepsAnOpaqueSurface() {
+        val fill = composerShellFill(chat = true)
+        assertEquals(Gemini.Surface, fill)
+        assertEquals(1f, fill.alpha, 0f)
         assertEquals(Gemini.Outline, composerShellBorder(chat = true))
         assertTrue(composerShellBorder(chat = true).alpha > 0f)
     }
@@ -48,9 +46,10 @@ class ComposerShellTest {
     }
 
     @Test
-    fun chatTextStillReadsOverTheWash() {
-        // body text and placeholder over the brightest part of the wash, WCAG AA at 15 sp
-        assertTrue(contrast(Gemini.Text, washBottom) >= 4.5)
-        assertTrue(contrast(Gemini.TextMuted, washBottom) >= 4.5)
+    fun chatTextStillReadsOnTheComposerSurface() {
+        // body text and placeholder over the pill the field actually sits on, WCAG AA at 15 sp
+        val fill = composerShellFill(chat = true)
+        assertTrue(contrast(Gemini.Text, fill) >= 4.5)
+        assertTrue(contrast(Gemini.TextMuted, fill) >= 4.5)
     }
 }

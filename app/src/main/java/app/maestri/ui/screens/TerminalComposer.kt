@@ -75,14 +75,13 @@ private val SegmentOffText = Color(0xFF9AA0B4)
 private val panelShape = RoundedCornerShape(26.dp)
 
 /**
- * The shell fill and border, one per face. The chat pill is transparent on purpose: since 187 the
- * aurora wash is painted behind the whole chat surface, so the field shows the wash and the
- * conversation through it, with a 1 dp hairline to hold its shape. The pty shell keeps its own
- * opaque panel — same values it has always had. Kept as functions so the split is asserted in tests
- * instead of living in a modifier chain.
+ * The shell fill and border, one per face. The chat pill wears the same opaque Gemini surface as
+ * the relay composer, so the conversation scrolling under it never reaches the field, with a 1 dp
+ * hairline to hold its shape. The pty shell keeps its own panel — same values it has always had.
+ * Kept as functions so the split is asserted in tests instead of living in a modifier chain.
  */
 internal fun composerShellFill(chat: Boolean): Color =
-    if (chat) Color.Transparent else ComposerFill.copy(alpha = ComposerFillAlpha)
+    if (chat) Gemini.Surface else ComposerFill.copy(alpha = ComposerFillAlpha)
 
 internal fun composerShellBorder(chat: Boolean): Color =
     if (chat) Gemini.Outline else ComposerRing
@@ -119,9 +118,9 @@ fun TerminalComposer(
         TextStyle(fontSize = 13.5.sp, color = ComposerText)
     }
     val colors = LocalMaestriColors.current
-    // Chrome only: the chat face wears the Gemini pill — transparent at 32 dp with a 1 dp hairline,
-    // so the wash reads through the field — while the terminal face keeps its haloed panel, which
-    // belongs to the pty surface. Geometry, order and behaviour are identical in both.
+    // Chrome only: the chat face wears the Gemini pill — opaque at 32 dp with a 1 dp hairline —
+    // while the terminal face keeps its haloed panel, which belongs to the pty surface. Geometry,
+    // order and behaviour are identical in both.
     val shellShape = if (chatSelected) RoundedCornerShape(32.dp) else panelShape
     val shellBorder = composerShellBorder(chatSelected)
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
