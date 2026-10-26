@@ -550,6 +550,8 @@ data class Attachment(
     val name: String = "",
     val bytes: Long = 0L,
     val path: String = "",
+    /** Host-side transcript of the audio, when the relay ran one; null when absent. */
+    val transcript: String? = null,
 )
 
 private fun anyAsLong(v: Any?): Long? = when (v) {
@@ -567,6 +569,7 @@ fun parseAttachment(root: Map<*, *>): Attachment? {
         name = root["name"] as? String ?: "",
         bytes = anyAsLong(root["bytes"]) ?: anyAsLong(root["size"]) ?: 0L,
         path = root["path"] as? String ?: "",
+        transcript = (root["transcript"] as? String)?.trim()?.takeIf { it.isNotBlank() },
     )
 }
 

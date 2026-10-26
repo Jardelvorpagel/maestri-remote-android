@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.MaestriRadii
 import app.maestri.ui.Style.Motion
@@ -132,6 +133,9 @@ private fun formatTs(ts: String): String =
 fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
     val colors = LocalMaestriColors.current
     val relayState by vm.relayState.collectAsState()
+    val url by vm.url.collectAsState()
+    val token by vm.token.collectAsState()
+    var showRelaySettings by remember { mutableStateOf(false) }
     Column(
         Modifier
             .fillMaxSize()
@@ -157,9 +161,21 @@ fun LiveScreen(onBack: () -> Unit, vm: LiveViewModel) {
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
-            RelayChip(state = relayState)
+            RelayChip(state = relayState, onClick = { showRelaySettings = true })
         }
         LiveFeedContent(vm)
+        if (showRelaySettings) {
+            RelaySettingsDialog(
+                url = url,
+                token = token,
+                state = relayState,
+                onUrl = { vm.setUrl(it) },
+                onToken = { vm.setToken(it) },
+                onConnect = { vm.connect() },
+                onDisconnect = { vm.disconnect() },
+                onDismiss = { showRelaySettings = false },
+            )
+        }
     }
 }
 
@@ -262,16 +278,6 @@ fun ColumnScope.LiveFeedContent(
     }
 
     Column(Modifier.fillMaxWidth().weight(1f)) {
-        RelaySettingsCard(
-            url = url,
-            token = token,
-            state = relayState,
-            onUrl = { vm.setUrl(it) },
-            onToken = { vm.setToken(it) },
-            onConnect = { vm.connect() },
-            onDisconnect = { vm.disconnect() },
-        )
-
         // Persistent outage strip: the empty-state error card below only shows with
         // zero rows, but outages usually strike with history on screen — then the
         // only signal was the Connect button. This strip shows iff the relay is in
@@ -309,7 +315,7 @@ fun ColumnScope.LiveFeedContent(
             when {
                 url.isBlank() -> LiveEmpty(
                     title = "No relay configured",
-                    body = "Set the relay URL above — nothing connects until then. Token is optional, only for relays that require one.",
+                    body = "Tap the relay chip in the header to set the URL — nothing connects until then. Token is optional, only for relays that require one.",
                 )
                 allRows.isEmpty() && waitingForSession && relayState is RelayState.Open -> LiveEmpty(
                     title = "This terminal's session is not on the relay yet",
@@ -331,7 +337,7 @@ fun ColumnScope.LiveFeedContent(
                 else -> LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(listSpacing),
                 ) {
                     items(renderItems, key = { renderKey(it) }) { item ->
@@ -352,15 +358,18 @@ fun ColumnScope.LiveFeedContent(
                     }
                 }
             }
-            if (allRows.isNotEmpty() && !following) {
+        }
+
+        // Below the list, never over it: the tail chip used to float on top of the last
+        // message and read as clipped text. It only costs a row while the tail is unfollowed.
+        if (allRows.isNotEmpty() && !following) {
+            Box(Modifier.fillMaxWidth().padding(bottom = 6.dp), contentAlignment = Alignment.Center) {
                 TextButton(
                     onClick = {
                         vm.resumeTail()
                         scope.launch { listState.animateScrollToItem(renderItems.size - 1) }
                     },
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp)
                         .heightIn(min = Rhythm.TouchTarget.dp)
                         .background(colors.canvasChromeElevated, pillShape())
                         .border(1.dp, colors.hairline, pillShape()),
@@ -383,7 +392,16 @@ fun ColumnScope.LiveFeedContent(
             // Voice memo: the take becomes a staged file, so the chat path uploads it exactly
             // like a picked attachment (vm.stageFiles owns the cap and its notice).
             val voice = rememberVoiceNote(
-                onClip = { name, bytes -> vm.stageFiles(listOf(voiceNoteStagedFile(name, bytes))) },
+                onClip = { name, bytes ->
+                    val memo = voiceNoteStagedFile(name, bytes)
+                    vm.stageFiles(listOf(memo))
+                    // Transcribe after staging: a slow or missing recognizer never delays the
+                    // memo, and the transcript lands on the file the user already sees.
+                    scope.launch {
+                        val transcript = transcribeMemo(ctx.applicationContext, bytes) ?: return@launch
+                        vm.setTranscript(memo.key, transcript)
+                    }
+                },
                 onNotice = { vm.note(it) },
             )
             LiveComposerBar(
@@ -564,7 +582,7 @@ private fun LiveEmpty(title: String, body: String) {
 }
 
 @Composable
-private fun RelayChip(state: RelayState) {
+private fun RelayChip(state: RelayState, onClick: () -> Unit) {
     val colors = LocalMaestriColors.current
     val label = when (state) {
         RelayState.Disconnected -> "Disconnected"
@@ -581,6 +599,7 @@ private fun RelayChip(state: RelayState) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
+            .clickable { onClick() }
             .background(colors.canvasSurface, pillShape())
             .border(1.dp, colors.hairline, pillShape())
             .padding(horizontal = 10.dp, vertical = 6.dp),
@@ -598,6 +617,62 @@ private fun RelayChip(state: RelayState) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 8.dp),
         )
+    }
+}
+
+/**
+ * Relay connection settings on demand. The Chat face keeps a status chip in the header
+ * instead of a permanent card; this dialog is where URL, token, Connect and Stop live now,
+ * so the affordance survives while the feed gets its vertical space back.
+ */
+@Composable
+fun RelaySettingsDialog(
+    url: String,
+    token: String,
+    state: RelayState,
+    onUrl: (String) -> Unit,
+    onToken: (String) -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalMaestriColors.current
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.canvasChrome, cardShape())
+                .border(1.dp, colors.hairline, cardShape())
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Relay",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "Close",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.accent,
+                    modifier = Modifier
+                        .clickable { onDismiss() }
+                        .padding(6.dp),
+                )
+            }
+            RelaySettingsCard(
+                url = url,
+                token = token,
+                state = state,
+                onUrl = onUrl,
+                onToken = onToken,
+                onConnect = onConnect,
+                onDisconnect = onDisconnect,
+            )
+        }
     }
 }
 

@@ -321,9 +321,8 @@ internal fun ToolGroupCard(
 // ----------------------------------------------------------------- message body
 
 /**
- * Assistant side of a bubble: prose plus any ```ui / ```ui-html cards the model
- * emitted, in message order. A single prose segment renders as one Text — the
- * pre-Intelligent-UI face, byte-identical for messages without fenced blocks.
+ * Assistant side of a bubble: markdown prose plus any ```ui / ```ui-html cards the model
+ * emitted, in message order. Only prose changes shape — the card contract is untouched.
  */
 @Composable
 fun IntelligentMessageBody(
@@ -336,13 +335,13 @@ fun IntelligentMessageBody(
     val segments = remember(text) { parseIntelligentSegments(text) }
     if (isPlainProseOnly(segments)) {
         val prose = (segments.firstOrNull() as? UiSegment.Prose)?.text ?: text
-        Text(prose, fontSize = bodySizeSp.sp, color = color)
+        MarkdownProse(prose, bodySizeSp = bodySizeSp, color = color)
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         segments.forEach { segment ->
             when (segment) {
-                is UiSegment.Prose -> Text(segment.text, fontSize = bodySizeSp.sp, color = color)
+                is UiSegment.Prose -> MarkdownProse(segment.text, bodySizeSp = bodySizeSp, color = color)
                 is UiSegment.NativeCard -> NativeUiCard(segment.spec, composerReady, onSendPrompt)
                 is UiSegment.HtmlWidget -> HtmlWidgetCard(segment.title, segment.html, onSendPrompt)
             }
@@ -350,7 +349,7 @@ fun IntelligentMessageBody(
     }
 }
 
-/** Plain-`Text` fast path: no segments at all, or exactly one prose segment. */
+/** Plain-prose fast path: no segments at all, or exactly one prose segment. */
 internal fun isPlainProseOnly(segments: List<UiSegment>): Boolean =
     segments.isEmpty() || (segments.size == 1 && segments[0] is UiSegment.Prose)
 

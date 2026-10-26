@@ -51,6 +51,8 @@ data class LiveStagedFile(
     val uploading: Boolean = false,
     val attachmentId: String? = null,
     val uploadedPath: String? = null,
+    /** On-device transcript of a voice memo; null until (or unless) ASR answers. */
+    val transcript: String? = null,
 )
 
 data class LivePendingAttachment(
@@ -59,6 +61,8 @@ data class LivePendingAttachment(
     val sizeBytes: Long,
     val attachmentId: String?,
     val bytes: ByteArray?,
+    /** On-device transcript first, host transcript second, null when neither had one. */
+    val transcript: String? = null,
 )
 
 data class LivePendingSend(
@@ -327,6 +331,11 @@ class LiveViewModel(
         _staged.value = _staged.value.filter { it.key != key }
     }
 
+    /** Lands the on-device transcript on an already-staged memo; a no-op if it was removed. */
+    fun setTranscript(key: String, transcript: String) {
+        _staged.value = _staged.value.map { if (it.key == key) it.copy(transcript = transcript) else it }
+    }
+
     fun send() {
         val gate = _composeState.value
         if (gate is LiveComposeState.Disabled) {
@@ -372,14 +381,17 @@ class LiveViewModel(
     /** Shared tail of [send] and [sendOption]: optimistic row, dial, 15s ack watchdog. */
     private suspend fun enqueueText(text: String, attachments: List<LivePendingAttachment>) {
         val target = client ?: return
+        // A memo's transcript rides the message text in the single agreed marker; the
+        // on-device take wins over the host's `transcript` field from POST /upload.
+        val body = composeMemoText(text, attachments.firstNotNullOfOrNull { it.transcript })
         val id = UUID.randomUUID().toString()
         if (attachments.isNotEmpty()) {
-            val recent = (_sentAttachments.value - text).entries.toList().takeLast(19)
-            _sentAttachments.value = recent.associate { it.key to it.value } + (text to attachments)
+            val recent = (_sentAttachments.value - body).entries.toList().takeLast(19)
+            _sentAttachments.value = recent.associate { it.key to it.value } + (body to attachments)
         }
-        _pending.value = _pending.value + LivePendingSend(id, text, attachments, LiveSendStatus.SENDING, createdAtMs = System.currentTimeMillis())
+        _pending.value = _pending.value + LivePendingSend(id, body, attachments, LiveSendStatus.SENDING, createdAtMs = System.currentTimeMillis())
         val sent = runCatching {
-            target.sendMessage(text, attachments.mapNotNull { it.attachmentId }, id)
+            target.sendMessage(body, attachments.mapNotNull { it.attachmentId }, id)
         }.isSuccess
         if (!sent) {
             markFailed(id, "send threw — tap retry")
@@ -458,7 +470,9 @@ class LiveViewModel(
         for (f in _staged.value) {
             val existing = f.attachmentId
             if (existing != null) {
-                out += LivePendingAttachment(f.name, f.mime, f.sizeBytes, existing, f.bytes)
+                out += LivePendingAttachment(
+                    f.name, f.mime, f.sizeBytes, existing, f.bytes, resolveTranscript(f.transcript, null),
+                )
                 continue
             }
             markUploading(f.key, true)
@@ -474,7 +488,14 @@ class LiveViewModel(
                     " — files kept, nothing sent."
                 return null
             }
-            out += LivePendingAttachment(f.name, f.mime, f.sizeBytes, attachment.id, f.bytes)
+            out += LivePendingAttachment(
+                f.name,
+                f.mime,
+                f.sizeBytes,
+                attachment.id,
+                f.bytes,
+                resolveTranscript(f.transcript, attachment.transcript),
+            )
         }
         return out
     }

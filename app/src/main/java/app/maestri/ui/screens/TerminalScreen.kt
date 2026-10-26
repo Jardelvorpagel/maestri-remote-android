@@ -106,14 +106,19 @@ import app.maestri.live.LiveSendStatus
 import app.maestri.live.LiveStagedFile
 import app.maestri.live.LiveViewModel
 import app.maestri.live.LiveViewModelFactory
+import app.maestri.live.RelaySettingsDialog
+import app.maestri.live.RelayState
 import app.maestri.live.rememberLiveAttachHandler
 import app.maestri.live.MAX_ATTACH_BYTES
 import app.maestri.live.MAX_STAGED_FILES
 import app.maestri.live.PiRelayUpload
+import app.maestri.live.composeMemoText
 import app.maestri.live.formatAttachmentSize
 import app.maestri.live.stagePickedUris
+import app.maestri.live.transcribeMemo
 import app.maestri.live.voiceNoteStagedFile
 import app.maestri.live.rememberVoiceNote
+import app.maestri.live.resolveTranscript
 import app.maestri.ui.settings.TerminalFontStore
 import app.maestri.ui.settings.TerminalScrollSpeedStore
 import app.maestri.ui.settings.TerminalViewModeStore
@@ -262,12 +267,25 @@ fun TerminalScreen(
     // upload path. The recorder, tick, cap and permission flow live in rememberVoiceNote.
     val voice = rememberVoiceNote(
         onClip = { name, bytes ->
+            val memo = voiceNoteStagedFile(name, bytes)
             if (inChat) {
-                liveVm.stageFiles(listOf(voiceNoteStagedFile(name, bytes)))
+                liveVm.stageFiles(listOf(memo))
             } else if (stagedFiles.size >= MAX_STAGED_FILES) {
                 notice = "Not attached — room for $MAX_STAGED_FILES max."
             } else {
-                stagedFiles = stagedFiles + voiceNoteStagedFile(name, bytes)
+                stagedFiles = stagedFiles + memo
+            }
+            // Transcribe after staging: the memo is sendable immediately, the transcript
+            // lands on it when the on-device recognizer answers (or never, if it can't).
+            scope.launch {
+                val transcript = transcribeMemo(ctx.applicationContext, bytes) ?: return@launch
+                if (inChat) {
+                    liveVm.setTranscript(memo.key, transcript)
+                } else {
+                    stagedFiles = stagedFiles.map {
+                        if (it.key == memo.key) it.copy(transcript = transcript) else it
+                    }
+                }
             }
         },
         onNotice = { notice = it },
@@ -345,14 +363,15 @@ fun TerminalScreen(
         for (f in files) {
             val existing = f.uploadedPath
             if (existing != null) {
-                out += StagedUpload(ptySafe(f.name), f.sizeBytes, existing)
+                out += StagedUpload(ptySafe(f.name), f.sizeBytes, existing, resolveTranscript(f.transcript, null))
                 continue
             }
             markStaged(f.key) { it.copy(uploading = true) }
             val outcome = runCatching {
                 uploader.upload(relayUrl, relayToken, ptySafe(f.name), f.bytes, terminalId)
             }
-            val path = outcome.getOrNull()?.path?.takeIf { it.isSafeHostPath() }
+            val attachment = outcome.getOrNull()
+            val path = attachment?.path?.takeIf { it.isSafeHostPath() }
             markStaged(f.key) { it.copy(uploading = false, uploadedPath = path) }
             if (outcome.isFailure || path == null) {
                 val cause = outcome.exceptionOrNull()
@@ -367,7 +386,12 @@ fun TerminalScreen(
                     " Files kept, nothing sent."
                 return null
             }
-            out += StagedUpload(ptySafe(f.name), f.sizeBytes, path)
+            out += StagedUpload(
+                ptySafe(f.name),
+                f.sizeBytes,
+                path,
+                resolveTranscript(f.transcript, attachment?.transcript),
+            )
         }
         return out
     }
@@ -417,9 +441,12 @@ fun TerminalScreen(
                 uploading = false
             }
             if (uploaded == null) return@launch
+            // The memo's transcript rides the same line, in the same marker vocabulary;
+            // the pty takes one line, so the separator is a space rather than a blank line.
+            val memoText = composeMemoText(text, uploaded.firstNotNullOfOrNull { it.transcript }, " ")
             val line = buildString {
-                if (text.isNotBlank()) {
-                    append(text)
+                if (memoText.isNotBlank()) {
+                    append(memoText)
                     append(' ')
                 }
                 uploaded.forEach {
@@ -603,6 +630,52 @@ fun TerminalScreen(
                 Text(if (live) "live" else "offline", fontSize = 11.sp, color = TerminalThemes.TokyoNight.foreground)
             }
         }
+        // Chat face only: the relay state lives here (a dot in the header) instead of a
+        // permanent card in the feed. Tap opens the settings the card used to show.
+        val relayChip: @Composable () -> Unit = {
+            val relay by liveVm.relayState.collectAsState()
+            val relayUrl by liveVm.url.collectAsState()
+            val relayToken by liveVm.token.collectAsState()
+            var relaySettingsOpen by remember { mutableStateOf(false) }
+            val palette = LocalMaestriColors.current
+            val relayDot = when (relay) {
+                RelayState.Open -> palette.positive
+                RelayState.Connecting -> palette.warning
+                is RelayState.Error -> palette.errorText
+                RelayState.Disconnected -> palette.secondaryLabel
+            }
+            val relayLabel = when (relay) {
+                RelayState.Open -> "relay live"
+                RelayState.Connecting -> "relay …"
+                is RelayState.Error -> "relay error"
+                RelayState.Disconnected -> "relay off"
+            }
+            Row(
+                Modifier.padding(horizontal = 12.dp)
+                    .clickable(enabled = true) { relaySettingsOpen = true }
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Relay settings"
+                        role = Role.Button
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(Modifier.size(7.dp).background(relayDot, CircleShape))
+                Text(relayLabel, fontSize = 11.sp, color = TerminalThemes.TokyoNight.foreground)
+            }
+            if (relaySettingsOpen) {
+                RelaySettingsDialog(
+                    url = relayUrl,
+                    token = relayToken,
+                    state = relay,
+                    onUrl = { liveVm.setUrl(it) },
+                    onToken = { liveVm.setToken(it) },
+                    onConnect = { liveVm.connect() },
+                    onDisconnect = { liveVm.disconnect() },
+                    onDismiss = { relaySettingsOpen = false },
+                )
+            }
+        }
         // Mono workspace chip (design v2 §4-03): floor name when the card carries one,
         // else the short workspace id — never a styled/serif value.
         val floorChip: @Composable () -> Unit = {
@@ -684,7 +757,8 @@ fun TerminalScreen(
             ) {
                 backBtn()
                 titleBlock()
-                connChip()
+                // The terminal stream has no meaning on the chat face; the relay state does.
+                if (inChat) relayChip() else connChip()
             }
             // design v2 .tchips: padding 4px 14px 12px 14px, gap 14px, and only
             // .tconf gets margin-left:auto — [Térreo · Collapse] left, settings right.
@@ -945,6 +1019,7 @@ private data class StagedUpload(
     val name: String,
     val sizeBytes: Long,
     val path: String,
+    val transcript: String?,
 )
 
 private fun String.isSafeHostPath(): Boolean =

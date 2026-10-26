@@ -12,6 +12,14 @@
          itself never installs anything (the user confirms in the system dialog). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Voice memos are transcribed by the on-device recognition service; without this
+         query, package visibility hides the service and on-device ASR looks unavailable. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:name=".MaestriApp"
         android:label="@string/app_name"
