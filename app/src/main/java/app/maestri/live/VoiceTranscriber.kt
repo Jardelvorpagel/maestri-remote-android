@@ -11,6 +11,7 @@ import android.os.ParcelFileDescriptor
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Locale
@@ -27,25 +28,47 @@ const val TRANSCRIPT_MARKER_CLOSE = "]"
 /** ASR ceiling: a memo that takes longer than this is sent unlabelled instead of stalled. */
 const val TRANSCRIBE_TIMEOUT_MS = 20_000L
 
+private const val TAG = "VoiceTranscriber"
+
+/** Retry the on-device take only if the first one failed fast; slow legs get no second chance. */
+private const val RETRY_IF_FASTER_THAN_MS = 10_000L
+
+/** What the retry still gets to use, so both attempts stay inside the caller's budget. */
+private const val MIN_RETRY_BUDGET_MS = 2_000L
+
+/** Letters/digits a transcript must carry before it is worth showing as words. */
+private const val MIN_TRANSCRIPT_WORDS = 2
+
+/**
+ * The usable transcript, or null. Trimming is not enough: a silent memo makes Whisper
+ * answer "." and a one-character blip answers "-", which rendered as `[transcript: .]`
+ * on the tablet. So punctuation and whitespace alone count as absent — the memo then
+ * sends exactly as it did before transcription existed.
+ */
+fun usableTranscript(transcript: String?): String? {
+    val heard = transcript?.trim().orEmpty()
+    if (heard.isEmpty()) return null
+    return heard.takeIf { chunk -> chunk.count { it.isLetterOrDigit() } >= MIN_TRANSCRIPT_WORDS }
+}
+
 /**
  * Message text for a memo: the caption, then the transcript in the single agreed marker.
- * A blank/missing transcript leaves the caption exactly as the user typed it, and a blank
- * caption with a transcript is the marker alone.
+ * A blank/missing/junk transcript leaves the caption exactly as the user typed it, and a
+ * blank caption with a transcript is the marker alone.
  */
 fun composeMemoText(caption: String, transcript: String?, separator: String = "\n\n"): String {
-    val heard = transcript?.trim().orEmpty()
-    if (heard.isEmpty()) return caption
+    val heard = usableTranscript(transcript) ?: return caption
     val marker = TRANSCRIPT_MARKER_OPEN + heard + TRANSCRIPT_MARKER_CLOSE
     if (caption.isBlank()) return marker
     return caption.trimEnd() + separator + marker
 }
 
 /**
- * Transcript preference: the on-device take when ASR answered, the host's /upload field
- * otherwise. Blank counts as absent on both sides, so a memo never carries an empty marker.
+ * Transcript preference: the on-device take when ASR answered with words, the host's
+ * /upload field otherwise. Junk counts as absent on both sides, so neither leg's "." wins.
  */
 fun resolveTranscript(onDevice: String?, host: String?): String? =
-    onDevice?.trim()?.takeIf { it.isNotBlank() } ?: host?.trim()?.takeIf { it.isNotBlank() }
+    usableTranscript(onDevice) ?: usableTranscript(host)
 
 /**
  * On-device transcription of a recorded m4a: decode to 16-bit PCM with the platform
@@ -61,14 +84,31 @@ suspend fun transcribeMemo(
     bytes: ByteArray,
     timeoutMs: Long = TRANSCRIBE_TIMEOUT_MS,
 ): String? {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null
-    if (bytes.isEmpty()) return null
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        Log.d(TAG, "skip: api=${Build.VERSION.SDK_INT} < 33")
+        return null
+    }
+    if (bytes.isEmpty()) {
+        Log.d(TAG, "skip: empty memo")
+        return null
+    }
     val app = context.applicationContext
-    val pcm = runCatching { withContext(Dispatchers.Default) { decodePcm(app, bytes) } }.getOrNull()
-        ?: return null
-    if (pcm.bytes.isEmpty()) return null
-    val heard = runCatching { recognizePcm(app, pcm, timeoutMs) }.getOrNull() ?: return null
-    return heard.trim().takeIf { it.isNotBlank() }
+    val pcm = runCatching { withContext(Dispatchers.Default) { decodePcm(app, bytes) } }
+        .onFailure { Log.w(TAG, "decode threw for ${bytes.size} bytes", it) }
+        .getOrNull()
+    if (pcm == null || pcm.bytes.isEmpty()) {
+        Log.w(TAG, "decode produced no pcm from ${bytes.size} bytes")
+        return null
+    }
+    Log.d(
+        TAG,
+        "decoded sampleRate=${pcm.sampleRate} channels=${pcm.channels} bytes=${pcm.bytes.size} " +
+            "frames=${pcm.bytes.size / (2 * pcm.channels)}",
+    )
+    val heard = runCatching { recognizePcm(app, pcm, timeoutMs) }
+        .onFailure { Log.w(TAG, "recognize threw", it) }
+        .getOrNull()
+    return heard?.trim()?.takeIf { it.isNotBlank() }
 }
 
 // ----------------------------------------------------------------- decode
@@ -196,52 +236,114 @@ private fun wavFile(pcm: Pcm, target: File): File {
 
 /**
  * Runs the on-device recognizer over the decoded audio. SpeechRecognizer is main-thread
- * bound, so the whole exchange (create, listen, await, destroy) stays on Main; the timeout
- * cancels the listen and a failure on any step yields null instead of hanging the caller.
+ * bound, so each attempt (create, listen, await, destroy) stays on Main; its timeout
+ * cancels the listen and a failure on any step yields an empty attempt.
+ *
+ * The tablet's AiAi answers intermittently (3 hypotheses once, empty twice, and once a
+ * service that never started), so an empty or NO_MATCH take is retried exactly once, and
+ * only while the first attempt was quick: a slow leg would eat the caller's whole budget.
  */
 private suspend fun recognizePcm(context: Context, pcm: Pcm, timeoutMs: Long): String? {
-    val onDevice = runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(context) }
+    val available = runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(context) }
         .getOrDefault(false)
-    if (!onDevice) return null
-    return withContext(Dispatchers.Main) {
-        val recognizer = runCatching { SpeechRecognizer.createOnDeviceSpeechRecognizer(context) }.getOrNull()
-            ?: return@withContext null
-        val wav = File(context.cacheDir, "asr/voice-" + UUID.randomUUID() + ".wav")
-        var descriptor: ParcelFileDescriptor? = null
-        try {
-            wavFile(pcm, wav)
-            descriptor = ParcelFileDescriptor.open(wav, ParcelFileDescriptor.MODE_READ_ONLY)
-            val heard = CompletableDeferred<String?>()
-            recognizer.setRecognitionListener(object : RecognitionListener {
-                override fun onResults(results: Bundle?) {
-                    val first = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull { it.isNotBlank() }
-                    heard.complete(first)
-                }
-
-                override fun onError(error: Int) {
-                    heard.complete(null)
-                }
-
-                override fun onReadyForSpeech(params: Bundle?) = Unit
-                override fun onBeginningOfSpeech() = Unit
-                override fun onRmsChanged(rmsdB: Float) = Unit
-                override fun onBufferReceived(buffer: ByteArray?) = Unit
-                override fun onEndOfSpeech() = Unit
-                override fun onPartialResults(partialResults: Bundle?) = Unit
-                override fun onEvent(eventType: Int, params: Bundle?) = Unit
-            })
-            val started = runCatching { recognizer.startListening(recognizerIntent(descriptor, pcm)) }
-            if (started.isFailure) return@withContext null
-            val result = withTimeoutOrNull(timeoutMs) { heard.await() }
-            if (result == null) runCatching { recognizer.cancel() }
-            result
-        } finally {
-            runCatching { descriptor?.close() }
-            runCatching { recognizer.destroy() }
-            wav.delete()
-        }
+    Log.d(TAG, "availability api=${Build.VERSION.SDK_INT} onDevice=$available")
+    if (!available) return null
+    val startedAt = System.currentTimeMillis()
+    val first = attemptRecognition(context, pcm, timeoutMs, number = 1)
+    val spent = System.currentTimeMillis() - startedAt
+    val empty = first.text.isNullOrBlank()
+    val retryable = empty || first.error == SpeechRecognizer.ERROR_NO_MATCH
+    if (retryable && spent < RETRY_IF_FASTER_THAN_MS) {
+        Log.d(TAG, "retrying once · first=${if (empty) "empty" else "no-match"} spent=${spent}ms")
+        val remaining = (timeoutMs - spent).coerceAtLeast(MIN_RETRY_BUDGET_MS)
+        return chosen(attemptRecognition(context, pcm, remaining, number = 2))
     }
+    if (retryable) Log.d(TAG, "no retry · first attempt spent ${spent}ms")
+    return chosen(first)
+}
+
+/** What one attempt produced: the first non-blank hypothesis, or the recognizer's error code. */
+private class Attempt(val text: String?, val error: Int?)
+
+/** Latest point the leg is decided: on-device answered with words, or the host will. */
+private fun chosen(attempt: Attempt): String? {
+    val text = attempt.text?.trim()?.takeIf { it.isNotBlank() }
+    if (text == null) {
+        Log.d(TAG, "final leg=host · on-device gave nothing (error=${attempt.error})")
+    } else {
+        Log.d(TAG, "final leg=on-device chars=${text.length}")
+    }
+    return text
+}
+
+private suspend fun attemptRecognition(
+    context: Context,
+    pcm: Pcm,
+    timeoutMs: Long,
+    number: Int,
+): Attempt = withContext(Dispatchers.Main) {
+    val recognizer = runCatching { SpeechRecognizer.createOnDeviceSpeechRecognizer(context) }
+        .onFailure { Log.w(TAG, "attempt #$number createOnDeviceSpeechRecognizer failed", it) }
+        .getOrNull()
+        ?: return@withContext Attempt(null, null)
+    val wav = File(context.cacheDir, "asr/voice-" + UUID.randomUUID() + ".wav")
+    var descriptor: ParcelFileDescriptor? = null
+    try {
+        wavFile(pcm, wav)
+        val open = ParcelFileDescriptor.open(wav, ParcelFileDescriptor.MODE_READ_ONLY)
+        descriptor = open
+        val heard = CompletableDeferred<Attempt>()
+        recognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onResults(results: Bundle?) {
+                val all = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                val first = all.firstOrNull { it.isNotBlank() }
+                Log.d(TAG, "attempt #$number results=${all.size} firstLen=${first?.length ?: 0}")
+                heard.complete(Attempt(first, null))
+            }
+
+            override fun onError(error: Int) {
+                Log.w(TAG, "attempt #$number onError=${errorName(error)} ($error)")
+                heard.complete(Attempt(null, error))
+            }
+
+            override fun onReadyForSpeech(params: Bundle?) = Unit
+            override fun onBeginningOfSpeech() = Unit
+            override fun onRmsChanged(rmsdB: Float) = Unit
+            override fun onBufferReceived(buffer: ByteArray?) = Unit
+            override fun onEndOfSpeech() = Unit
+            override fun onPartialResults(partialResults: Bundle?) = Unit
+            override fun onEvent(eventType: Int, params: Bundle?) = Unit
+        })
+        val started = runCatching { recognizer.startListening(recognizerIntent(open, pcm)) }
+        if (started.isFailure) {
+            Log.w(TAG, "attempt #$number startListening threw", started.exceptionOrNull())
+            return@withContext Attempt(null, null)
+        }
+        val result = withTimeoutOrNull(timeoutMs) { heard.await() }
+        if (result == null) {
+            Log.w(TAG, "attempt #$number timed out after ${timeoutMs}ms")
+            runCatching { recognizer.cancel() }
+            return@withContext Attempt(null, null)
+        }
+        result
+    } finally {
+        runCatching { descriptor?.close() }
+        runCatching { recognizer.destroy() }
+        wav.delete()
+    }
+}
+
+private fun errorName(code: Int): String = when (code) {
+    SpeechRecognizer.ERROR_AUDIO -> "AUDIO"
+    SpeechRecognizer.ERROR_CLIENT -> "CLIENT"
+    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "INSUFFICIENT_PERMISSIONS"
+    SpeechRecognizer.ERROR_NETWORK -> "NETWORK"
+    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "NETWORK_TIMEOUT"
+    SpeechRecognizer.ERROR_NO_MATCH -> "NO_MATCH"
+    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "RECOGNIZER_BUSY"
+    SpeechRecognizer.ERROR_SERVER -> "SERVER"
+    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "SPEECH_TIMEOUT"
+    else -> "unknown"
 }
 
 private fun recognizerIntent(

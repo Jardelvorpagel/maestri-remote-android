@@ -63,6 +63,36 @@ class VoiceTranscriberTest {
     }
 
     @Test
+    fun punctuationOnlyTranscriptIsAbsent() {
+        assertNull(usableTranscript("."))
+        assertNull(usableTranscript(" . "))
+        assertNull(usableTranscript("-"))
+        assertNull(usableTranscript("..."))
+        assertNull(usableTranscript("?"))
+        assertNull(usableTranscript("a"))
+    }
+
+    @Test
+    fun realWordsSurviveTheFloor() {
+        assertEquals("ok", usableTranscript("ok"))
+        assertEquals("sim", usableTranscript("  sim  "))
+        assertEquals(
+            "transcrição no tablet e mandando para o Pi.",
+            usableTranscript("transcrição no tablet e mandando para o Pi."),
+        )
+        assertEquals("42", usableTranscript("42"))
+    }
+
+    @Test
+    fun aSilentMemoSendsWithoutTheMarker() {
+        assertEquals("", composeMemoText("", "."))
+        assertEquals("caption", composeMemoText("caption", " . "))
+        assertNull(resolveTranscript(".", "-"))
+        assertEquals("host guess", resolveTranscript(".", "host guess"))
+        assertEquals("heard here", resolveTranscript("heard here", "."))
+    }
+
+    @Test
     fun uploadResponseCarriesTheHostTranscriptWhenPresent() {
         val withTranscript = parseUploadResponse(
             """{"id":"a1","name":"voice-1.m4a","bytes":42,"path":"/tmp/voice-1.m4a",""" +

@@ -429,8 +429,10 @@ fun TerminalScreen(
         }
         // Attachments go to the host FIRST: the pty can only be handed an id the host
         // already knows, so the upload has to finish before the line is typed.
+        // Set before the dispatch, not inside it: a second tap in the same frame used to slip
+        // past the guard while the coroutine was still queued.
+        uploading = true
         scope.launch {
-            uploading = true
             val uploaded = try {
                 if (session.terminalStream.state.value != SocketState.OPEN) {
                     notice = "Terminal stream is not live — nothing sent, files kept."

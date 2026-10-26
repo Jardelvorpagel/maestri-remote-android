@@ -196,6 +196,28 @@ class LiveViewModel(
 
     private fun ioScope(): CoroutineScope = scope ?: viewModelScope
 
+    /**
+     * Single send in flight. A memo upload takes over a second, and until it returned the
+     * composer still looked sendable (draft clears on the echo at [reconcilePending], staged
+     * files only after [uploadStaged]), so a second tap re-uploaded the same files and sent a
+     * second identical message — the duplicate bubbles seen on the tablet.
+     */
+    private var sendInFlight = false
+
+    /** One send per dispatch: the guard drops as soon as the message is on the wire, not when
+     *  its ack watchdog finishes, so a deliberate second message is never swallowed. */
+    private fun launchSend(block: suspend () -> Unit) {
+        if (sendInFlight) return
+        sendInFlight = true
+        ioScope().launch {
+            try {
+                block()
+            } finally {
+                sendInFlight = false
+            }
+        }
+    }
+
     val configured: Boolean get() = store.url.value.isNotBlank()
 
     fun setUrl(value: String) {
@@ -349,8 +371,8 @@ class LiveViewModel(
         }
         val text = _draft.value.trim()
         if (text.isEmpty() && _staged.value.isEmpty()) return
-        ioScope().launch {
-            val attachments = uploadStaged() ?: return@launch
+        launchSend {
+            val attachments = uploadStaged() ?: return@launchSend
             _staged.value = emptyList()
             enqueueText(text, attachments)
         }
@@ -375,7 +397,7 @@ class LiveViewModel(
             _notice.value = "Not connected — connect first, then send."
             return
         }
-        ioScope().launch { enqueueText(text, emptyList()) }
+        launchSend { enqueueText(text, emptyList()) }
     }
 
     /** Shared tail of [send] and [sendOption]: optimistic row, dial, 15s ack watchdog. */
@@ -397,9 +419,15 @@ class LiveViewModel(
             markFailed(id, "send threw — tap retry")
             return
         }
+        // The 15s watchdog runs beside the sender, never inside it: holding the in-flight
+        // guard for it would refuse the next message the user types.
+        ioScope().launch { awaitAck(id) }
+    }
+
+    private suspend fun awaitAck(clientMsgId: String) {
         delay(SEND_ACK_TIMEOUT_MS)
-        if (_pending.value.any { it.clientMsgId == id && it.status == LiveSendStatus.SENDING }) {
-            markFailed(id, "no send_ack from the relay — tap retry")
+        if (_pending.value.any { it.clientMsgId == clientMsgId && it.status == LiveSendStatus.SENDING }) {
+            markFailed(clientMsgId, "no send_ack from the relay — tap retry")
         }
     }
 
@@ -422,10 +450,7 @@ class LiveViewModel(
                 markFailed(clientMsgId, "send threw — tap retry")
                 return@launch
             }
-            delay(SEND_ACK_TIMEOUT_MS)
-            if (_pending.value.any { it.clientMsgId == clientMsgId && it.status == LiveSendStatus.SENDING }) {
-                markFailed(clientMsgId, "no send_ack from the relay — tap retry")
-            }
+            awaitAck(clientMsgId)
         }
     }
 
