@@ -311,16 +311,52 @@ private fun kindGlyph(mime: String): String = when {
     else -> "\u25A4"
 }
 
+private val IMAGE_MAGICS = listOf(
+    byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()),
+    byteArrayOf(0x89.toByte(), 0x50.toByte(), 0x4E.toByte(), 0x47.toByte()),
+    byteArrayOf(0x47.toByte(), 0x49.toByte(), 0x46.toByte(), 0x38.toByte()),
+)
+
+/**
+ * Offset where the image stream actually starts, or -1 when these bytes carry no image.
+ *
+ * A picked "image" is not always a bare file: the 348 KB `IMG-qa180.jpg` that reached the
+ * tablet was an HTTP multipart body (its own bytes, verbatim — the relay stored the same
+ * envelope) with the JPEG starting at byte 163, so decoding from offset 0 could only ever
+ * fail and the plate fell back to its glyph. The magic is what identifies the payload.
+ * shortcut: only the leading 64 KB is searched, so a wrapper bigger than that stays a glyph.
+ */
+internal fun imagePayloadStart(bytes: ByteArray, window: Int = 64 * 1024): Int {
+    val limit = minOf(bytes.size, window)
+    for (at in 0 until limit) {
+        val hit = IMAGE_MAGICS.any { magic ->
+            at + magic.size <= bytes.size && magic.indices.all { bytes[at + it] == magic[it] }
+        }
+        if (hit) return at
+    }
+    return -1
+}
+
 /** Downsampled bitmap for a plate or a preview; null when the bytes are not a decodable image. */
 private fun decodeDownsampled(bytes: ByteArray?, maxSide: Int = 512): ImageBitmap? {
     if (bytes == null || bytes.isEmpty()) return null
+    val start = imagePayloadStart(bytes)
+    if (start < 0) return null
+    val size = bytes.size - start
     return runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        BitmapFactory.decodeByteArray(bytes, start, size, bounds)
         var sample = 1
         while (bounds.outWidth / sample > maxSide || bounds.outHeight / sample > maxSide) sample *= 2
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
+        val decoded = BitmapFactory.decodeByteArray(bytes, start, size, opts)
+        if (decoded == null) {
+            android.util.Log.w(
+                "QAFeed",
+                "plate: no decode bytes=${bytes.size} start=$start ${bounds.outWidth}x${bounds.outHeight} sample=$sample",
+            )
+        }
+        decoded?.asImageBitmap()
     }.getOrNull()
 }
 

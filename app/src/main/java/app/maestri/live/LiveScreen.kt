@@ -793,11 +793,15 @@ private fun MessageRow(
 ) {
     val colors = LocalMaestriColors.current
     val mine = event.kind == LiveKinds.USER_MESSAGE
+    val body = event.text.orEmpty()
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(modifier = Modifier.fillMaxWidth(if (mine) 0.86f else 0.92f)) {
             // Reference reading style: an attachment is its own card ABOVE the typed bubble,
             // never clipped inside the bubble it belongs to.
             if (mine && attachments.isNotEmpty()) LiveAttachmentChips(attachments)
+            // A turn that carried only an attachment has nothing to say: the card stands alone,
+            // with no empty bubble and no stray "you" label above it.
+            if (!mine || showsTurnBubble(body, attachments.size)) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -843,7 +847,6 @@ private fun MessageRow(
                     }
                 }
                 Spacer(Modifier.height(2.dp))
-                val body = event.text.orEmpty()
                 if (mine) {
                     if (body.isNotBlank()) {
                         Text(body, fontSize = bodySizeSp.sp, color = colors.bubbleMineText)
@@ -859,9 +862,14 @@ private fun MessageRow(
                     LiveCopyRow(text = body)
                 }
             }
+            }
         }
     }
 }
+
+/** Whether a turn needs bubble chrome at all: an attachment-only turn is just its card. */
+internal fun showsTurnBubble(body: String, attachmentCount: Int): Boolean =
+    body.isNotBlank() || attachmentCount == 0
 
 /**
  * Action row under an assistant turn. Copy only: share, thumbs and regenerate each need host

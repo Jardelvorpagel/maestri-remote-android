@@ -213,6 +213,13 @@ private fun styleFor(marker: String): MdStyle = when (marker) {
 // ----------------------------------------------------------------- renderer
 
 /**
+ * The reading measure: on the tablet the bare feed gave lines of 120-130 characters, which is
+ * a wall, not a page. A cap keeps the prose column readable without shrinking the type, and
+ * code fences scroll inside it instead of running the full width.
+ */
+private val ProseMaxWidth = 740.dp
+
+/**
  * Renders assistant prose as markdown: headings, lists with a hanging indent, quotes,
  * horizontally scrolling code fences and inline emphasis.
  *
@@ -232,7 +239,7 @@ fun MarkdownProse(
     if (blocks.isEmpty()) return
     val proseSize = bodySizeSp + MaestriType.SerifBodyStep
     val leading = (proseSize * MaestriType.SerifBodyLeading).sp
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(modifier.widthIn(max = ProseMaxWidth).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         blocks.forEach { block ->
             when (block) {
                 is MdBlock.Heading -> Text(

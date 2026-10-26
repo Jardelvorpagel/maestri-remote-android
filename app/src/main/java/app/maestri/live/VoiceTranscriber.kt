@@ -40,6 +40,13 @@ private const val MIN_RETRY_BUDGET_MS = 2_000L
 private const val MIN_TRANSCRIPT_WORDS = 2
 
 /**
+ * The rate on-device recognizers want. AiAi/SODA-class engines returned an empty hypothesis
+ * list twice on 44.1 kHz audio the host transcribed perfectly, and 16 kHz mono is what their
+ * acoustic model was trained on.
+ */
+internal const val RECOGNIZER_SAMPLE_RATE = 16_000
+
+/**
  * The usable transcript, or null. Trimming is not enough: a silent memo makes Whisper
  * answer "." and a one-character blip answers "-", which rendered as `[transcript: .]`
  * on the tablet. So punctuation and whitespace alone count as absent — the memo then
@@ -105,7 +112,8 @@ suspend fun transcribeMemo(
         "decoded sampleRate=${pcm.sampleRate} channels=${pcm.channels} bytes=${pcm.bytes.size} " +
             "frames=${pcm.bytes.size / (2 * pcm.channels)}",
     )
-    val heard = runCatching { recognizePcm(app, pcm, timeoutMs) }
+    val feed = recognizerPcm(pcm)
+    val heard = runCatching { recognizePcm(app, feed, timeoutMs) }
         .onFailure { Log.w(TAG, "recognize threw", it) }
         .getOrNull()
     return heard?.trim()?.takeIf { it.isNotBlank() }
@@ -114,6 +122,53 @@ suspend fun transcribeMemo(
 // ----------------------------------------------------------------- decode
 
 private class Pcm(val bytes: ByteArray, val sampleRate: Int, val channels: Int)
+
+/**
+ * What the recognizer is fed: 16-bit mono at [RECOGNIZER_SAMPLE_RATE]. The WAV header and the
+ * `EXTRA_AUDIO_SOURCE_*` extras both read this object, so the payload and what we declare about
+ * it can never disagree.
+ */
+private fun recognizerPcm(pcm: Pcm): Pcm {
+    val resampled = resample16kMono(pcm.bytes, pcm.sampleRate, pcm.channels)
+    if (resampled.isEmpty()) return pcm
+    Log.d(
+        TAG,
+        "feed rate=${RECOGNIZER_SAMPLE_RATE} channels=1 bytes=${resampled.size} " +
+            "(from ${pcm.sampleRate}Hz ch=${pcm.channels} ${pcm.bytes.size}B)",
+    )
+    return Pcm(resampled, RECOGNIZER_SAMPLE_RATE, 1)
+}
+
+/**
+ * 16-bit little-endian PCM at [sampleRate]/[channels] to 16 kHz mono, linear interpolation.
+ * A no-op when the input already is 16 kHz mono; returns empty when there is nothing to read.
+ */
+internal fun resample16kMono(bytes: ByteArray, sampleRate: Int, channels: Int): ByteArray {
+    val ch = channels.coerceAtLeast(1)
+    val frames = bytes.size / (2 * ch)
+    if (frames <= 0 || sampleRate <= 0) return ByteArray(0)
+    if (sampleRate == RECOGNIZER_SAMPLE_RATE && ch == 1) return bytes
+    fun sampleAt(frame: Int, channel: Int): Double {
+        val at = (frame * ch + channel) * 2
+        if (at + 1 >= bytes.size) return 0.0
+        return (((bytes[at].toInt() and 0xFF) or (bytes[at + 1].toInt() shl 8)).toShort()).toDouble()
+    }
+    val outFrames = (frames.toLong() * RECOGNIZER_SAMPLE_RATE / sampleRate).toInt()
+    val out = ByteArray(outFrames * 2)
+    val step = sampleRate.toDouble() / RECOGNIZER_SAMPLE_RATE
+    for (i in 0 until outFrames) {
+        val pos = i * step
+        val base = pos.toInt()
+        val frac = pos - base
+        val next = if (base + 1 < frames) base + 1 else base
+        var mixed = 0.0
+        for (c in 0 until ch) mixed += sampleAt(base, c) * (1 - frac) + sampleAt(next, c) * frac
+        val value = (mixed / ch).toInt().coerceIn(-32768, 32767)
+        out[i * 2] = (value and 0xFF).toByte()
+        out[i * 2 + 1] = ((value shr 8) and 0xFF).toByte()
+    }
+    return out
+}
 
 private const val WAV_HEADER_BYTES = 44
 

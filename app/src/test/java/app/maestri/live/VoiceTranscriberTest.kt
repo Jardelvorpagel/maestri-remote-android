@@ -1,5 +1,6 @@
 package app.maestri.live
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -111,5 +112,57 @@ class VoiceTranscriberTest {
         )
         assertNull(blankTranscript?.transcript)
         assertNull(parseUploadResponse("not json"))
+    }
+
+    private fun pcm16(values: IntArray): ByteArray {
+        val out = ByteArray(values.size * 2)
+        values.forEachIndexed { i, v ->
+            out[i * 2] = (v and 0xFF).toByte()
+            out[i * 2 + 1] = ((v shr 8) and 0xFF).toByte()
+        }
+        return out
+    }
+
+    private fun shortsOf(bytes: ByteArray): List<Int> =
+        (0 until bytes.size / 2).map { i ->
+            ((bytes[i * 2].toInt() and 0xFF) or (bytes[i * 2 + 1].toInt() shl 8)).toShort().toInt()
+        }
+
+    @Test
+    fun fortyFourOneKilohertzIsFedToTheRecognizerAtSixteen() {
+        val input = pcm16(IntArray(4410) { 1200 })
+        val out = resample16kMono(input, 44100, 1)
+        assertEquals(1600 * 2, out.size)
+        assertTrue(shortsOf(out).all { kotlin.math.abs(it - 1200) <= 2 })
+    }
+
+    @Test
+    fun silenceAndFullScaleSurviveTheResample() {
+        val silence = resample16kMono(pcm16(IntArray(4800)), 48000, 1)
+        assertEquals(1600 * 2, silence.size)
+        assertTrue(shortsOf(silence).all { it == 0 })
+        val loud = resample16kMono(pcm16(IntArray(4800) { 32767 }), 48000, 1)
+        assertTrue(shortsOf(loud).all { it in 32760..32767 })
+    }
+
+    @Test
+    fun stereoIsMixedDownToMono() {
+        val frames = 4800
+        val interleaved = IntArray(frames * 2) { i -> if (i % 2 == 0) 1000 else 3000 }
+        val out = resample16kMono(pcm16(interleaved), 48000, 2)
+        assertEquals(frames / 3 * 2, out.size)
+        assertTrue(shortsOf(out).all { kotlin.math.abs(it - 2000) <= 3 })
+    }
+
+    @Test
+    fun alreadySixteenKilohertzMonoIsUntouched() {
+        val input = pcm16(IntArray(100) { 500 })
+        assertArrayEquals(input, resample16kMono(input, 16000, 1))
+    }
+
+    @Test
+    fun unusablePcmResamplesToNothing() {
+        assertEquals(0, resample16kMono(ByteArray(0), 44100, 1).size)
+        assertEquals(0, resample16kMono(pcm16(IntArray(10)), 0, 1).size)
     }
 }
