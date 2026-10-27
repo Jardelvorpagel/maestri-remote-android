@@ -837,7 +837,8 @@ fun TerminalScreen(
                 // Screens 1-6: one clean black bar in chat mode — back, the model/thinking
                 // picker, then the relay state and the display settings. No TokyoNight chips.
                 Row(
-                    Modifier.fillMaxWidth().height(ChatHeaderMetrics.BarHeight).background(Gemini.Canvas),
+                    Modifier.fillMaxWidth().height(ChatHeaderMetrics.BarHeight).background(Gemini.Canvas)
+                        .padding(start = 10.dp, end = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     backBtn()

@@ -38,6 +38,7 @@ Native Kotlin + Jetpack Compose client for the **Maestri Wire** v1 protocol (`ap
 
 ## 3. Device Verification & QA Discipline
 
+- **Default Test Device**: Use Samsung SM-A325M for all device/UI testing; use the tablet only for tablet-specific scenarios or when the Samsung is unavailable. Resolve the Samsung's current serial before use.
 - **Android CLI First**: Use `~/.local/bin/android` (`android-cli` skill) as the default entry point for SDK/AVD/device inspection, and `adb` for md5 attestation, logcat forensics, and raw input injection.
 - **Explicit Device Serial (`-s`)**: Multiple devices may be attached simultaneously (e.g., Redmi tablet `rkb66p7xaahatk89`, OPPO Reno14 5G `CPH2737` over wireless TLS, or `Pixel_8` AVD). **Never run a bare `adb` command** — always pass `adb -s <serial>`.
 - **Artifact Attestation**: A green build is not proof of behavior. Attest the `md5` of the built APK against the installed package before running UI/device checks, and capture before/after screenshots or hierarchy dumps as evidence.
