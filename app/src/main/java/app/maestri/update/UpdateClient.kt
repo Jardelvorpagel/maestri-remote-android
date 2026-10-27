@@ -36,10 +36,12 @@ fun isNewer(publishedVersionCode: Int, installedVersionCode: Int): Boolean =
     publishedVersionCode > installedVersionCode
 
 /**
- * Where to look for the manifest, in order: the relay on the user's own tailnet first —
- * a device on Tailscale reaches its paired host whether or not it has a working route to
- * the public internet — then the public releases URL. [pairedHost] is the host the app is
- * paired with; blank means no tailnet candidate.
+ * Where to look for the manifest: the relay on the user's own tailnet first — a device on
+ * Tailscale reaches its paired host whether or not it has a working route to the public
+ * internet — then the public releases URL. The order only breaks ties: [pickNewest] keeps
+ * the highest versionCode whatever the candidate, so a relay copy that lags behind the
+ * published release can never mask it. [pairedHost] is the host the app is paired with;
+ * blank means no tailnet candidate.
  */
 fun manifestUrls(
     githubUrl: String,
@@ -67,6 +69,21 @@ fun digestMatches(expected: String, actual: String): Boolean =
     actual.trim().equals(expected.trim(), ignoreCase = true)
 
 /**
+ * One usable manifest plus where it came from: [source] is the enum-like `relay`/`github`
+ * label the journey log records.
+ */
+internal data class ManifestCandidate(val source: String, val info: ReleaseInfo)
+
+/**
+ * The manifest to trust: the one with the HIGHEST versionCode across every candidate, so a
+ * lagging relay copy can never mask a newer published release. Ties keep the first
+ * candidate — [manifestUrls] lists the relay first, so a same-version manifest still
+ * downloads from the local host.
+ */
+internal fun pickNewest(candidates: List<ManifestCandidate>): ManifestCandidate? =
+    candidates.maxByOrNull { it.info.versionCode }
+
+/**
  * Fetcher for the public release manifest and for the APK it points at.
  *
  * The endpoint is a public GitHub Releases URL: no token, no pairing, no relay — and
@@ -84,16 +101,21 @@ class UpdateClient(
 ) {
 
     /**
-     * The published manifest, or null when it is missing, unreadable or offline.
+     * The newest published manifest across all candidates, or null when none is usable.
      * A null is never an error the user sees: the check fails silently.
      */
     suspend fun latest(): ReleaseInfo? = withContext(Dispatchers.IO) {
-        for (url in manifests().distinct()) {
+        val candidates = manifests().distinct().mapNotNull { url ->
             val source = if (url.startsWith("https://github.com")) "github" else "relay"
-            val info = fetch(url, source)
-            if (info != null) return@withContext info
+            fetch(url, source)?.let { ManifestCandidate(source, it) }
         }
-        null
+        val chosen = pickNewest(candidates) ?: return@withContext null
+        Journey.update(
+            "check",
+            "manifest",
+            "source=${chosen.source} versionCode=${chosen.info.versionCode}",
+        )
+        chosen.info
     }
 
     /** One manifest URL. A failure here is a log line, never a user-facing error. */

@@ -2,6 +2,7 @@ package app.maestri.update
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -49,4 +50,52 @@ class UpdateClientTest {
         assertEquals(listOf(UpdateClient.LATEST_URL), urls)
         assertEquals(listOf(UpdateClient.LATEST_URL), manifestUrls(UpdateClient.LATEST_URL, null, null))
     }
+
+    @Test
+    fun aStaleRelayManifestLosesToANewerPublishedOne() {
+        val picked = pickNewest(
+            listOf(
+                ManifestCandidate("relay", release(193)),
+                ManifestCandidate("github", release(198)),
+            ),
+        )
+        assertEquals("github", picked?.source)
+        assertEquals(198, picked?.info?.versionCode)
+    }
+
+    @Test
+    fun aNewerRelayManifestWins() {
+        val picked = pickNewest(
+            listOf(
+                ManifestCandidate("relay", release(198)),
+                ManifestCandidate("github", release(193)),
+            ),
+        )
+        assertEquals("relay", picked?.source)
+        assertEquals(198, picked?.info?.versionCode)
+    }
+
+    @Test
+    fun aTieKeepsTheFirstCandidate() {
+        val picked = pickNewest(
+            listOf(
+                ManifestCandidate("relay", release(198)),
+                ManifestCandidate("github", release(198)),
+            ),
+        )
+        assertEquals("relay", picked?.source)
+    }
+
+    @Test
+    fun withoutAUsableCandidateNothingIsSelected() {
+        assertNull(pickNewest(emptyList()))
+    }
+
+    @Test
+    fun aSingleCandidateIsSelectedAsIs() {
+        val only = ManifestCandidate("github", release(198))
+        assertEquals(only, pickNewest(listOf(only)))
+    }
+
+    private fun release(code: Int) = ReleaseInfo(code, "0.2.1", "", "", 0L, "", "")
 }
