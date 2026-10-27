@@ -60,6 +60,7 @@ object CanvasWrites {
     // ------------------------------------------------------------------ paths
 
     fun createNodePath(wsId: String) = "api/workspaces/$wsId/nodes"
+    fun createTerminalPath(wsId: String) = "api/workspaces/$wsId/terminals"
     fun nodePath(wsId: String, nodeId: String, op: String) = "api/workspaces/$wsId/nodes/$nodeId/$op"
     fun deleteNodePath(wsId: String, nodeId: String) = "api/workspaces/$wsId/nodes/$nodeId"
     fun nodesPath(wsId: String, op: String) = "api/workspaces/$wsId/nodes/$op"
@@ -90,6 +91,20 @@ object CanvasWrites {
         text?.let { put("text", it) }
         color?.let { put("color", it) }
         fontFamily?.let { put("fontFamily", it) }
+        mutationId?.let { put("mutationId", it) }
+    }
+
+    /**
+     * `{floorId?, mutationId?}` — the whole body this client sends to `POST …/{ws}/terminals`.
+     * It deliberately carries no draft field (presetId/name/command/roleId/…): that is the host's
+     * own rule for creating from the default preset. The ground floor carries no id, and the
+     * documented convention reads an absent floor as the ground floor, so `floorId` is omitted for
+     * ground instead of being named: the literal `ground` is documented-acceptable on some write
+     * routes (`/ties`: "ausente ou ground para o térreo") but the drawings write route rejects it
+     * (400 "Invalid floor", observed), so this client does not depend on it here.
+     */
+    fun createTerminal(floorId: String?, mutationId: String? = null): JSONObject = JSONObject().apply {
+        if (floorId != null && floorId != "ground") put("floorId", floorId)
         mutationId?.let { put("mutationId", it) }
     }
 

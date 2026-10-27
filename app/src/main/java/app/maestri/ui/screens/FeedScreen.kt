@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.maestri.wire.CanvasWrites
 import app.maestri.wire.FeedItem
 import app.maestri.wire.FloorMeta
 import app.maestri.wire.FeedSnapshot
@@ -56,7 +58,9 @@ import app.maestri.wire.SocketState
 import app.maestri.wire.TerminalCard
 import app.maestri.wire.session.WireSession
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.Palette
@@ -108,6 +112,12 @@ fun FeedScreen(
     var arrivalTick by remember { mutableStateOf(0) } // 30 s re-render cadence for the labels
 
     var initialError by remember { mutableStateOf<String?>(null) }
+
+    val caps = session.serverInfo
+    val canCreateTerminal = caps?.has("canvasWrites") == true && caps?.role == "owner"
+    var createDialog by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
+    var createError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(session) {
         val p = session.pairing.value ?: return@LaunchedEffect
@@ -221,6 +231,12 @@ fun FeedScreen(
             ) {
                 TextButton(onClick = onOpenFloors, contentPadding = PaddingValues(horizontal = 8.dp)) {
                     Text("${app.maestri.ui.FloorsStrings.floors} ›", fontSize = 13.sp)
+                }
+                if (canCreateTerminal && floor != null) {
+                    TextButton(
+                        onClick = { createError = null; createDialog = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text("＋ New terminal", fontSize = 13.sp) }
                 }
                 FilterChip(
                     selected = floor == null,
@@ -340,6 +356,67 @@ fun FeedScreen(
                 }
             }
         }
+    }
+
+    if (createDialog) {
+        val selectedFloor = floor
+        val floorName = snapNow?.floors?.firstOrNull { (it.id ?: "ground") == selectedFloor }?.name
+            ?: selectedFloor.orEmpty()
+        AlertDialog(
+            onDismissRequest = { if (!creating) { createDialog = false; createError = null } },
+            title = { Text("New terminal") },
+            text = {
+                Column {
+                    Text("$wsName · $floorName — the host's default preset picks the command.", fontSize = 13.sp)
+                    val err = createError
+                    if (err != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(err, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !creating,
+                    onClick = {
+                        if (!creating) {
+                            creating = true
+                            createError = null
+                            scope.launch {
+                                try {
+                                    val res = session.canvasWrite(
+                                        CanvasWrites.createTerminalPath(wsId),
+                                        CanvasWrites.createTerminal(selectedFloor, CanvasWrites.newMutationId("term")),
+                                    )
+                                    val terminalId = res.optString("terminalId")
+                                    if (terminalId.isBlank()) {
+                                        createError = "the host answered without a terminal id"
+                                        return@launch
+                                    }
+                                    createDialog = false
+                                    val name = withTimeoutOrNull(2_000L) {
+                                        session.feed.snapshot.first { s ->
+                                            s?.terminalCards?.any { it.id == terminalId } == true
+                                        }
+                                    }?.terminalCards?.firstOrNull { it.id == terminalId }?.name ?: "Terminal"
+                                    onOpenTerminal(terminalId, name)
+                                } catch (e: Exception) {
+                                    createError = errText(e)
+                                } finally {
+                                    creating = false
+                                }
+                            }
+                        }
+                    },
+                ) { Text(if (creating) "Creating…" else "Create") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !creating,
+                    onClick = { createDialog = false; createError = null },
+                ) { Text("Cancel") }
+            },
+        )
     }
 }
 
