@@ -43,7 +43,7 @@ fun UpdateBanner(controller: UpdateController, modifier: Modifier = Modifier) {
     if (!visible) return
 
     LaunchedEffect(info.versionCode) {
-        Journey.update("banner", "visible", "published=${info.versionCode}")
+        controller.bannerShown()
     }
 
     val status = when (install) {

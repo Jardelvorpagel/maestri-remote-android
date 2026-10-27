@@ -100,7 +100,7 @@ class UpdateClient(
     private suspend fun fetch(url: String, source: String): ReleaseInfo? = runCatching {
         client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
             if (!resp.isSuccessful) {
-                Journey.update("check", "failed", "source=$source status=${resp.code}")
+                Journey.update("check", "attemptFailed", "source=$source status=${resp.code}")
                 return@use null
             }
             val json = JSONObject(resp.body.string())
@@ -116,7 +116,7 @@ class UpdateClient(
         }
     }.onFailure {
         Log.d("QAUpdate", "manifest fetch failed ($url): ${it.javaClass.simpleName}: ${it.message}")
-        Journey.update("check", "failed", "source=$source error=${it.javaClass.simpleName}")
+        Journey.update("check", "attemptFailed", "source=$source error=${it.javaClass.simpleName}")
     }.getOrNull()
 
     /**

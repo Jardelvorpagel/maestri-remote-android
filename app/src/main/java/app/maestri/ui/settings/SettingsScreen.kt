@@ -59,7 +59,9 @@ import app.maestri.ui.Style.RootTitle
 import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.warmRing
 import app.maestri.wire.session.WireSession
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Settings v1 — the Privacy section ONLY (the fuller surface folds in when another
@@ -383,22 +385,25 @@ private fun GraceRow(label: String, seconds: Int, current: Int, onPick: (Int) ->
 @Composable
 private fun ShareDiagnosticsRow() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 52.dp)
             .clickable {
-                val journey = Journey.export()
                 Journey.event("diagnostics", "share", "tap")
-                val send = Intent(Intent.ACTION_SEND).setType("text/plain")
-                    .putExtra(Intent.EXTRA_SUBJECT, "Maestri journey log")
-                    .putExtra(Intent.EXTRA_TEXT, journey.ifBlank { "no journey events recorded yet" })
-                runCatching {
-                    context.startActivity(
-                        Intent.createChooser(send, "Share journey log")
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
+                scope.launch {
+                    val journey = withContext(Dispatchers.IO) { Journey.export() }
+                    val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+                        .putExtra(Intent.EXTRA_SUBJECT, "Maestri journey log")
+                        .putExtra(Intent.EXTRA_TEXT, journey.ifBlank { "no journey events recorded yet" })
+                    runCatching {
+                        context.startActivity(
+                            Intent.createChooser(send, "Share journey log")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
                 }
             },
     ) {

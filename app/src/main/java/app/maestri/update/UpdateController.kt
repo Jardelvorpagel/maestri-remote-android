@@ -76,6 +76,7 @@ class UpdateController(
     private val main = Handler(Looper.getMainLooper())
     private val started = java.util.concurrent.atomic.AtomicBoolean(false)
     private val lastCheckAt = java.util.concurrent.atomic.AtomicLong(0L)
+    private val shownBannerVersions = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
 
     /** The newer build found, if any. */
     private val _release = MutableStateFlow<ReleaseInfo?>(null)
@@ -178,6 +179,13 @@ class UpdateController(
         Journey.update("banner", "dismissed", "published=${info.versionCode}")
     }
 
+    /** The banner reached the screen: recorded once per published version, whatever hosts it. */
+    fun bannerShown() {
+        val info = _release.value ?: return
+        if (shownBannerVersions.putIfAbsent(info.versionCode, true) != null) return
+        Journey.update("banner", "visible", "published=${info.versionCode}")
+    }
+
     // -------------------------------------------------------------- installing
 
     /**
@@ -195,10 +203,17 @@ class UpdateController(
      */
     fun installFromNotification() {
         Log.d(TAG, "install: asked by the notification")
-        Journey.update("tap", "notification")
         scope.launch {
-            val info = _release.value ?: latestRelease()?.also { _release.value = it } ?: return@launch
-            if (!isNewer(info.versionCode, BuildConfig.VERSION_CODE)) return@launch
+            val info = _release.value ?: latestRelease()?.also { _release.value = it }
+            if (info == null) {
+                Journey.update("tap", "notification", "outcome=noManifest")
+                return@launch
+            }
+            if (!isNewer(info.versionCode, BuildConfig.VERSION_CODE)) {
+                Journey.update("tap", "notification", "outcome=upToDate")
+                return@launch
+            }
+            Journey.update("tap", "notification", "outcome=install")
             install(info)
         }
     }
@@ -301,7 +316,11 @@ class UpdateController(
             }
             val uri = runCatching {
                 FileProvider.getUriForFile(appContext, appContext.packageName + ".fileprovider", file)
-            }.getOrNull() ?: return@post
+            }.getOrNull()
+            if (uri == null) {
+                Journey.update("install", "refused", "error=FileProvider")
+                return@post
+            }
             @Suppress("DEPRECATION")
             val intent = Intent(Intent.ACTION_INSTALL_PACKAGE, uri)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -336,10 +355,12 @@ class UpdateController(
             PackageManager.PERMISSION_GRANTED
         ) {
             Log.d(TAG, "notify: POST_NOTIFICATIONS not granted, banner only")
+            Journey.update("notify", "denied", "published=${info.versionCode}")
             return // honest denial: the in-app banner is the only surface left
         }
         if (prefs.getInt(KEY_NOTIFIED, -1) == info.versionCode) {
             Log.d(TAG, "notify: version ${info.versionCode} already announced")
+            Journey.update("notify", "deduped", "published=${info.versionCode}")
             return
         }
         prefs.edit().putInt(KEY_NOTIFIED, info.versionCode).apply()
@@ -358,8 +379,14 @@ class UpdateController(
                 installIntent(NOTIFICATION_ID + 1),
             )
         runCatching { nm.notify(NOTIFICATION_ID, builder.build()) }
-            .onFailure { Log.w(TAG, "notify failed: ${it.message}") }
-            .onSuccess { Log.d(TAG, "notified version ${info.versionCode}") }
+            .onFailure {
+                Log.w(TAG, "notify failed: ${it.message}")
+                Journey.update("notify", "failed", "error=${it.javaClass.simpleName}")
+            }
+            .onSuccess {
+                Log.d(TAG, "notified version ${info.versionCode}")
+                Journey.update("notify", "posted", "published=${info.versionCode}")
+            }
     }
 
     private fun installIntent(requestCode: Int): PendingIntent = PendingIntent.getActivity(

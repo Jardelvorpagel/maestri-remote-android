@@ -66,7 +66,8 @@ class JourneyLog(
     }
 
     private fun rotate() {
-        val kept = journeyTail(file.readLines(), keepLines)
+        val kept = journeyTail(file.readLines(), keepLines).toMutableList()
+        while (kept.size > 1 && kept.sumOf { it.length.toLong() + 1 } > maxBytes) kept.removeAt(0)
         val temp = File(file.parentFile, file.name + ".tmp")
         temp.writeText(if (kept.isEmpty()) "" else kept.joinToString("\n", postfix = "\n"))
         if (!temp.renameTo(file)) {
