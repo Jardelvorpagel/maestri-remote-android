@@ -48,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.maestri.diagnostics.Journey
+import app.maestri.wire.ApiException
 import app.maestri.wire.CanvasWrites
 import app.maestri.wire.FeedItem
 import app.maestri.wire.FloorMeta
@@ -234,7 +236,11 @@ fun FeedScreen(
                 }
                 if (canCreateTerminal && floor != null) {
                     TextButton(
-                        onClick = { createError = null; createDialog = true },
+                        onClick = {
+                            createError = null
+                            createDialog = true
+                            Journey.feed("createTerminal", "dialog", floorKind(floor))
+                        },
                         contentPadding = PaddingValues(horizontal = 8.dp),
                     ) { Text("＋ New terminal", fontSize = 13.sp) }
                 }
@@ -363,7 +369,13 @@ fun FeedScreen(
         val floorName = snapNow?.floors?.firstOrNull { (it.id ?: "ground") == selectedFloor }?.name
             ?: selectedFloor.orEmpty()
         AlertDialog(
-            onDismissRequest = { if (!creating) { createDialog = false; createError = null } },
+            onDismissRequest = {
+                if (!creating) {
+                    createDialog = false
+                    createError = null
+                    Journey.feed("createTerminal", "dismissed", floorKind(selectedFloor))
+                }
+            },
             title = { Text("New terminal") },
             text = {
                 Column {
@@ -382,6 +394,7 @@ fun FeedScreen(
                         if (!creating) {
                             creating = true
                             createError = null
+                            Journey.feed("createTerminal", "tap", floorKind(selectedFloor))
                             scope.launch {
                                 try {
                                     val res = session.canvasWrite(
@@ -391,8 +404,14 @@ fun FeedScreen(
                                     val terminalId = res.optString("terminalId")
                                     if (terminalId.isBlank()) {
                                         createError = "the host answered without a terminal id"
+                                        Journey.feed("createTerminal", "noId")
                                         return@launch
                                     }
+                                    Journey.feed(
+                                        "createTerminal",
+                                        "ok",
+                                        "terminalId=$terminalId nodeId=${res.optString("nodeId")}",
+                                    )
                                     createDialog = false
                                     val name = withTimeoutOrNull(2_000L) {
                                         session.feed.snapshot.first { s ->
@@ -402,6 +421,11 @@ fun FeedScreen(
                                     onOpenTerminal(terminalId, name)
                                 } catch (e: Exception) {
                                     createError = errText(e)
+                                    Journey.feed(
+                                        "createTerminal",
+                                        "failed",
+                                        if (e is ApiException) "status=${e.status}" else "error=${e.javaClass.simpleName}",
+                                    )
                                 } finally {
                                     creating = false
                                 }
@@ -413,12 +437,19 @@ fun FeedScreen(
             dismissButton = {
                 TextButton(
                     enabled = !creating,
-                    onClick = { createDialog = false; createError = null },
+                    onClick = {
+                        createDialog = false
+                        createError = null
+                        Journey.feed("createTerminal", "dismissed", floorKind(selectedFloor))
+                    },
                 ) { Text("Cancel") }
             },
         )
     }
 }
+
+private fun floorKind(floorId: String?): String =
+    if (floorId.isNullOrBlank() || floorId == "ground") "floor=ground" else "floor=named id=$floorId"
 
 private enum class FeedFilter(val label: String) {
     All("all"),

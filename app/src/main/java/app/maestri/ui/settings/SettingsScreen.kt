@@ -1,6 +1,7 @@
 package app.maestri.ui.settings
 
 import androidx.activity.ComponentActivity
+import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontFamily
+import app.maestri.diagnostics.Journey
 import app.maestri.ui.Style.LocalMaestriColors
 import app.maestri.ui.Style.Motion
 import app.maestri.ui.Style.MaestriRadii
@@ -292,6 +294,8 @@ fun SettingsScreen(
                     color = LocalMaestriColors.current.secondaryLabel,
                 )
             }
+            DividerHair()
+            ShareDiagnosticsRow()
         }
 
         Spacer(Modifier.height(12.dp))
@@ -373,6 +377,40 @@ private fun GraceRow(label: String, seconds: Int, current: Int, onPick: (Int) ->
         RadioButton(selected = current == seconds, onClick = { onPick(seconds) })
         Spacer(Modifier.width(8.dp))
         Text(label)
+    }
+}
+
+@Composable
+private fun ShareDiagnosticsRow() {
+    val context = LocalContext.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clickable {
+                val journey = Journey.export()
+                Journey.event("diagnostics", "share", "tap")
+                val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, "Maestri journey log")
+                    .putExtra(Intent.EXTRA_TEXT, journey.ifBlank { "no journey events recorded yet" })
+                runCatching {
+                    context.startActivity(
+                        Intent.createChooser(send, "Share journey log")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            },
+    ) {
+        Text("Diagnostics", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+        Text(
+            "journey log · share",
+            fontSize = 11.5.sp,
+            fontFamily = FontFamily.Monospace,
+            color = LocalMaestriColors.current.secondaryLabel,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
     }
 }
 
@@ -670,6 +708,8 @@ private fun SettingsPhoneBody(
                     color = LocalMaestriColors.current.secondaryLabel,
                 )
             }
+            DividerHair()
+            ShareDiagnosticsRow()
         }
 
         Spacer(Modifier.height(12.dp))

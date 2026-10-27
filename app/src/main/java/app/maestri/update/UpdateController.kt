@@ -15,6 +15,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
+import app.maestri.diagnostics.Journey
 import app.maestri.remote.BuildConfig
 import app.maestri.remote.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -135,21 +136,35 @@ class UpdateController(
         // No connectivity gate: a VPN network (Tailscale) often reports no INTERNET
         // capability while the paired host is perfectly reachable, and the request
         // itself is the only honest test of whether the manifest can be fetched.
+        Journey.update("check", "start")
         scope.launch {
             val info = latestRelease()
             if (info == null) {
                 Log.d(TAG, "check: no manifest (offline or nothing published yet)")
+                Journey.update("check", "noManifest")
                 return@launch
             }
             if (!isNewer(info.versionCode, BuildConfig.VERSION_CODE)) {
                 Log.d(TAG, "check: up to date (installed ${BuildConfig.VERSION_CODE})")
+                Journey.update(
+                    "check",
+                    "upToDate",
+                    "installed=${BuildConfig.VERSION_CODE} published=${info.versionCode}",
+                )
                 return@launch
             }
             val known = _release.value?.versionCode
             _release.value = info
             Log.d(TAG, "check: newer build ${info.versionCode} (${info.versionName}) available")
+            Journey.update(
+                "check",
+                "newer",
+                "installed=${BuildConfig.VERSION_CODE} published=${info.versionCode}",
+            )
             if (known != info.versionCode) {
-                _bannerVisible.value = prefs.getInt(KEY_DISMISSED, -1) != info.versionCode
+                val visible = prefs.getInt(KEY_DISMISSED, -1) != info.versionCode
+                _bannerVisible.value = visible
+                if (!visible) Journey.update("banner", "suppressed", "published=${info.versionCode}")
                 notify(info)
             }
         }
@@ -160,6 +175,7 @@ class UpdateController(
         val info = _release.value ?: return
         prefs.edit().putInt(KEY_DISMISSED, info.versionCode).apply()
         _bannerVisible.value = false
+        Journey.update("banner", "dismissed", "published=${info.versionCode}")
     }
 
     // -------------------------------------------------------------- installing
@@ -179,6 +195,7 @@ class UpdateController(
      */
     fun installFromNotification() {
         Log.d(TAG, "install: asked by the notification")
+        Journey.update("tap", "notification")
         scope.launch {
             val info = _release.value ?: latestRelease()?.also { _release.value = it } ?: return@launch
             if (!isNewer(info.versionCode, BuildConfig.VERSION_CODE)) return@launch
@@ -200,11 +217,13 @@ class UpdateController(
         val cached = apkFile(info)
         if (cached.isFile && cached.length() > 0 && client.verify(cached, info.sha256)) {
             Log.d(TAG, "install: cached APK matches the manifest digest")
+            Journey.update("download", "cached", "published=${info.versionCode}")
             handOff(info, cached)
             return
         }
         cached.delete()
         Log.d(TAG, "install: downloading ${info.versionName}")
+        Journey.update("download", "start", "published=${info.versionCode}")
         _install.value = InstallState.Downloading(info)
         cached.parentFile?.mkdirs()
         if (!client.download(info, cached)) {
@@ -213,6 +232,7 @@ class UpdateController(
             return
         }
         Log.d(TAG, "install: digest verified, opening the system installer")
+        Journey.update("download", "done", "published=${info.versionCode}")
         handOff(info, cached)
     }
 
@@ -224,6 +244,7 @@ class UpdateController(
         val sized = info.size <= 0L || file.length() == info.size
         if (!sized || !client.verify(file, info.sha256)) {
             Log.w(TAG, "install: on-disk APK no longer matches the manifest, hand-off refused")
+            Journey.update("install", "refused", "digest=mismatch")
             file.delete()
             _install.value = InstallState.Failed(info)
             return false
@@ -274,6 +295,7 @@ class UpdateController(
         main.post {
             if (!appContext.packageManager.canRequestPackageInstalls()) {
                 Log.d(TAG, "install: the system asks first for 'install unknown apps'")
+                Journey.update("install", "needsPermission")
                 _install.value = InstallState.NeedsPermission(_release.value ?: return@post, file)
                 return@post
             }
@@ -284,8 +306,14 @@ class UpdateController(
             val intent = Intent(Intent.ACTION_INSTALL_PACKAGE, uri)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             runCatching { appContext.startActivity(intent) }
-                .onSuccess { Log.d(TAG, "install: system installer opened") }
-                .onFailure { Log.w(TAG, "install: installer refused: ${it.message}") }
+                .onSuccess {
+                    Log.d(TAG, "install: system installer opened")
+                    Journey.update("install", "handedOff")
+                }
+                .onFailure {
+                    Log.w(TAG, "install: installer refused: ${it.message}")
+                    Journey.update("install", "refused", "error=${it.javaClass.simpleName}")
+                }
         }
     }
 

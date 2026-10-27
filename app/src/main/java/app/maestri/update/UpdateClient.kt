@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import android.util.Log
+import app.maestri.diagnostics.Journey
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
@@ -88,16 +89,20 @@ class UpdateClient(
      */
     suspend fun latest(): ReleaseInfo? = withContext(Dispatchers.IO) {
         for (url in manifests().distinct()) {
-            val info = fetch(url)
+            val source = if (url.startsWith("https://github.com")) "github" else "relay"
+            val info = fetch(url, source)
             if (info != null) return@withContext info
         }
         null
     }
 
     /** One manifest URL. A failure here is a log line, never a user-facing error. */
-    private suspend fun fetch(url: String): ReleaseInfo? = runCatching {
+    private suspend fun fetch(url: String, source: String): ReleaseInfo? = runCatching {
         client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
-            if (!resp.isSuccessful) return@use null
+            if (!resp.isSuccessful) {
+                Journey.update("check", "failed", "source=$source status=${resp.code}")
+                return@use null
+            }
             val json = JSONObject(resp.body.string())
             ReleaseInfo(
                 versionCode = json.getInt("versionCode"),
@@ -111,6 +116,7 @@ class UpdateClient(
         }
     }.onFailure {
         Log.d("QAUpdate", "manifest fetch failed ($url): ${it.javaClass.simpleName}: ${it.message}")
+        Journey.update("check", "failed", "source=$source error=${it.javaClass.simpleName}")
     }.getOrNull()
 
     /**
@@ -124,7 +130,10 @@ class UpdateClient(
         val ok = runCatching {
             val digest = MessageDigest.getInstance("SHA-256")
             client.newCall(Request.Builder().url(release.apkUrl).build()).execute().use { resp ->
-                if (!resp.isSuccessful) return@use false
+                if (!resp.isSuccessful) {
+                    Journey.update("download", "failed", "status=${resp.code}")
+                    return@use false
+                }
                 val body = resp.body
                 body.byteStream().use { input ->
                     FileOutputStream(target).use { out ->
@@ -137,10 +146,15 @@ class UpdateClient(
                         }
                     }
                 }
-                digest.digest().joinToString("") { "%02x".format(it) }
+                val matches = digest.digest().joinToString("") { "%02x".format(it) }
                     .let { digestMatches(release.sha256, it) }
+                if (!matches) Journey.update("download", "failed", "digest=mismatch")
+                matches
             }
-        }.getOrElse { false }
+        }.getOrElse {
+            Journey.update("download", "failed", "error=${it.javaClass.simpleName}")
+            false
+        }
         if (!ok) target.delete()
         ok
     }

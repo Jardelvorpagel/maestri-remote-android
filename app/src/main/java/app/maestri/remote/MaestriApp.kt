@@ -1,6 +1,7 @@
 package app.maestri.remote
 
 import android.app.Application
+import app.maestri.diagnostics.Journey
 import app.maestri.update.UpdateClient
 import app.maestri.update.UpdateController
 import app.maestri.update.manifestUrls
@@ -28,6 +29,7 @@ class MaestriApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        Journey.install(this)
         session = WireSession(this)
     }
 }
