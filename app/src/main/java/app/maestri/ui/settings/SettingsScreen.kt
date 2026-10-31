@@ -212,13 +212,15 @@ fun SettingsScreen(
                     .heightIn(min = 56.dp)
                     .clickable(enabled = openUsage != null) { openUsage?.invoke() },
             ) {
-                Text("Usage", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                Text(
-                    "provider limits · live wss",
-                    fontSize = 11.5.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = LocalMaestriColors.current.secondaryLabel,
-                )
+                Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                    Text("Usage", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        "provider limits · live wss",
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = LocalMaestriColors.current.secondaryLabel,
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
                 Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
@@ -230,13 +232,15 @@ fun SettingsScreen(
                     .heightIn(min = 56.dp)
                     .clickable(enabled = openRoutines != null) { openRoutines?.invoke() },
             ) {
-                Text("Routines", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                Text(
-                    "scheduled prompts · host scheduler",
-                    fontSize = 11.5.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = LocalMaestriColors.current.secondaryLabel,
-                )
+                Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                    Text("Routines", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        "scheduled prompts · host scheduler",
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = LocalMaestriColors.current.secondaryLabel,
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
                 Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
@@ -248,13 +252,15 @@ fun SettingsScreen(
                     .heightIn(min = 56.dp)
                     .clickable(enabled = openPartituras != null) { openPartituras?.invoke() },
             ) {
-                Text("Partituras", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                Text(
-                    "canvas library · preview + stamp",
-                    fontSize = 11.5.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = LocalMaestriColors.current.secondaryLabel,
-                )
+                Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                    Text("Partituras", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        "canvas library · preview + stamp",
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = LocalMaestriColors.current.secondaryLabel,
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
                 Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
@@ -629,13 +635,15 @@ private fun SettingsPhoneBody(
                     .heightIn(min = 52.dp)
                     .clickable(enabled = onUsage != null) { onUsage?.invoke() },
             ) {
-                Text("Usage", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                Text(
-                    "provider limits · live wss",
-                    fontSize = 11.5.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = LocalMaestriColors.current.secondaryLabel,
-                )
+                Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                    Text("Usage", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        "provider limits · live wss",
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = LocalMaestriColors.current.secondaryLabel,
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
                 Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
@@ -647,13 +655,15 @@ private fun SettingsPhoneBody(
                     .heightIn(min = 52.dp)
                     .clickable(enabled = onRoutines != null) { onRoutines?.invoke() },
             ) {
-                Text("Routines", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                Text(
-                    "scheduled prompts · host scheduler",
-                    fontSize = 11.5.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = LocalMaestriColors.current.secondaryLabel,
-                )
+                Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                    Text("Routines", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        "scheduled prompts · host scheduler",
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = LocalMaestriColors.current.secondaryLabel,
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
                 Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }
@@ -665,13 +675,15 @@ private fun SettingsPhoneBody(
                     .heightIn(min = 52.dp)
                     .clickable(enabled = onPartituras != null) { onPartituras?.invoke() },
             ) {
-                Text("Partituras", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                Text(
-                    "canvas library · preview + stamp",
-                    fontSize = 11.5.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = LocalMaestriColors.current.secondaryLabel,
-                )
+                Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                    Text("Partituras", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        "canvas library · preview + stamp",
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = LocalMaestriColors.current.secondaryLabel,
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
                 Text("›", fontSize = 18.sp, color = LocalMaestriColors.current.secondaryLabel)
             }

@@ -562,10 +562,10 @@ private fun WorkspaceCard(
                         Text(
                             FloorsStrings.floors,
                             fontSize = 11.5.sp,
-                            color = c.secondaryLabel,
+                            color = if (compact) Palette.Ivory else c.secondaryLabel,
                             maxLines = 1,
                         )
-                        Text(" ›", fontSize = 11.5.sp, color = Palette.StoneGray)
+                        Text(" ›", fontSize = 11.5.sp, color = if (compact) Palette.Ivory else Palette.StoneGray)
                     }
                 }
             }

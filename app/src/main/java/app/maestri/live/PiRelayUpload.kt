@@ -47,11 +47,14 @@ class PiRelayUpload(
 fun uploadRequest(uploadUrl: String, token: String, filename: String, bytes: ByteArray): Request {
     val builder = Request.Builder()
         .url(uploadUrl)
-        .header("X-Filename", filename)
+        .header("X-Filename", uploadFilename(filename))
         .post(bytes.toRequestBody("application/octet-stream".toMediaType()))
     if (token.isNotBlank()) builder.header("Authorization", "Bearer $token")
     return builder.build()
 }
+
+internal fun uploadFilename(name: String): String =
+    name.map { c -> if (c.code in 0x20..0x7e) c else '_' }.joinToString("").ifBlank { "file" }
 
 /** 2xx upload body `{id,name,bytes,path}`. */
 fun parseUploadResponse(json: String): Attachment? {

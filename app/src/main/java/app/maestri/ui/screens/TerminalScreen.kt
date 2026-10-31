@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +33,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -64,6 +67,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.roundToInt
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -517,30 +524,19 @@ fun TerminalScreen(
     val streamState by session.terminalStream.state.collectAsState()
     var chipOpen by remember { mutableStateOf(false) }
     var codexAwayFromBottom by rememberSaveable(terminalId) { mutableStateOf(false) }
-    var chipManualClose by remember { mutableStateOf(false) }
     val inputFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val configuration = LocalConfiguration.current
     LaunchedEffect(terminalId, inChat, configuration.orientation, configuration.screenWidthDp, locked) {
         chipOpen = false
-        chipManualClose = false
         showDisplayConfig = false
     }
     BackHandler(enabled = chipOpen) {
         chipOpen = false
-        chipManualClose = true
     }
     // System back takes the same door as the topbar Voltar — including its fallback
     // when this route was restored as the stack root (a bare pop would be a no-op).
     BackHandler(enabled = !chipOpen && !locked) { onBack() }
-    LaunchedEffect(imeUp, inChat, locked) {
-        if (imeUp) {
-            chipOpen = false
-            chipManualClose = false
-        } else if (!inChat && !locked && !chipManualClose) {
-            chipOpen = true
-        }
-    }
     // Typing needs the grid, not the chrome: the IME leaves ~140dp here, so the header
     // steps aside while the keyboard is up (system back closes the IME first).
     val chromeTight = imeUp && !inChat && !fullscreen
@@ -616,6 +612,7 @@ fun TerminalScreen(
                         terminalName,
                         fontSize = 21.sp,
                         fontWeight = FontWeight.SemiBold,
+                        color = TerminalThemes.TokyoNight.foreground,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -626,7 +623,7 @@ fun TerminalScreen(
                         card?.accountName?.let { append(" · $it") }
                     },
                     fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = TerminalThemes.TokyoNight.foreground,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -855,7 +852,7 @@ fun TerminalScreen(
                 }
             } else {
                 Row(
-                    Modifier.fillMaxWidth().height(50.dp),
+                    Modifier.fillMaxWidth().height(50.dp).padding(start = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     backBtn()
@@ -865,7 +862,7 @@ fun TerminalScreen(
                 // design v2 .tchips: padding 4px 14px 12px 14px, gap 14px, and only
                 // .tconf gets margin-left:auto — [Térreo · Collapse] left, settings right.
                 Row(
-                    Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp),
+                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
@@ -999,7 +996,7 @@ fun TerminalScreen(
             else -> TerminalThemes.TokyoNight.green
         }
         val quickKeys = terminalQuickKeys(card?.agentType, codexAwayFromBottom)
-        Box(Modifier.fillMaxWidth().weight(1f)) {
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
             TerminalWebView(
                 session = session,
                 terminalId = terminalId,
@@ -1013,18 +1010,29 @@ fun TerminalScreen(
                 modifier = Modifier.fillMaxSize(),
             )
             if (!fullscreen) {
+                val density = LocalDensity.current
+                val availableWidth = with(density) { maxWidth.toPx() }
+                val availableHeight = with(density) { maxHeight.toPx() }
+                var chipSize by remember { mutableStateOf(IntSize.Zero) }
+                var chipX by remember(terminalId) { mutableFloatStateOf(0f) }
+                var chipY by remember(terminalId) { mutableFloatStateOf(0f) }
+                val minX = -(availableWidth - chipSize.width).coerceAtLeast(0f)
+                val minY = -(availableHeight - chipSize.height).coerceAtLeast(0f)
+                val drag = Modifier.pointerInput(minX, minY) {
+                    detectDragGestures { change, amount ->
+                        change.consume()
+                        chipX = (chipX + amount.x).coerceIn(minX, 0f)
+                        chipY = (chipY + amount.y).coerceIn(minY, 0f)
+                    }
+                }
                 TerminalChip(
                     status = TerminalChipStatus(label = chipStatusLabel, dotColor = chipDotColor),
                     expanded = chipOpen,
                     imeVisible = imeUp,
                     keys = quickKeys,
                     enabled = streamState == SocketState.OPEN && !locked,
-                    onToggle = {
-                        if (chipOpen) chipManualClose = true
-                        chipOpen = !chipOpen
-                    },
+                    onToggle = { chipOpen = !chipOpen },
                     onKey = { key ->
-                        chipOpen = false
                         if (key.id == QuickChipKeyId.ESCAPE) codexAwayFromBottom = false
                         session.terminalStream.sendInput(key.bytes.toString(Charsets.UTF_8))
                     },
@@ -1033,13 +1041,15 @@ fun TerminalScreen(
                         enterChatMode()
                     },
                     onShowKeyboard = {
-                        chipOpen = false
                         inputFocusRequester.requestFocus()
                         keyboardController?.show()
                     },
                     modifier = Modifier.align(Alignment.BottomEnd)
-                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
-                        .padding(12.dp).zIndex(6f),
+                        .offset { IntOffset(chipX.coerceIn(minX, 0f).roundToInt(), chipY.coerceIn(minY, 0f).roundToInt()) }
+                        .onSizeChanged { chipSize = it }
+                        .padding(12.dp).widthIn(max = 336.dp)
+                        .zIndex(6f),
+                    dragModifier = drag,
                 )
             }
         }
@@ -1070,7 +1080,9 @@ fun TerminalScreen(
                 staged = stagedFiles,
                 onRemoveStaged = { key -> stagedFiles = stagedFiles.filter { it.key != key } },
                 focusRequester = inputFocusRequester,
-                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                showModeSwitch = !imeUp,
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
+                    ,
             )
         }
 

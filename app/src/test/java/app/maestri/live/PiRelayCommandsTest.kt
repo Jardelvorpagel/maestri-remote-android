@@ -201,6 +201,17 @@ class PiRelayCommandsTest {
     }
 
     @Test
+    fun uploadFilenameStaysAscii() {
+        val accented = uploadRequest("http://h:1/upload", "", "Orçamento – café.pdf", "d".toByteArray())
+        assertEquals("Or_amento _ caf_.pdf", accented.header("X-Filename"))
+        assertEquals("Or_amento _ caf_.pdf", uploadFilename("Orçamento – café.pdf"))
+        assertEquals("a__b.txt", uploadFilename("a\r\nb.txt"))
+        assertEquals("__o", uploadFilename("ção"))
+        assertEquals("file", uploadFilename(""))
+        assertEquals("plate.jpg", uploadFilename("plate.jpg"))
+    }
+
+    @Test
     fun uploadResponseParses() {
         val full = parseUploadResponse("""{"id":"a1","name":"f.png","bytes":41,"path":"/t/f.png"}""")!!
         assertEquals("a1", full.id)

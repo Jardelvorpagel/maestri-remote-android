@@ -107,6 +107,7 @@ fun TerminalComposer(
     recording: Boolean = false,
     recordElapsedMs: Long = 0L,
     onToggleRecord: (() -> Unit)? = null,
+    showModeSwitch: Boolean = true,
 ) {
     val pickPhotos = rememberImagePick(onAttach)
     val capturePhoto = rememberPhotoCapture(onAttach)
@@ -207,6 +208,7 @@ fun TerminalComposer(
                 onDismiss = { sheetOpen = false },
             )
         }
+        if (showModeSwitch) {
         Spacer(Modifier.height(8.dp))
         Row(
             Modifier
@@ -217,6 +219,7 @@ fun TerminalComposer(
         ) {
             SegmentButton("Terminal", !chatSelected, onRun)
             SegmentButton("Chat", chatSelected, onChat)
+        }
         }
     }
 }

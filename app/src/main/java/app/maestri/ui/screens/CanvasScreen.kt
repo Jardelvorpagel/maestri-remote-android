@@ -3,6 +3,7 @@ package app.maestri.ui.screens
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -504,7 +506,7 @@ fun CanvasScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onBack) { BackLabel("Feed") }
-            Column(Modifier.weight(1f).padding(start = 8.dp)) {
+            if (!(compact && viewMode == CanvasViewMode.Board)) Column(Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(
                     "Canvas · $wsName",
                     fontSize = 18.sp,
@@ -524,6 +526,7 @@ fun CanvasScreen(
                 }
             }
             // design-v2 modern: segmented Stack⇄Board (44pt, ivory-on-charcoal thumb).
+            Row((if (compact && viewMode == CanvasViewMode.Board) Modifier.weight(1f) else Modifier).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             CanvasViewSegmented(
                 mode = viewMode,
                 onStack = { viewMode = CanvasViewMode.Stack },
@@ -544,6 +547,7 @@ fun CanvasScreen(
                 ConnChip(socketState, socketError)
             } else {
                 ConnChip(socketState, socketError)
+            }
             }
         }
 
@@ -570,6 +574,7 @@ fun CanvasScreen(
         if (viewMode == CanvasViewMode.Board) Box(
             Modifier
                 .align(Alignment.BottomStart)
+                .navigationBarsPadding()
                 .padding(start = 16.dp, bottom = 88.dp)
                 .background(LocalMaestriColors.current.canvasSurface.copy(alpha = 0.85f), pillShape())
                 .padding(horizontal = 10.dp, vertical = 4.dp)
@@ -591,6 +596,7 @@ fun CanvasScreen(
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
                 .padding(bottom = if (compact) 16.dp else 24.dp)
                 .zIndex(10f),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -658,6 +664,7 @@ fun CanvasScreen(
                 Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
+                    .navigationBarsPadding()
                     .padding(top = 64.dp, start = 16.dp, end = 16.dp, bottom = 76.dp)
             ) {
                 if (canvas == null) {
@@ -1741,6 +1748,7 @@ private fun StackNodeCard(
                         Spacer(Modifier.width(8.dp))
                         Text(
                             t.name,
+                            color = Palette.Ivory,
                             fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
@@ -1831,6 +1839,7 @@ private fun StackNodeCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             portal.name.ifBlank { node.title },
+                            color = Palette.Ivory,
                             fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
@@ -1864,6 +1873,7 @@ private fun StackNodeCard(
                 Column {
                     Text(
                         node.title.ifBlank { node.kind },
+                        color = Palette.Ivory,
                         fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )

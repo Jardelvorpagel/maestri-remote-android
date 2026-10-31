@@ -151,6 +151,7 @@ fun TerminalChip(
     onShowKeyboard: () -> Unit,
     enabled: Boolean = true,
     modifier: Modifier = Modifier,
+    dragModifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
     val keyHeight = if (density.fontScale >= 2f) 56.dp else 44.dp
@@ -201,6 +202,7 @@ fun TerminalChip(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .then(dragModifier)
                             .padding(horizontal = 2.dp)
                             .semantics(mergeDescendants = true) { traversalIndex = 0f },
                         verticalAlignment = Alignment.CenterVertically,
@@ -289,6 +291,7 @@ fun TerminalChip(
             Row(
                 modifier = Modifier
                     .size(48.dp)
+                    .then(dragModifier)
                     .shadow(8.dp, pill)
                     .terminalFocusRing(pill)
                     .clip(pill)
