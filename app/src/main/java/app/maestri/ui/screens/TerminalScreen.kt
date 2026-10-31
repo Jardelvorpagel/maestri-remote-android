@@ -639,7 +639,7 @@ fun TerminalScreen(
             )
             val live = streamState == SocketState.OPEN
             Row(
-                Modifier.padding(horizontal = 12.dp),
+                Modifier,
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -693,20 +693,6 @@ fun TerminalScreen(
                     onDismiss = { relaySettingsOpen = false },
                 )
             }
-        }
-        // Mono workspace chip (design v2 §4-03): floor name when the card carries one,
-        // else the short workspace id — never a styled/serif value.
-        val floorChip: @Composable () -> Unit = {
-            Text(
-                (card?.floorName?.takeIf { it.isNotBlank() } ?: wsId.take(8)),
-                fontFamily = MaestriType.Mono,
-                fontSize = 12.5.sp,
-                color = Color(0xFFFAF9F5),
-                maxLines = 1,
-                modifier = Modifier
-                    .background(Color(0xFF2B2A26), pillShape())
-                    .padding(horizontal = 15.dp, vertical = 8.dp),
-            )
         }
         // design v2 .tchip-collapse: 44dp, r-sm (12dp), --dim glyph, no box until pressed.
         val fullscreenBtn: @Composable () -> Unit = {
@@ -852,23 +838,12 @@ fun TerminalScreen(
                 }
             } else {
                 Row(
-                    Modifier.fillMaxWidth().height(50.dp).padding(start = 10.dp),
+                    Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     backBtn()
                     titleBlock()
-                    connChip()
-                }
-                // design v2 .tchips: padding 4px 14px 12px 14px, gap 14px, and only
-                // .tconf gets margin-left:auto — [Térreo · Collapse] left, settings right.
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    floorChip()
                     fullscreenBtn()
-                    Spacer(Modifier.weight(1f))
                     settingsBox()
                 }
             }
@@ -1056,7 +1031,6 @@ fun TerminalScreen(
         if (!fullscreen) {
             val composerMeta = when {
                 uploading -> "uploading…"
-                streamState != SocketState.OPEN -> "offline"
                 stagedFiles.isNotEmpty() ->
                     "${stagedFiles.size} file${if (stagedFiles.size == 1) "" else "s"}"
                 else -> null
@@ -1074,6 +1048,7 @@ fun TerminalScreen(
                 recordElapsedMs = voice.elapsedMs,
                 onToggleRecord = voice::toggle,
                 meta = composerMeta,
+                status = connChip,
                 chatSelected = inChat,
                 onChat = ::enterChatMode,
                 onRun = { viewModeStore.setMode(terminalId, TerminalViewModeStore.TERMINAL) },

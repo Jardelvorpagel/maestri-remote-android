@@ -108,6 +108,7 @@ fun TerminalComposer(
     recordElapsedMs: Long = 0L,
     onToggleRecord: (() -> Unit)? = null,
     showModeSwitch: Boolean = true,
+    status: (@Composable () -> Unit)? = null,
 ) {
     val pickPhotos = rememberImagePick(onAttach)
     val capturePhoto = rememberPhotoCapture(onAttach)
@@ -192,6 +193,10 @@ fun TerminalComposer(
                     )
                 }
                 Spacer(Modifier.weight(1f))
+                if (status != null) {
+                    status()
+                    Spacer(Modifier.width(8.dp))
+                }
                 if (meta != null) {
                     Text(meta, fontSize = 11.5.sp, color = ComposerMuted)
                     Spacer(Modifier.width(8.dp))
