@@ -6,3 +6,4 @@ local.properties
 *.apk
 *.log
 .kotlin/
+.claude/settings.local.json
