@@ -21,6 +21,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
@@ -221,6 +222,7 @@ fun TerminalWebView(
     enabled: Boolean,
     modifier: Modifier = Modifier,
     scrollSpeed: Int = 1,
+    onScrollAwayFromBottom: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val main = remember { Handler(Looper.getMainLooper()) }
@@ -241,9 +243,11 @@ fun TerminalWebView(
     // listener was built with.
     var scrollSpeedState by remember { mutableStateOf(scrollSpeed) }
     LaunchedEffect(scrollSpeed) { scrollSpeedState = scrollSpeed }
+    val reportScrollAwayFromBottom by rememberUpdatedState(onScrollAwayFromBottom)
 
     fun scrollByInPage(deltaPx: Float) {
         val wv = webView ?: return
+        if (deltaPx > 0f) reportScrollAwayFromBottom()
         wv.evaluateJavascript("window.__scrollTerminal(${deltaPx * scrollSpeedState})", null)
     }
     fun ready(): Boolean = rendererGen > 0 && webView?.parent != null

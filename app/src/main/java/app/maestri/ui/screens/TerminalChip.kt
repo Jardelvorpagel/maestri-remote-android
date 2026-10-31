@@ -69,13 +69,42 @@ import androidx.compose.ui.unit.sp
 import app.maestri.ui.Style.MaestriType
 import app.maestri.ui.Style.Palette
 import app.maestri.ui.Style.TerminalThemes.TokyoNight
+import java.util.Locale
 
 data class TerminalChipStatus(
     val label: String,
     val dotColor: Color,
 )
 
-class QuickChipKey(
+enum class TerminalHarness {
+    PI,
+    CODEX,
+    GENERIC;
+
+    companion object {
+        fun fromAgentType(agentType: String?): TerminalHarness = when (agentType?.trim()?.lowercase(Locale.ROOT)) {
+            "pi", "pi-agent" -> PI
+            "codex" -> CODEX
+            else -> GENERIC
+        }
+    }
+}
+
+enum class QuickChipKeyId {
+    INTERRUPT,
+    KILL_LINE,
+    TAB,
+    ESCAPE,
+    UP,
+    DOWN,
+    CLEAR,
+    EOF,
+    REVERSE_SEARCH,
+    CHAT,
+}
+
+data class QuickChipKey(
+    val id: QuickChipKeyId,
     val label: String,
     val description: String,
     val bytes: ByteArray,
@@ -83,17 +112,30 @@ class QuickChipKey(
 ) {
     companion object {
         val DEFAULT: List<QuickChipKey> = listOf(
-            QuickChipKey("Ctrl-C", "Control C — interrupt", byteArrayOf(0x03), "⌃C"),
+            QuickChipKey(QuickChipKeyId.INTERRUPT, "Ctrl-C", "Control C — interrupt", byteArrayOf(0x03), "⌃C"),
             // shortcut: Ctrl-K sends 0x0B (kill-line), not a command-palette action.
-            QuickChipKey("\u2303K", "Control K — kill line", byteArrayOf(0x0B)),
-            QuickChipKey("\u21E5", "Tab key", byteArrayOf(0x09)),
-            QuickChipKey("esc", "Escape key", byteArrayOf(0x1B)),
-            QuickChipKey("\u2191", "Arrow up", byteArrayOf(0x1B, 0x5B, 0x41)),
-            QuickChipKey("\u2193", "Arrow down", byteArrayOf(0x1B, 0x5B, 0x42)),
-            QuickChipKey("Ctrl-L", "Control L — clear screen", byteArrayOf(0x0C), "⌃L"),
-            QuickChipKey("Ctrl-D", "Control D — end of file", byteArrayOf(0x04), "⌃D"),
-            QuickChipKey("Ctrl-R", "Control R — reverse search", byteArrayOf(0x12), "⌃R"),
+            QuickChipKey(QuickChipKeyId.KILL_LINE, "\u2303K", "Control K — kill line", byteArrayOf(0x0B)),
+            QuickChipKey(QuickChipKeyId.TAB, "\u21E5", "Tab key", byteArrayOf(0x09)),
+            QuickChipKey(QuickChipKeyId.ESCAPE, "esc", "Escape key", byteArrayOf(0x1B)),
+            QuickChipKey(QuickChipKeyId.UP, "\u2191", "Arrow up", byteArrayOf(0x1B, 0x5B, 0x41)),
+            QuickChipKey(QuickChipKeyId.DOWN, "\u2193", "Arrow down", byteArrayOf(0x1B, 0x5B, 0x42)),
+            QuickChipKey(QuickChipKeyId.CLEAR, "Ctrl-L", "Control L — clear screen", byteArrayOf(0x0C), "⌃L"),
+            QuickChipKey(QuickChipKeyId.EOF, "Ctrl-D", "Control D — end of file", byteArrayOf(0x04), "⌃D"),
+            QuickChipKey(QuickChipKeyId.REVERSE_SEARCH, "Ctrl-R", "Control R — reverse search", byteArrayOf(0x12), "⌃R"),
         )
+    }
+}
+
+fun terminalQuickKeys(agentType: String?, codexAwayFromBottom: Boolean): List<QuickChipKey> {
+    if (TerminalHarness.fromAgentType(agentType) != TerminalHarness.CODEX || !codexAwayFromBottom) {
+        return QuickChipKey.DEFAULT
+    }
+    return QuickChipKey.DEFAULT.map { key ->
+        if (key.id == QuickChipKeyId.ESCAPE) {
+            key.copy(label = "\u2193 End", compactLabel = "\u2193 End", description = "Back to bottom — Escape")
+        } else {
+            key
+        }
     }
 }
 
@@ -102,6 +144,7 @@ fun TerminalChip(
     status: TerminalChipStatus,
     expanded: Boolean,
     imeVisible: Boolean,
+    keys: List<QuickChipKey> = QuickChipKey.DEFAULT,
     onToggle: () -> Unit,
     onKey: (QuickChipKey) -> Unit,
     onChat: () -> Unit,
@@ -181,7 +224,7 @@ fun TerminalChip(
                     }
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        (QuickChipKey.DEFAULT + QuickChipKey("Chat →", "Chat", byteArrayOf(), "Chat")).chunked(5).forEachIndexed { rowIndex, rowKeys ->
+                        (keys + QuickChipKey(QuickChipKeyId.CHAT, "Chat →", "Chat", byteArrayOf(), "Chat")).chunked(5).forEachIndexed { rowIndex, rowKeys ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),

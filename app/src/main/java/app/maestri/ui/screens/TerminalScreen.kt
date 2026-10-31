@@ -516,6 +516,7 @@ fun TerminalScreen(
     val imeUp = WindowInsets.isImeVisible
     val streamState by session.terminalStream.state.collectAsState()
     var chipOpen by remember { mutableStateOf(false) }
+    var codexAwayFromBottom by rememberSaveable(terminalId) { mutableStateOf(false) }
     var chipManualClose by remember { mutableStateOf(false) }
     val inputFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -997,6 +998,7 @@ fun TerminalScreen(
             pending || card?.needsAttention == true -> TerminalThemes.TokyoNight.red
             else -> TerminalThemes.TokyoNight.green
         }
+        val quickKeys = terminalQuickKeys(card?.agentType, codexAwayFromBottom)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             TerminalWebView(
                 session = session,
@@ -1007,6 +1009,7 @@ fun TerminalScreen(
                 // canStream also gates the dial: the face stays composed (and explains itself
                 // above) but never opens a stream this host cannot serve.
                 enabled = canStream && !locked && !inChat,
+                onScrollAwayFromBottom = { codexAwayFromBottom = true },
                 modifier = Modifier.fillMaxSize(),
             )
             if (!fullscreen) {
@@ -1014,6 +1017,7 @@ fun TerminalScreen(
                     status = TerminalChipStatus(label = chipStatusLabel, dotColor = chipDotColor),
                     expanded = chipOpen,
                     imeVisible = imeUp,
+                    keys = quickKeys,
                     enabled = streamState == SocketState.OPEN && !locked,
                     onToggle = {
                         if (chipOpen) chipManualClose = true
@@ -1021,6 +1025,7 @@ fun TerminalScreen(
                     },
                     onKey = { key ->
                         chipOpen = false
+                        if (key.id == QuickChipKeyId.ESCAPE) codexAwayFromBottom = false
                         session.terminalStream.sendInput(key.bytes.toString(Charsets.UTF_8))
                     },
                     onChat = {
